@@ -4,12 +4,19 @@ import helmet from 'helmet';
 import { ConfigService } from '@nestjs/config';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
+import { ValidationPipe } from '@nestjs/common';
+import { VersioningType } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
 
   const frontendUrl = configService.get<string>('FRONTEND_URL');
+
+  app.setGlobalPrefix('api');
+  app.enableVersioning({
+    type: VersioningType.URI,
+  });
 
   app.enableCors({
     origin: frontendUrl,
@@ -33,6 +40,18 @@ async function bootstrap() {
   );
 
   app.use(cookieParser());
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    }),
+  );
+
   const port = configService.get<string>('PORT') || process.env.PORT || 3000;
   await app.listen(port);
 }

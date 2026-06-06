@@ -1,4 +1,4 @@
-import { Controller, Get, Req } from '@nestjs/common';
+import { Controller, Get, Req, Version } from '@nestjs/common';
 import { AppService } from './app.service';
 // import type { Request } from 'express';
 
@@ -14,5 +14,12 @@ export class AppController {
   // @Get('test-cookie')
   // testCookie(@Req() req: Request) {
   //   return req.cookies;
+  // }
+
+  // /api/v1/test-version
+  // @Version('1')
+  // @Get('test-version')
+  // findAll() {
+  //   return [];
   // }
 }
