@@ -1,4 +1,10 @@
-import { Controller, Get, Req, Version } from '@nestjs/common';
+import {
+  // BadRequestException,
+  Controller,
+  Get,
+  // Req,
+  // Version,
+} from '@nestjs/common';
 import { AppService } from './app.service';
 // import type { Request } from 'express';
 
@@ -21,5 +27,10 @@ export class AppController {
   // @Get('test-version')
   // findAll() {
   //   return [];
+  // }
+
+  // @Get('test-error')
+  // test() {
+  //   throw new BadRequestException('Email already exists');
   // }
 }

@@ -4,8 +4,8 @@ import helmet from 'helmet';
 import { ConfigService } from '@nestjs/config';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { ValidationPipe } from '@nestjs/common';
-import { VersioningType } from '@nestjs/common';
+import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -51,6 +51,8 @@ async function bootstrap() {
       },
     }),
   );
+
+  app.useGlobalFilters(new GlobalExceptionFilter());
 
   const port = configService.get<string>('PORT') || process.env.PORT || 3000;
   await app.listen(port);
