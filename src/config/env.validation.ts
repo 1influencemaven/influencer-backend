@@ -26,4 +26,6 @@ export const envValidationSchema = Joi.object({
   REDIS_PASSWORD: Joi.string().allow('').optional(),
 
   REDIS_DB: Joi.number().required(),
+
+  SWAGGER_ENABLED: Joi.boolean().required(),
 });

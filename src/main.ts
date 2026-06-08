@@ -6,12 +6,16 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { configureSwagger } from './config/swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const configService = app.get(ConfigService);
   app.enableShutdownHooks();
 
-  const configService = app.get(ConfigService);
+  if (configService.get('SWAGGER_ENABLED')) {
+    configureSwagger(app);
+  }
 
   const frontendUrl = configService.get<string>('FRONTEND_URL');
 
