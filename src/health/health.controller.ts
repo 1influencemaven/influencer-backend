@@ -7,6 +7,7 @@ import {
 } from '@nestjs/terminus';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisHealthIndicator } from './redis.health';
 
 @Controller({
   path: 'health',
@@ -17,6 +18,7 @@ export class HealthController {
     private readonly health: HealthCheckService,
     private readonly memory: MemoryHealthIndicator,
     private readonly prismaHealth: PrismaHealthIndicator,
+    private readonly redisHealth: RedisHealthIndicator,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -43,6 +45,7 @@ export class HealthController {
   private getReadinessChecks() {
     return [
       () => this.prismaHealth.pingCheck('database', this.prisma),
+      () => this.redisHealth.pingCheck('redis'),
       () => this.memory.checkHeap('memory_heap', 256 * 1024 * 1024),
     ];
   }

@@ -6,11 +6,15 @@ import {
   // Version,
 } from '@nestjs/common';
 import { AppService } from './app.service';
+// import { RedisService } from './redis/redis.service';
 // import type { Request } from 'express';
 
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly appService: AppService,
+    // private readonly redisService: RedisService,
+  ) {}
 
   @Get()
   getHello(): string {
@@ -32,5 +36,16 @@ export class AppController {
   // @Get('test-error')
   // test() {
   //   throw new BadRequestException('Email already exists');
+  // }
+
+  // @Get('redis-test')
+  // async testRedis() {
+  //   const client = this.redisService.getClient();
+
+  //   await client.set('test-key', 'hello redis');
+
+  //   return {
+  //     value: await client.get('test-key'),
+  //   };
   // }
 }

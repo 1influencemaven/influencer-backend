@@ -9,6 +9,7 @@ import { jwtConfig } from './config/jwt.config';
 import { LoggerModule } from './common/logger/logger.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     LoggerModule,
     HealthModule,
+    RedisModule,
   ],
   controllers: [AppController],
   providers: [AppService],
