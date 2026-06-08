@@ -9,6 +9,8 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
+
   const configService = app.get(ConfigService);
 
   const frontendUrl = configService.get<string>('FRONTEND_URL');
@@ -54,7 +56,7 @@ async function bootstrap() {
 
   app.useGlobalFilters(new GlobalExceptionFilter());
 
-  const port = configService.get<string>('PORT') || process.env.PORT || 3000;
+  const port = configService.getOrThrow<number>('PORT');
   await app.listen(port);
 }
 bootstrap();
