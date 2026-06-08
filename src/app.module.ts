@@ -10,6 +10,7 @@ import { LoggerModule } from './common/logger/logger.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { BullMqModule } from './bullmq/bullmq.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { RedisModule } from './redis/redis.module';
     LoggerModule,
     HealthModule,
     RedisModule,
+    BullMqModule,
   ],
   controllers: [AppController],
   providers: [AppService],
