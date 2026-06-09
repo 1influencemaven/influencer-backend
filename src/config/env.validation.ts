@@ -28,4 +28,8 @@ export const envValidationSchema = Joi.object({
   REDIS_DB: Joi.number().required(),
 
   SWAGGER_ENABLED: Joi.boolean().required(),
+
+  THROTTLE_TTL: Joi.number().required(),
+
+  THROTTLE_LIMIT: Joi.number().required(),
 });
