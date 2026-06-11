@@ -52,6 +52,7 @@ describe('AuthService', () => {
   const mockRegisteredUser = {
     id: 'user-id',
     email: 'test@test.com',
+    role: 'USER',
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
   };
@@ -99,15 +100,48 @@ describe('AuthService', () => {
         data: {
           email: 'test@test.com',
           password: 'hashed-password',
+          role: 'USER',
         },
         select: {
           id: true,
           email: true,
+          role: true,
           createdAt: true,
           updatedAt: true,
         },
       });
       expect(result).toEqual(mockRegisteredUser);
+    });
+
+    it('should register a user with the provided role', async () => {
+      prismaService.user.findUnique.mockResolvedValue(null);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
+      prismaService.user.create.mockResolvedValue({
+        ...mockRegisteredUser,
+        role: 'ADMIN',
+      });
+
+      const result = await authService.register({
+        email: 'admin@test.com',
+        password: 'password123',
+        role: 'ADMIN',
+      });
+
+      expect(prismaService.user.create).toHaveBeenCalledWith({
+        data: {
+          email: 'admin@test.com',
+          password: 'hashed-password',
+          role: 'ADMIN',
+        },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+      expect(result.role).toBe('ADMIN');
     });
 
     it('should throw ConflictException when user already exists', async () => {

@@ -41,7 +41,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Registrar usuario',
     description:
-      'Crea una nueva cuenta de usuario con correo electrónico y contraseña. La contraseña se almacena de forma segura y no se incluye en la respuesta.',
+      'Crea una nueva cuenta de usuario con correo electrónico, contraseña y rol opcional. La contraseña se almacena de forma segura y no se incluye en la respuesta.',
   })
   @ApiBody({ type: RegisterDto })
   @ApiCreatedResponse({
@@ -51,6 +51,7 @@ export class AuthController {
       properties: {
         id: { type: 'string', example: 'clx123abc456' },
         email: { type: 'string', example: 'usuario@ejemplo.com' },
+        role: { type: 'string', enum: ['USER', 'ADMIN'], example: 'USER' },
         createdAt: {
           type: 'string',
           format: 'date-time',

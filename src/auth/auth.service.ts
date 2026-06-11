@@ -22,7 +22,7 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
-  async register({ email, password }: RegisterDto) {
+  async register({ email, password, role }: RegisterDto) {
     const existingUser = await this.prisma.user.findUnique({
       where: { email },
     });
@@ -37,10 +37,12 @@ export class AuthService {
       data: {
         email,
         password: hashedPassword,
+        role: role ?? 'USER',
       },
       select: {
         id: true,
         email: true,
+        role: true,
         createdAt: true,
         updatedAt: true,
       },
