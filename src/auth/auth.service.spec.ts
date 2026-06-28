@@ -1,4 +1,4 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -23,7 +23,6 @@ describe('AuthService', () => {
   const prismaService = {
     user: {
       findUnique: jest.fn(),
-      create: jest.fn(),
     },
     refreshToken: {
       create: jest.fn(),
@@ -49,14 +48,6 @@ describe('AuthService', () => {
     updatedAt: new Date('2026-01-01'),
   };
 
-  const mockRegisteredUser = {
-    id: 'user-id',
-    email: 'test@test.com',
-    role: 'USER',
-    createdAt: new Date('2026-01-01'),
-    updatedAt: new Date('2026-01-01'),
-  };
-
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -78,83 +69,6 @@ describe('AuthService', () => {
       };
 
       return config[key];
-    });
-  });
-
-  describe('register', () => {
-    it('should register a new user successfully', async () => {
-      prismaService.user.findUnique.mockResolvedValue(null);
-      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
-      prismaService.user.create.mockResolvedValue(mockRegisteredUser);
-
-      const result = await authService.register({
-        email: 'test@test.com',
-        password: 'password123',
-      });
-
-      expect(prismaService.user.findUnique).toHaveBeenCalledWith({
-        where: { email: 'test@test.com' },
-      });
-      expect(bcrypt.hash).toHaveBeenCalledWith('password123', 10);
-      expect(prismaService.user.create).toHaveBeenCalledWith({
-        data: {
-          email: 'test@test.com',
-          password: 'hashed-password',
-          role: 'USER',
-        },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
-      expect(result).toEqual(mockRegisteredUser);
-    });
-
-    it('should register a user with the provided role', async () => {
-      prismaService.user.findUnique.mockResolvedValue(null);
-      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed-password');
-      prismaService.user.create.mockResolvedValue({
-        ...mockRegisteredUser,
-        role: 'ADMIN',
-      });
-
-      const result = await authService.register({
-        email: 'admin@test.com',
-        password: 'password123',
-        role: 'ADMIN',
-      });
-
-      expect(prismaService.user.create).toHaveBeenCalledWith({
-        data: {
-          email: 'admin@test.com',
-          password: 'hashed-password',
-          role: 'ADMIN',
-        },
-        select: {
-          id: true,
-          email: true,
-          role: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
-      expect(result.role).toBe('ADMIN');
-    });
-
-    it('should throw ConflictException when user already exists', async () => {
-      prismaService.user.findUnique.mockResolvedValue(mockUser);
-
-      await expect(
-        authService.register({
-          email: 'test@test.com',
-          password: 'password123',
-        }),
-      ).rejects.toThrow(ConflictException);
-
-      expect(prismaService.user.create).not.toHaveBeenCalled();
     });
   });
 

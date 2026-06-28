@@ -1,5 +1,4 @@
 import {
-  ConflictException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -23,7 +22,6 @@ describe('AuthController', () => {
   let authController: AuthController;
 
   const authService = {
-    register: jest.fn(),
     login: jest.fn(),
     refresh: jest.fn(),
     logout: jest.fn(),
@@ -51,39 +49,6 @@ describe('AuthController', () => {
     authController = module.get<AuthController>(AuthController);
 
     jest.clearAllMocks();
-  });
-
-  describe('register', () => {
-    const registerDto = {
-      email: 'test@test.com',
-      password: 'password123',
-    };
-
-    it('should call authService.register and return the result', async () => {
-      const expected = {
-        id: 'user-id',
-        email: 'test@test.com',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      authService.register.mockResolvedValue(expected);
-
-      const result = await authController.register(registerDto);
-
-      expect(authService.register).toHaveBeenCalledWith(registerDto);
-      expect(result).toEqual(expected);
-    });
-
-    it('should propagate exceptions from authService.register', async () => {
-      authService.register.mockRejectedValue(
-        new ConflictException('Email already exists'),
-      );
-
-      await expect(authController.register(registerDto)).rejects.toThrow(
-        ConflictException,
-      );
-    });
   });
 
   describe('login', () => {

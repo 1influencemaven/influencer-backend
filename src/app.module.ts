@@ -18,6 +18,7 @@ import { LoggerModule } from './common/logger/logger.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { RedisModule } from './redis/redis.module';
 
     PrismaModule,
     AuthModule,
+    UsersModule,
     LoggerModule,
     HealthModule,
     RedisModule,

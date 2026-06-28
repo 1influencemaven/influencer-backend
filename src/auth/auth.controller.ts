@@ -8,10 +8,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
-  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
-  ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -23,7 +21,6 @@ import { AuthCookieService } from './auth-cookie.service';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { AuthUser } from './interfaces/auth-user.interface';
 
@@ -37,41 +34,6 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly authCookieService: AuthCookieService,
   ) {}
-
-  @ApiOperation({
-    summary: 'Registrar usuario',
-    description:
-      'Crea una nueva cuenta de usuario con correo electrónico, contraseña y rol opcional. La contraseña se almacena de forma segura y no se incluye en la respuesta.',
-  })
-  @ApiBody({ type: RegisterDto })
-  @ApiCreatedResponse({
-    description: 'Usuario registrado correctamente',
-    schema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', example: 'clx123abc456' },
-        email: { type: 'string', example: 'usuario@ejemplo.com' },
-        role: { type: 'string', enum: ['USER', 'ADMIN'], example: 'USER' },
-        createdAt: {
-          type: 'string',
-          format: 'date-time',
-          example: '2026-06-07T16:00:00.000Z',
-        },
-        updatedAt: {
-          type: 'string',
-          format: 'date-time',
-          example: '2026-06-07T16:00:00.000Z',
-        },
-      },
-    },
-  })
-  @ApiBadRequestResponse({
-    description: 'Datos de entrada inválidos',
-  })
-  @Post('register')
-  register(@Body() registerDto: RegisterDto) {
-    return this.authService.register(registerDto);
-  }
 
   @ApiOperation({
     summary: 'Iniciar sesión',
