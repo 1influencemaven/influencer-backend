@@ -35,19 +35,13 @@ describe('RolesGuard', () => {
   });
 
   it('should allow access when the user has a required role', () => {
-    jest
-      .spyOn(reflector, 'getAllAndOverride')
-      .mockReturnValue([Role.ADMIN]);
+    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.ADMIN]);
 
-    expect(
-      rolesGuard.canActivate(createContext({ role: 'ADMIN' })),
-    ).toBe(true);
+    expect(rolesGuard.canActivate(createContext({ role: 'ADMIN' }))).toBe(true);
   });
 
   it('should deny access when the user lacks the required role', () => {
-    jest
-      .spyOn(reflector, 'getAllAndOverride')
-      .mockReturnValue([Role.ADMIN]);
+    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.ADMIN]);
 
     expect(() =>
       rolesGuard.canActivate(createContext({ role: 'USER' })),
@@ -55,9 +49,7 @@ describe('RolesGuard', () => {
   });
 
   it('should deny access when there is no authenticated user', () => {
-    jest
-      .spyOn(reflector, 'getAllAndOverride')
-      .mockReturnValue([Role.ADMIN]);
+    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([Role.ADMIN]);
 
     expect(() => rolesGuard.canActivate(createContext())).toThrow(
       ForbiddenException,

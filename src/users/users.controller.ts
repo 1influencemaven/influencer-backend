@@ -73,7 +73,9 @@ export class UsersController {
       items: userResponseSchema,
     },
   })
-  @ApiUnauthorizedResponse({ description: 'Token de acceso inválido o ausente' })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
   @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
   @Get()
   findAll() {
@@ -89,7 +91,9 @@ export class UsersController {
     schema: userResponseSchema,
   })
   @ApiNotFoundResponse({ description: 'Usuario no encontrado' })
-  @ApiUnauthorizedResponse({ description: 'Token de acceso inválido o ausente' })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
   @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
   @Get(':id')
   findOne(@Param('id') id: string) {
@@ -106,7 +110,9 @@ export class UsersController {
     schema: userResponseSchema,
   })
   @ApiBadRequestResponse({ description: 'Datos de entrada inválidos' })
-  @ApiUnauthorizedResponse({ description: 'Token de acceso inválido o ausente' })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
   @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
   @Post()
   create(@Body() createUserDto: CreateUserDto) {
@@ -124,7 +130,9 @@ export class UsersController {
   })
   @ApiBadRequestResponse({ description: 'Datos de entrada inválidos' })
   @ApiNotFoundResponse({ description: 'Usuario no encontrado' })
-  @ApiUnauthorizedResponse({ description: 'Token de acceso inválido o ausente' })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
   @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
@@ -148,7 +156,9 @@ export class UsersController {
     },
   })
   @ApiNotFoundResponse({ description: 'Usuario no encontrado' })
-  @ApiUnauthorizedResponse({ description: 'Token de acceso inválido o ausente' })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
   @ApiForbiddenResponse({
     description: 'Permisos insuficientes o intento de auto-eliminación',
   })

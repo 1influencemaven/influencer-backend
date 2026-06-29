@@ -18,6 +18,13 @@ enum Role {
   ADMIN
 }
 
+enum ProfileStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model User {
   id            String         @id @default(uuid())
   name          String
@@ -38,4 +45,29 @@ model RefreshToken {
   createdAt          DateTime @default(now())
 
   @@index([userId])
+}
+
+model Influencer {
+  id                String        @id @default(uuid())
+  name              String
+  instagram         String?
+  tiktok            String?
+  youtube           String?
+  country           String?
+  language          String?
+  niche             String?
+  subNiche          String?
+  followers         Int?
+  engagement        Decimal?      @db.Decimal(5, 2)
+  email             String?
+  mediaKitUrl       String?
+  profileStatus     ProfileStatus @default(PENDING)
+  commercialProfile Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([profileStatus])
+  @@index([country])
+  @@index([niche])
+  @@index([createdAt])
 }
