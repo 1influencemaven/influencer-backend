@@ -10,11 +10,10 @@ COPY package.json package-lock.json ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 
+# Dummy URL only for `prisma generate` during build (postinstall).
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
+
 RUN npm ci
-
-ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/app_db"
-
-RUN npx prisma generate
 
 COPY . .
 
@@ -32,7 +31,8 @@ COPY package.json package-lock.json ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 
-RUN npm ci --omit=dev && npm install prisma --no-save
+# Client is copied from builder; skip postinstall to avoid needing DATABASE_URL here.
+RUN npm ci --omit=dev --ignore-scripts && npm install prisma --no-save --ignore-scripts
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src/generated ./src/generated
