@@ -1,14 +1,11 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
-import { getQueueToken } from '@nestjs/bullmq';
+import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 
 jest.mock('../prisma/prisma.service', () => ({
   PrismaService: class PrismaService {},
 }));
 
-import { AI_JOBS } from '../bullmq/job-types';
-import { QUEUES } from '../bullmq/queue.constants';
-import { ProfileStatus } from '../generated/prisma/enums';
+import { IbpStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { InfluencerSortBy, SortOrder } from './dto/query-influencers.dto';
 import { InfluencersService, influencerSelect } from './influencers.service';
@@ -27,10 +24,6 @@ describe('InfluencersService', () => {
     },
   };
 
-  const aiQueue = {
-    add: jest.fn(),
-  };
-
   const mockInfluencer = {
     id: 'influencer-id',
     name: 'Laura Martínez',
@@ -45,8 +38,7 @@ describe('InfluencersService', () => {
     engagement: '4.50',
     email: 'laura@example.com',
     mediaKitUrl: null,
-    profileStatus: ProfileStatus.PENDING,
-    commercialProfile: null,
+    idealBrandProfile: null,
     createdAt: new Date('2026-06-28T12:00:00.000Z'),
     updatedAt: new Date('2026-06-28T12:00:00.000Z'),
   };
@@ -56,7 +48,6 @@ describe('InfluencersService', () => {
       providers: [
         InfluencersService,
         { provide: PrismaService, useValue: prismaService },
-        { provide: getQueueToken(QUEUES.AI), useValue: aiQueue },
       ],
     }).compile();
 
@@ -74,6 +65,7 @@ describe('InfluencersService', () => {
         limit: 20,
         search: 'laura',
         country: 'ES',
+        ibpStatus: IbpStatus.ACTIVE,
         sortBy: InfluencerSortBy.NAME,
         sortOrder: SortOrder.ASC,
       });
@@ -86,6 +78,7 @@ describe('InfluencersService', () => {
       expect(prismaService.influencer.findMany).toHaveBeenCalledWith({
         where: {
           country: 'ES',
+          idealBrandProfile: { status: IbpStatus.ACTIVE },
           OR: [
             { name: { contains: 'laura', mode: 'insensitive' } },
             { instagram: { contains: 'laura', mode: 'insensitive' } },
@@ -173,46 +166,6 @@ describe('InfluencersService', () => {
       expect(prismaService.influencer.delete).toHaveBeenCalledWith({
         where: { id: 'influencer-id' },
       });
-    });
-  });
-
-  describe('generateProfile', () => {
-    it('should enqueue a profile generation job', async () => {
-      prismaService.influencer.findUnique.mockResolvedValue(mockInfluencer);
-      prismaService.influencer.update.mockResolvedValue({
-        ...mockInfluencer,
-        profileStatus: ProfileStatus.PROCESSING,
-      });
-      aiQueue.add.mockResolvedValue(undefined);
-
-      const result = await influencersService.generateProfile('influencer-id');
-
-      expect(prismaService.influencer.update).toHaveBeenCalledWith({
-        where: { id: 'influencer-id' },
-        data: { profileStatus: ProfileStatus.PROCESSING },
-      });
-      expect(aiQueue.add).toHaveBeenCalledWith(
-        AI_JOBS.GENERATE_INFLUENCER_PROFILE,
-        { influencerId: 'influencer-id' },
-      );
-      expect(result).toEqual({
-        message: 'Profile generation job enqueued',
-        influencerId: 'influencer-id',
-        profileStatus: ProfileStatus.PROCESSING,
-      });
-    });
-
-    it('should throw ConflictException when profile is already processing', async () => {
-      prismaService.influencer.findUnique.mockResolvedValue({
-        ...mockInfluencer,
-        profileStatus: ProfileStatus.PROCESSING,
-      });
-
-      await expect(
-        influencersService.generateProfile('influencer-id'),
-      ).rejects.toThrow(ConflictException);
-
-      expect(aiQueue.add).not.toHaveBeenCalled();
     });
   });
 });

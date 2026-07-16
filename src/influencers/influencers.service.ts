@@ -1,19 +1,10 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 
-import { AI_JOBS } from '../bullmq/job-types';
-import { QUEUES } from '../bullmq/queue.constants';
 import {
   buildPaginationMeta,
   buildPrismaPagination,
 } from '../common/utils/build-prisma-pagination';
-import { ProfileStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateInfluencerDto } from './dto/create-influencer.dto';
 import {
@@ -22,9 +13,8 @@ import {
   SortOrder,
 } from './dto/query-influencers.dto';
 import { UpdateInfluencerDto } from './dto/update-influencer.dto';
-import type { GenerateInfluencerProfileJobData } from './interfaces/commercial-profile.interface';
 
-const influencerSelect = {
+export const influencerSelect = {
   id: true,
   name: true,
   instagram: true,
@@ -38,18 +28,21 @@ const influencerSelect = {
   engagement: true,
   email: true,
   mediaKitUrl: true,
-  profileStatus: true,
-  commercialProfile: true,
   createdAt: true,
   updatedAt: true,
+  idealBrandProfile: {
+    select: {
+      id: true,
+      status: true,
+      metadata: true,
+      updatedAt: true,
+    },
+  },
 } as const;
 
 @Injectable()
 export class InfluencersService {
-  constructor(
-    private readonly prisma: PrismaService,
-    @InjectQueue(QUEUES.AI) private readonly aiQueue: Queue,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async findAll(query: QueryInfluencersDto) {
     const page = query.page ?? 1;
@@ -115,31 +108,6 @@ export class InfluencersService {
     return { message: 'Influencer deleted successfully' };
   }
 
-  async generateProfile(id: string) {
-    const influencer = await this.findOne(id);
-
-    if (influencer.profileStatus === ProfileStatus.PROCESSING) {
-      throw new ConflictException(
-        'Profile generation is already in progress for this influencer',
-      );
-    }
-
-    await this.prisma.influencer.update({
-      where: { id },
-      data: { profileStatus: ProfileStatus.PROCESSING },
-    });
-
-    await this.aiQueue.add(AI_JOBS.GENERATE_INFLUENCER_PROFILE, {
-      influencerId: id,
-    } satisfies GenerateInfluencerProfileJobData);
-
-    return {
-      message: 'Profile generation job enqueued',
-      influencerId: id,
-      profileStatus: ProfileStatus.PROCESSING,
-    };
-  }
-
   private buildWhereClause(
     query: QueryInfluencersDto,
   ): Prisma.InfluencerWhereInput {
@@ -161,8 +129,10 @@ export class InfluencersService {
       where.subNiche = query.subNiche;
     }
 
-    if (query.profileStatus) {
-      where.profileStatus = query.profileStatus;
+    if (query.ibpStatus) {
+      where.idealBrandProfile = {
+        status: query.ibpStatus,
+      };
     }
 
     if (query.search) {
@@ -262,5 +232,3 @@ export class InfluencersService {
     return data;
   }
 }
-
-export { influencerSelect };

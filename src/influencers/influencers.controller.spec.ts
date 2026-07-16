@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 
 jest.mock('./influencers.service', () => ({
@@ -15,7 +15,6 @@ jest.mock('../auth/guards/roles.guard', () => ({
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { ProfileStatus } from '../generated/prisma/enums';
 import { InfluencersController } from './influencers.controller';
 import { InfluencersService } from './influencers.service';
 
@@ -28,7 +27,6 @@ describe('InfluencersController', () => {
     create: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),
-    generateProfile: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -113,22 +111,6 @@ describe('InfluencersController', () => {
     });
   });
 
-  it('should delegate generateProfile to the service', async () => {
-    influencersService.generateProfile.mockResolvedValue({
-      message: 'Profile generation job enqueued',
-      influencerId: 'influencer-id',
-      profileStatus: ProfileStatus.PROCESSING,
-    });
-
-    await expect(
-      influencersController.generateProfile('influencer-id'),
-    ).resolves.toEqual({
-      message: 'Profile generation job enqueued',
-      influencerId: 'influencer-id',
-      profileStatus: ProfileStatus.PROCESSING,
-    });
-  });
-
   it('should propagate service exceptions', async () => {
     influencersService.findOne.mockRejectedValue(
       new NotFoundException('Influencer not found'),
@@ -137,13 +119,5 @@ describe('InfluencersController', () => {
     await expect(influencersController.findOne('missing-id')).rejects.toThrow(
       NotFoundException,
     );
-
-    influencersService.generateProfile.mockRejectedValue(
-      new ConflictException('Profile generation is already in progress'),
-    );
-
-    await expect(
-      influencersController.generateProfile('influencer-id'),
-    ).rejects.toThrow(ConflictException);
   });
 });

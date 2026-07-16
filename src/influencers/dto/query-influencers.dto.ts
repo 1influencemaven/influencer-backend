@@ -10,7 +10,7 @@ import {
   Min,
 } from 'class-validator';
 
-import { ProfileStatus } from '../../generated/prisma/enums';
+import { IbpStatus } from '../../generated/prisma/enums';
 
 export enum InfluencerSortBy {
   NAME = 'name',
@@ -98,13 +98,13 @@ export class QueryInfluencersDto {
   subNiche?: string;
 
   @ApiPropertyOptional({
-    description: 'Filtro por estado del perfil comercial',
-    enum: ProfileStatus,
-    example: ProfileStatus.PENDING,
+    description: 'Filtro por estado del perfil ideal (IBP)',
+    enum: IbpStatus,
+    example: IbpStatus.ACTIVE,
   })
   @IsOptional()
-  @IsEnum(ProfileStatus)
-  profileStatus?: ProfileStatus;
+  @IsEnum(IbpStatus)
+  ibpStatus?: IbpStatus;
 
   @ApiPropertyOptional({
     description: 'Campo de ordenamiento',

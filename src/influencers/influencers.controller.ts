@@ -3,8 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  HttpCode,
-  HttpStatus,
   Param,
   Patch,
   Post,
@@ -12,11 +10,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
-  ApiAcceptedResponse,
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
-  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -29,50 +25,20 @@ import {
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { ProfileStatus, Role } from '../generated/prisma/enums';
+import { IbpStatus, Role } from '../generated/prisma/enums';
 import { CreateInfluencerDto } from './dto/create-influencer.dto';
-import { GenerateProfileResponseDto } from './dto/generate-profile-response.dto';
 import { QueryInfluencersDto } from './dto/query-influencers.dto';
 import { UpdateInfluencerDto } from './dto/update-influencer.dto';
 import { InfluencersService } from './influencers.service';
 
-const commercialProfileSchema = {
+const ibpSummarySchema = {
   type: 'object',
+  nullable: true,
   properties: {
-    idealBrands: {
-      type: 'array',
-      items: { type: 'string' },
-      example: ['Sportswear brands', 'Wellness apps'],
-    },
-    brandSize: {
-      type: 'array',
-      items: { type: 'string' },
-      example: ['smb', 'mid_market'],
-    },
-    departments: {
-      type: 'array',
-      items: { type: 'string' },
-      example: ['marketing', 'brand'],
-    },
-    buyerPersonas: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', example: 'Marketing Manager' },
-          seniority: { type: 'string', example: 'mid' },
-          responsibilities: {
-            type: 'array',
-            items: { type: 'string' },
-            example: ['influencer partnerships'],
-          },
-        },
-      },
-    },
-    futureMetadata: {
-      type: 'object',
-      additionalProperties: true,
-    },
+    id: { type: 'string' },
+    status: { type: 'string', enum: Object.values(IbpStatus) },
+    metadata: { type: 'object', nullable: true, additionalProperties: true },
+    updatedAt: { type: 'string', format: 'date-time' },
   },
 };
 
@@ -100,15 +66,7 @@ const influencerResponseSchema = {
       example: 'https://example.com/mediakit/laura',
       nullable: true,
     },
-    profileStatus: {
-      type: 'string',
-      enum: Object.values(ProfileStatus),
-      example: ProfileStatus.PENDING,
-    },
-    commercialProfile: {
-      ...commercialProfileSchema,
-      nullable: true,
-    },
+    idealBrandProfile: ibpSummarySchema,
     createdAt: {
       type: 'string',
       format: 'date-time',
@@ -191,7 +149,7 @@ export class InfluencersController {
 
   @ApiOperation({
     summary: 'Crear influencer',
-    description: 'Crea un nuevo influencer con perfil comercial pendiente.',
+    description: 'Crea un nuevo influencer.',
   })
   @ApiBody({ type: CreateInfluencerDto })
   @ApiCreatedResponse({
@@ -255,28 +213,5 @@ export class InfluencersController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.influencersService.remove(id);
-  }
-
-  @ApiOperation({
-    summary: 'Generar perfil comercial',
-    description:
-      'Encola un job asíncrono para generar el perfil comercial del influencer.',
-  })
-  @ApiAcceptedResponse({
-    description: 'Job de generación encolado correctamente',
-    type: GenerateProfileResponseDto,
-  })
-  @ApiConflictResponse({
-    description: 'Ya existe una generación en curso para este influencer',
-  })
-  @ApiNotFoundResponse({ description: 'Influencer no encontrado' })
-  @ApiUnauthorizedResponse({
-    description: 'Token de acceso inválido o ausente',
-  })
-  @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
-  @HttpCode(HttpStatus.ACCEPTED)
-  @Post(':id/generate-profile')
-  generateProfile(@Param('id') id: string) {
-    return this.influencersService.generateProfile(id);
   }
 }

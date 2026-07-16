@@ -20,6 +20,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
 import { InfluencersModule } from './influencers/influencers.module';
+import { IdealBrandProfilesModule } from './ideal-brand-profiles/ideal-brand-profiles.module';
+import { AiPromptsModule } from './ai-prompts/ai-prompts.module';
 
 @Module({
   imports: [
@@ -37,6 +39,8 @@ import { InfluencersModule } from './influencers/influencers.module';
     AuthModule,
     UsersModule,
     InfluencersModule,
+    IdealBrandProfilesModule,
+    AiPromptsModule,
     LoggerModule,
     HealthModule,
     RedisModule,

@@ -1,7 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 
-import { ProfileStatus } from '../../generated/prisma/enums';
+import { IbpStatus } from '../../generated/prisma/enums';
 import {
   InfluencerSortBy,
   QueryInfluencersDto,
@@ -30,7 +30,7 @@ describe('QueryInfluencersDto', () => {
       language: 'es',
       niche: 'Fitness',
       subNiche: 'Nutrición',
-      profileStatus: ProfileStatus.PENDING,
+      ibpStatus: IbpStatus.DRAFT,
       sortBy: InfluencerSortBy.FOLLOWERS,
       sortOrder: SortOrder.ASC,
     });
