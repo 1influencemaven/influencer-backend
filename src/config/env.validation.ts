@@ -32,4 +32,30 @@ export const envValidationSchema = Joi.object({
   THROTTLE_TTL: Joi.number().required(),
 
   THROTTLE_LIMIT: Joi.number().required(),
+
+  AI_PROVIDER: Joi.string().valid('cursor', 'anthropic').optional(),
+
+  CURSOR_API_KEY: Joi.string().when('AI_PROVIDER', {
+    is: 'cursor',
+    then: Joi.required(),
+    otherwise: Joi.when('NODE_ENV', {
+      is: 'development',
+      then: Joi.optional(),
+      otherwise: Joi.optional(),
+    }),
+  }),
+
+  CURSOR_MODEL: Joi.string().default('composer-2.5'),
+
+  ANTHROPIC_API_KEY: Joi.string().when('AI_PROVIDER', {
+    is: 'anthropic',
+    then: Joi.required(),
+    otherwise: Joi.when('NODE_ENV', {
+      is: 'production',
+      then: Joi.optional(),
+      otherwise: Joi.optional(),
+    }),
+  }),
+
+  ANTHROPIC_MODEL: Joi.string().default('claude-sonnet-4-20250514'),
 });
