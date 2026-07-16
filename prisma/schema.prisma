@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider     = "prisma-client"
   output       = "../src/generated/prisma"
@@ -18,22 +16,23 @@ enum Role {
   ADMIN
 }
 
-enum ProfileStatus {
-  PENDING
+enum IbpStatus {
+  DRAFT
   PROCESSING
-  COMPLETED
+  ACTIVE
   FAILED
 }
 
 model User {
-  id            String         @id @default(uuid())
-  name          String
-  email         String         @unique
-  password      String
-  role          Role           @default(USER)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  refreshTokens RefreshToken[]
+  id                 String              @id @default(uuid())
+  name               String
+  email              String              @unique
+  password           String
+  role               Role                @default(USER)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  refreshTokens      RefreshToken[]
+  ibpPromptTemplates IbpPromptTemplate[]
 }
 
 model RefreshToken {
@@ -48,7 +47,7 @@ model RefreshToken {
 }
 
 model Influencer {
-  id                String        @id @default(uuid())
+  id                String             @id @default(uuid())
   name              String
   instagram         String?
   tiktok            String?
@@ -58,16 +57,45 @@ model Influencer {
   niche             String?
   subNiche          String?
   followers         Int?
-  engagement        Decimal?      @db.Decimal(5, 2)
+  engagement        Decimal?           @db.Decimal(5, 2)
   email             String?
   mediaKitUrl       String?
-  profileStatus     ProfileStatus @default(PENDING)
-  commercialProfile Json?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  idealBrandProfile IdealBrandProfile?
 
-  @@index([profileStatus])
   @@index([country])
   @@index([niche])
   @@index([createdAt])
+}
+
+model IdealBrandProfile {
+  id                 String     @id @default(uuid())
+  influencerId       String     @unique
+  influencer         Influencer @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  status             IbpStatus  @default(DRAFT)
+  targetSectors      String[]
+  excludedSectors    String[]
+  brandSize          String[]
+  markets            String[]
+  collaborationTypes String[]
+  summary            String     @default("")
+  alertSignals       String[]
+  desirableCriteria  String[]
+  metadata           Json?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@index([status])
+}
+
+model IbpPromptTemplate {
+  id           String   @id @default("default")
+  instructions String
+  updatedById  String?
+  updatedBy    User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedById])
 }
