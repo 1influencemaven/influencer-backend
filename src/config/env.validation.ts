@@ -35,14 +35,13 @@ export const envValidationSchema = Joi.object({
 
   AI_PROVIDER: Joi.string().valid('cursor', 'anthropic').optional(),
 
+  // La key solo es obligatoria (y no vacía) cuando su proveedor es el activo.
+  // Docker Compose pasa las variables no definidas como cadena vacía, por lo
+  // que el proveedor inactivo debe aceptar '' para no bloquear el arranque.
   CURSOR_API_KEY: Joi.string().when('AI_PROVIDER', {
     is: 'cursor',
     then: Joi.required(),
-    otherwise: Joi.when('NODE_ENV', {
-      is: 'development',
-      then: Joi.optional(),
-      otherwise: Joi.optional(),
-    }),
+    otherwise: Joi.optional().allow(''),
   }),
 
   CURSOR_MODEL: Joi.string().default('composer-2.5'),
@@ -50,11 +49,7 @@ export const envValidationSchema = Joi.object({
   ANTHROPIC_API_KEY: Joi.string().when('AI_PROVIDER', {
     is: 'anthropic',
     then: Joi.required(),
-    otherwise: Joi.when('NODE_ENV', {
-      is: 'production',
-      then: Joi.optional(),
-      otherwise: Joi.optional(),
-    }),
+    otherwise: Joi.optional().allow(''),
   }),
 
   ANTHROPIC_MODEL: Joi.string().default('claude-sonnet-4-20250514'),
