@@ -11,27 +11,21 @@ import { MockLlmProvider } from './providers/mock-llm.provider';
   imports: [ConfigModule],
   providers: [
     AiService,
-    AnthropicProvider,
-    CursorProvider,
-    MockLlmProvider,
     {
       provide: LLM_PROVIDER_TOKEN,
-      inject: [
-        ConfigService,
-        AnthropicProvider,
-        CursorProvider,
-        MockLlmProvider,
-      ],
-      useFactory: (
-        configService: ConfigService,
-        anthropicProvider: AnthropicProvider,
-        cursorProvider: CursorProvider,
-        mockProvider: MockLlmProvider,
-      ) => {
+      inject: [ConfigService],
+      // Instanciación perezosa: solo se construye el provider seleccionado.
+      // Los constructores hacen getOrThrow de su API key, así que registrar
+      // todos como providers de Nest exigiría tener todas las keys definidas.
+      useFactory: (configService: ConfigService) => {
         if (configService.get<string>('NODE_ENV') === 'test') {
-          return mockProvider;
+          return new MockLlmProvider();
         }
 
+        // TEMPORAL: producción usa Cursor (AI_PROVIDER=cursor) mientras se
+        // adquiere Claude (Anthropic). Al tener la key, basta con definir
+        // AI_PROVIDER=anthropic y ANTHROPIC_API_KEY en el entorno; el default
+        // por ambiente ya apunta a anthropic en producción.
         const provider =
           configService.get<string>('AI_PROVIDER') ??
           (configService.get<string>('NODE_ENV') === 'production'
@@ -39,10 +33,10 @@ import { MockLlmProvider } from './providers/mock-llm.provider';
             : 'cursor');
 
         if (provider === 'anthropic') {
-          return anthropicProvider;
+          return new AnthropicProvider(configService);
         }
 
-        return cursorProvider;
+        return new CursorProvider(configService);
       },
     },
   ],
