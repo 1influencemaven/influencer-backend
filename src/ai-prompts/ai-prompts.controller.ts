@@ -18,7 +18,7 @@ import { Role } from '../generated/prisma/enums';
 import { AiPromptsService } from './ai-prompts.service';
 import { UpdateIbpPromptTemplateDto } from './dto/update-ibp-prompt-template.dto';
 
-const ibpPromptResponseSchema = {
+const promptTemplateResponseSchema = {
   type: 'object',
   properties: {
     id: { type: 'string', example: 'default' },
@@ -50,7 +50,7 @@ export class AiPromptsController {
   })
   @ApiOkResponse({
     description: 'Template de prompt IBP',
-    schema: ibpPromptResponseSchema,
+    schema: promptTemplateResponseSchema,
   })
   @ApiUnauthorizedResponse({
     description: 'Token de acceso inválido o ausente',
@@ -70,7 +70,7 @@ export class AiPromptsController {
   @ApiBody({ type: UpdateIbpPromptTemplateDto })
   @ApiOkResponse({
     description: 'Template actualizado',
-    schema: ibpPromptResponseSchema,
+    schema: promptTemplateResponseSchema,
   })
   @ApiUnauthorizedResponse({
     description: 'Token de acceso inválido o ausente',
@@ -92,7 +92,7 @@ export class AiPromptsController {
   })
   @ApiOkResponse({
     description: 'Template restaurado al valor por defecto',
-    schema: ibpPromptResponseSchema,
+    schema: promptTemplateResponseSchema,
   })
   @ApiUnauthorizedResponse({
     description: 'Token de acceso inválido o ausente',
@@ -102,5 +102,66 @@ export class AiPromptsController {
   @Post('ibp-prompt/reset')
   resetIbpPrompt(@CurrentUser() user: AuthUser) {
     return this.aiPromptsService.resetIbpTemplate(user.id);
+  }
+
+  @ApiOperation({
+    summary: 'Obtener prompt Brand Discovery',
+    description:
+      'Devuelve las instrucciones de negocio usadas al buscar y puntuar marcas candidatas.',
+  })
+  @ApiOkResponse({
+    description: 'Template de prompt Brand Discovery',
+    schema: promptTemplateResponseSchema,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
+  @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
+  @Roles(Role.USER, Role.ADMIN)
+  @Get('brand-discovery-prompt')
+  getBrandDiscoveryPrompt() {
+    return this.aiPromptsService.getBrandDiscoveryTemplate();
+  }
+
+  @ApiOperation({
+    summary: 'Actualizar prompt Brand Discovery',
+    description:
+      'Actualiza las instrucciones de negocio del prompt de búsqueda de marcas. Solo ADMIN.',
+  })
+  @ApiBody({ type: UpdateIbpPromptTemplateDto })
+  @ApiOkResponse({
+    description: 'Template actualizado',
+    schema: promptTemplateResponseSchema,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN puede editar' })
+  @Roles(Role.ADMIN)
+  @Patch('brand-discovery-prompt')
+  updateBrandDiscoveryPrompt(
+    @Body() dto: UpdateIbpPromptTemplateDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.aiPromptsService.updateBrandDiscoveryTemplate(dto, user.id);
+  }
+
+  @ApiOperation({
+    summary: 'Restaurar prompt Brand Discovery predeterminado',
+    description:
+      'Restaura las instrucciones por defecto del sistema. Solo ADMIN.',
+  })
+  @ApiOkResponse({
+    description: 'Template restaurado al valor por defecto',
+    schema: promptTemplateResponseSchema,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN puede restaurar' })
+  @Roles(Role.ADMIN)
+  @Post('brand-discovery-prompt/reset')
+  resetBrandDiscoveryPrompt(@CurrentUser() user: AuthUser) {
+    return this.aiPromptsService.resetBrandDiscoveryTemplate(user.id);
   }
 }
