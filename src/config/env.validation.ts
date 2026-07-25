@@ -53,4 +53,21 @@ export const envValidationSchema = Joi.object({
   }),
 
   ANTHROPIC_MODEL: Joi.string().default('claude-sonnet-4-20250514'),
+
+  BRAND_SOURCE: Joi.string().valid('tavily').default('tavily'),
+
+  // Brand Discovery: solo Tavily. Bright Data se reserva a Lead Discovery.
+  TAVILY_API_KEY: Joi.string().when('NODE_ENV', {
+    is: 'test',
+    then: Joi.optional().allow(''),
+    otherwise: Joi.required(),
+  }),
+
+  BRIGHTDATA_API_KEY: Joi.string().optional().allow(''),
+
+  BRIGHTDATA_DATASET_ID: Joi.string().optional().allow(''),
+
+  BRIGHTDATA_ZONE: Joi.string().optional().allow(''),
+
+  BRAND_DISCOVERY_LIMIT: Joi.number().integer().min(1).max(20).default(20),
 });

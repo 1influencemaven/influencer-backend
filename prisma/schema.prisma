@@ -23,6 +23,19 @@ enum IbpStatus {
   FAILED
 }
 
+enum BrandDiscoveryStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum BrandCandidateStatus {
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  POSTPONED
+}
+
 model User {
   id                 String              @id @default(uuid())
   name               String
@@ -31,8 +44,9 @@ model User {
   role               Role                @default(USER)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
-  refreshTokens      RefreshToken[]
-  ibpPromptTemplates IbpPromptTemplate[]
+  refreshTokens                 RefreshToken[]
+  ibpPromptTemplates            IbpPromptTemplate[]
+  brandDiscoveryPromptTemplates BrandDiscoveryPromptTemplate[]
 }
 
 model RefreshToken {
@@ -62,7 +76,9 @@ model Influencer {
   mediaKitUrl       String?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
-  idealBrandProfile IdealBrandProfile?
+  idealBrandProfile  IdealBrandProfile?
+  brandDiscoveryRuns BrandDiscoveryRun[]
+  brandCandidates    BrandCandidate[]
 
   @@index([country])
   @@index([niche])
@@ -98,4 +114,61 @@ model IbpPromptTemplate {
   updatedAt    DateTime @updatedAt
 
   @@index([updatedById])
+}
+
+model BrandDiscoveryPromptTemplate {
+  id           String   @id @default("default")
+  instructions String
+  updatedById  String?
+  updatedBy    User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedById])
+}
+
+model BrandDiscoveryRun {
+  id            String                @id @default(uuid())
+  influencerId  String
+  influencer    Influencer            @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  status        BrandDiscoveryStatus  @default(PROCESSING)
+  source        String
+  limit         Int                   @default(20)
+  ibpSnapshot   Json
+  errorMessage  String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  candidates    BrandCandidate[]
+
+  @@index([influencerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model BrandCandidate {
+  id             String                @id @default(uuid())
+  influencerId   String
+  influencer     Influencer            @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  discoveryRunId String
+  discoveryRun   BrandDiscoveryRun     @relation(fields: [discoveryRunId], references: [id], onDelete: Cascade)
+  name           String
+  website        String
+  domain         String
+  sector         String?
+  market         String?
+  brandSize      String?
+  score          Float?
+  fitReason      String?
+  source         String
+  evidenceUrls   String[]
+  status         BrandCandidateStatus  @default(UNDER_REVIEW)
+  metadata       Json?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@index([influencerId])
+  @@index([discoveryRunId])
+  @@index([status])
+  @@index([domain])
+  @@index([createdAt])
 }

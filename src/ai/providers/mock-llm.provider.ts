@@ -8,7 +8,24 @@ export class MockLlmProvider implements LlmProvider {
   readonly name = 'mock' as const;
   readonly model = 'mock';
 
-  async complete(): Promise<string> {
+  async complete(prompt?: string): Promise<string> {
+    if (prompt && prompt.includes('brand discovery')) {
+      return JSON.stringify({
+        brands: [
+          {
+            name: 'Demo Wellness Co',
+            website: 'https://www.demowellness.example',
+            sector: 'wellness',
+            market: 'Spain',
+            brandSize: 'smb',
+            score: 80,
+            fitReason: 'Mock scored brand for tests',
+            evidenceUrls: ['https://www.demowellness.example'],
+          },
+        ],
+      });
+    }
+
     const mockOutput: IbpOutput = {
       targetSectors: ['sportswear', 'wellness', 'healthy food'],
       excludedSectors: ['alcohol', 'gambling'],

@@ -22,6 +22,7 @@ import { UsersModule } from './users/users.module';
 import { InfluencersModule } from './influencers/influencers.module';
 import { IdealBrandProfilesModule } from './ideal-brand-profiles/ideal-brand-profiles.module';
 import { AiPromptsModule } from './ai-prompts/ai-prompts.module';
+import { BrandDiscoveryModule } from './brand-discovery/brand-discovery.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { AiPromptsModule } from './ai-prompts/ai-prompts.module';
     InfluencersModule,
     IdealBrandProfilesModule,
     AiPromptsModule,
+    BrandDiscoveryModule,
     LoggerModule,
     HealthModule,
     RedisModule,
