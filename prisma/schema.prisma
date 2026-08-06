@@ -36,6 +36,27 @@ enum BrandCandidateStatus {
   POSTPONED
 }
 
+enum LeadDiscoveryStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum LeadStatus {
+  UNDER_REVIEW
+  APPROVED
+  DISCARDED
+  DUPLICATE
+}
+
+enum LeadEmailConfidence {
+  VALID
+  PROBABLE
+  DOUBTFUL
+  INVALID
+  UNKNOWN
+}
+
 model User {
   id                 String              @id @default(uuid())
   name               String
@@ -47,6 +68,7 @@ model User {
   refreshTokens                 RefreshToken[]
   ibpPromptTemplates            IbpPromptTemplate[]
   brandDiscoveryPromptTemplates BrandDiscoveryPromptTemplate[]
+  leadDiscoveryPromptTemplates  LeadDiscoveryPromptTemplate[]
 }
 
 model RefreshToken {
@@ -79,6 +101,8 @@ model Influencer {
   idealBrandProfile  IdealBrandProfile?
   brandDiscoveryRuns BrandDiscoveryRun[]
   brandCandidates    BrandCandidate[]
+  leadDiscoveryRuns  LeadDiscoveryRun[]
+  leads              Lead[]
 
   @@index([country])
   @@index([niche])
@@ -127,6 +151,17 @@ model BrandDiscoveryPromptTemplate {
   @@index([updatedById])
 }
 
+model LeadDiscoveryPromptTemplate {
+  id           String   @id @default("default")
+  instructions String
+  updatedById  String?
+  updatedBy    User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedById])
+}
+
 model BrandDiscoveryRun {
   id            String                @id @default(uuid())
   influencerId  String
@@ -165,10 +200,64 @@ model BrandCandidate {
   metadata       Json?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
+  leadDiscoveryRuns LeadDiscoveryRun[]
+  leads             Lead[]
 
   @@index([influencerId])
   @@index([discoveryRunId])
   @@index([status])
   @@index([domain])
+  @@index([createdAt])
+}
+
+model LeadDiscoveryRun {
+  id               String              @id @default(uuid())
+  brandCandidateId String
+  brandCandidate   BrandCandidate      @relation(fields: [brandCandidateId], references: [id], onDelete: Cascade)
+  influencerId     String
+  influencer       Influencer          @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  status           LeadDiscoveryStatus @default(PROCESSING)
+  providerId       String
+  providerOptions  Json
+  limit            Int                 @default(10)
+  errorMessage     String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  leads            Lead[]
+
+  @@index([brandCandidateId])
+  @@index([influencerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Lead {
+  id               String              @id @default(uuid())
+  brandCandidateId String
+  brandCandidate   BrandCandidate      @relation(fields: [brandCandidateId], references: [id], onDelete: Cascade)
+  influencerId     String
+  influencer       Influencer          @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  runId            String
+  run              LeadDiscoveryRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  contactName      String
+  title            String?
+  email            String
+  emailConfidence  LeadEmailConfidence @default(UNKNOWN)
+  isGeneric        Boolean             @default(false)
+  profileUrl       String?
+  providerId       String
+  sourceOptionId   String?
+  fitReason        String?
+  source           String
+  status           LeadStatus          @default(UNDER_REVIEW)
+  metadata         Json?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@index([brandCandidateId])
+  @@index([influencerId])
+  @@index([runId])
+  @@index([status])
+  @@index([email])
   @@index([createdAt])
 }
