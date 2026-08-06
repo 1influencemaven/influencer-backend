@@ -9,6 +9,19 @@ export class MockLlmProvider implements LlmProvider {
   readonly model = 'mock';
 
   async complete(prompt?: string): Promise<string> {
+    if (prompt && prompt.includes('lead discovery')) {
+      return JSON.stringify({
+        tavilyQueries: [
+          'Demo Brand CEO LinkedIn',
+          'Demo Brand CMO LinkedIn',
+          'Demo Brand Marketing Manager LinkedIn',
+        ],
+        scraperIds: ['gd_mock_scraper'],
+        priorityRoles: ['CEO', 'CMO', 'Marketing Manager'],
+        notes: 'Mock lead discovery plan',
+      });
+    }
+
     if (prompt && prompt.includes('brand discovery')) {
       return JSON.stringify({
         brands: [

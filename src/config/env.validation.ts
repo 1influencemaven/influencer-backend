@@ -69,5 +69,9 @@ export const envValidationSchema = Joi.object({
 
   BRIGHTDATA_ZONE: Joi.string().optional().allow(''),
 
+  LEAD_DISCOVERY_LIMIT: Joi.number().integer().min(1).max(20).default(10),
+
+  APOLLO_API_KEY: Joi.string().optional().allow(''),
+
   BRAND_DISCOVERY_LIMIT: Joi.number().integer().min(1).max(20).default(20),
 });

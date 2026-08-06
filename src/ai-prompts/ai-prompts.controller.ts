@@ -164,4 +164,65 @@ export class AiPromptsController {
   resetBrandDiscoveryPrompt(@CurrentUser() user: AuthUser) {
     return this.aiPromptsService.resetBrandDiscoveryTemplate(user.id);
   }
+
+  @ApiOperation({
+    summary: 'Obtener prompt Lead Discovery',
+    description:
+      'Devuelve las instrucciones de negocio usadas al planificar la búsqueda de contactos.',
+  })
+  @ApiOkResponse({
+    description: 'Template de prompt Lead Discovery',
+    schema: promptTemplateResponseSchema,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
+  @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
+  @Roles(Role.USER, Role.ADMIN)
+  @Get('lead-discovery-prompt')
+  getLeadDiscoveryPrompt() {
+    return this.aiPromptsService.getLeadDiscoveryTemplate();
+  }
+
+  @ApiOperation({
+    summary: 'Actualizar prompt Lead Discovery',
+    description:
+      'Actualiza las instrucciones de negocio del prompt de contactos. Solo ADMIN.',
+  })
+  @ApiBody({ type: UpdateIbpPromptTemplateDto })
+  @ApiOkResponse({
+    description: 'Template actualizado',
+    schema: promptTemplateResponseSchema,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN puede editar' })
+  @Roles(Role.ADMIN)
+  @Patch('lead-discovery-prompt')
+  updateLeadDiscoveryPrompt(
+    @Body() dto: UpdateIbpPromptTemplateDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.aiPromptsService.updateLeadDiscoveryTemplate(dto, user.id);
+  }
+
+  @ApiOperation({
+    summary: 'Restaurar prompt Lead Discovery predeterminado',
+    description:
+      'Restaura las instrucciones por defecto del sistema. Solo ADMIN.',
+  })
+  @ApiOkResponse({
+    description: 'Template restaurado al valor por defecto',
+    schema: promptTemplateResponseSchema,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN puede restaurar' })
+  @Roles(Role.ADMIN)
+  @Post('lead-discovery-prompt/reset')
+  resetLeadDiscoveryPrompt(@CurrentUser() user: AuthUser) {
+    return this.aiPromptsService.resetLeadDiscoveryTemplate(user.id);
+  }
 }

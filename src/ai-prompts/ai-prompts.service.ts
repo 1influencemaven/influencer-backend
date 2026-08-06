@@ -3,11 +3,13 @@ import { createHash } from 'crypto';
 
 import { DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS } from '../ai/prompts/generate-brand-discovery.prompt';
 import { DEFAULT_IBP_INSTRUCTIONS } from '../ai/prompts/generate-ibp.prompt';
+import { DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS } from '../ai/prompts/generate-lead-discovery.prompt';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateIbpPromptTemplateDto } from './dto/update-ibp-prompt-template.dto';
 
 export const IBP_PROMPT_TEMPLATE_ID = 'default';
 export const BRAND_DISCOVERY_PROMPT_TEMPLATE_ID = 'default';
+export const LEAD_DISCOVERY_PROMPT_TEMPLATE_ID = 'default';
 
 export const ibpPromptTemplateSelect = {
   id: true,
@@ -18,6 +20,14 @@ export const ibpPromptTemplateSelect = {
 } as const;
 
 export const brandDiscoveryPromptTemplateSelect = {
+  id: true,
+  instructions: true,
+  updatedById: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+export const leadDiscoveryPromptTemplateSelect = {
   id: true,
   instructions: true,
   updatedById: true,
@@ -148,6 +158,67 @@ export class AiPromptsService {
   async resetBrandDiscoveryTemplate(userId: string) {
     return this.updateBrandDiscoveryTemplate(
       { instructions: DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS },
+      userId,
+    );
+  }
+
+  async getLeadDiscoveryTemplate() {
+    const template = await this.prisma.leadDiscoveryPromptTemplate.findUnique({
+      where: { id: LEAD_DISCOVERY_PROMPT_TEMPLATE_ID },
+      select: leadDiscoveryPromptTemplateSelect,
+    });
+
+    if (!template) {
+      return {
+        id: LEAD_DISCOVERY_PROMPT_TEMPLATE_ID,
+        instructions: DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
+        updatedById: null,
+        createdAt: null,
+        updatedAt: null,
+        isDefault: true,
+      };
+    }
+
+    return {
+      ...template,
+      isDefault: template.instructions === DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
+    };
+  }
+
+  async getLeadDiscoveryInstructions(): Promise<string> {
+    const template = await this.getLeadDiscoveryTemplate();
+    return template.instructions.trim() || DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS;
+  }
+
+  async updateLeadDiscoveryTemplate(
+    dto: UpdateIbpPromptTemplateDto,
+    userId: string,
+  ) {
+    const instructions = dto.instructions.trim();
+
+    const template = await this.prisma.leadDiscoveryPromptTemplate.upsert({
+      where: { id: LEAD_DISCOVERY_PROMPT_TEMPLATE_ID },
+      create: {
+        id: LEAD_DISCOVERY_PROMPT_TEMPLATE_ID,
+        instructions,
+        updatedById: userId,
+      },
+      update: {
+        instructions,
+        updatedById: userId,
+      },
+      select: leadDiscoveryPromptTemplateSelect,
+    });
+
+    return {
+      ...template,
+      isDefault: template.instructions === DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
+    };
+  }
+
+  async resetLeadDiscoveryTemplate(userId: string) {
+    return this.updateLeadDiscoveryTemplate(
+      { instructions: DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS },
       userId,
     );
   }

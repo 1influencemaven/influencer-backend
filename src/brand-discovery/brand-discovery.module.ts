@@ -7,6 +7,7 @@ import { AiService } from '../ai/ai.service';
 import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUES } from '../bullmq/queue.constants';
+import { LeadDiscoveryModule } from '../lead-discovery/lead-discovery.module';
 import { BrandDiscoveryController } from './brand-discovery.controller';
 import { BrandDiscoveryService } from './brand-discovery.service';
 import {
@@ -25,6 +26,7 @@ import { TavilyWebSearchProvider } from './providers/tavily-web-search.provider'
     AuthModule,
     AiModule,
     AiPromptsModule,
+    LeadDiscoveryModule,
     ConfigModule,
     BullModule.registerQueue({ name: QUEUES.PROSPECTING }),
   ],

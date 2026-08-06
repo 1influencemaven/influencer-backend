@@ -18,10 +18,19 @@ import {
   DEFAULT_IBP_INSTRUCTIONS,
 } from './prompts/generate-ibp.prompt';
 import {
+  buildLeadDiscoveryCorrectionPrompt,
+  buildPlanLeadDiscoveryPrompt,
+  DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
+} from './prompts/generate-lead-discovery.prompt';
+import {
   parseBrandDiscoveryOutput,
   type BrandDiscoveryOutput,
 } from './schemas/brand-discovery-output.schema';
 import { parseIbpOutput, type IbpOutput } from './schemas/ibp-output.schema';
+import {
+  parseLeadDiscoveryPlan,
+  type LeadDiscoveryPlan,
+} from './schemas/lead-discovery-plan.schema';
 
 export type GenerateIbpResult = IbpOutput & {
   metadata: {
@@ -103,6 +112,38 @@ export class AiService {
         buildBrandDiscoveryCorrectionPrompt(rawResponse, errorMessage),
       );
       return parseBrandDiscoveryOutput(rawResponse);
+    }
+  }
+
+  async planLeadDiscovery(input: {
+    brandName: string;
+    website: string;
+    domain: string;
+    limit: number;
+    scraperAllowlist: Array<{ id: string; name: string }>;
+    instructions?: string;
+  }): Promise<LeadDiscoveryPlan> {
+    const prompt = buildPlanLeadDiscoveryPrompt({
+      ...input,
+      instructions:
+        input.instructions?.trim() || DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
+    });
+    let rawResponse = await this.llmProvider.complete(prompt);
+
+    try {
+      return parseLeadDiscoveryPlan(rawResponse);
+    } catch (firstError) {
+      const errorMessage =
+        firstError instanceof Error ? firstError.message : 'Invalid JSON';
+
+      this.logger.warn(
+        `Lead discovery plan parse failed, retrying: ${errorMessage}`,
+      );
+
+      rawResponse = await this.llmProvider.complete(
+        buildLeadDiscoveryCorrectionPrompt(rawResponse, errorMessage),
+      );
+      return parseLeadDiscoveryPlan(rawResponse);
     }
   }
 

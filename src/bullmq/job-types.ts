@@ -5,6 +5,7 @@ export const AI_JOBS = {
 
 export const PROSPECTING_JOBS = {
   FIND_BRANDS: 'find-brands',
+  FIND_LEADS: 'find-leads',
 } as const;
 
 export const OUTREACH_JOBS = {
