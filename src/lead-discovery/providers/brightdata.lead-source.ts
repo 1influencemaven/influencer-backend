@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { DEFAULT_LEAD_PRIORITY_ROLES } from '../../ai/prompts/generate-lead-discovery.prompt';
 import { BrightDataClient } from '../clients/brightdata.client';
 import type {
   LeadFindContext,
@@ -8,22 +9,13 @@ import type {
   LeadSourceProvider,
   RawLeadContact,
 } from '../interfaces/lead-source-provider.interface';
+import { LeadDiscoverySearchOrchestrator } from '../search/lead-discovery-search.orchestrator';
 import {
   classifyBrightDataOption,
   filterEmailContactCatalog,
 } from '../utils/brightdata-catalog.util';
 
 type BrightDataRecord = Record<string, unknown>;
-
-const ROLE_QUERIES = [
-  'CEO',
-  'Founder',
-  'CMO',
-  'Marketing Manager',
-  'Brand Manager',
-  'Influencer Marketing',
-  'Partnerships',
-];
 
 @Injectable()
 export class BrightDataLeadSource implements LeadSourceProvider {
@@ -33,6 +25,7 @@ export class BrightDataLeadSource implements LeadSourceProvider {
   constructor(
     private readonly client: BrightDataClient,
     private readonly configService: ConfigService,
+    private readonly searchOrchestrator: LeadDiscoverySearchOrchestrator,
   ) {}
 
   isConfigured(): boolean {
@@ -40,8 +33,6 @@ export class BrightDataLeadSource implements LeadSourceProvider {
   }
 
   async listOptions(): Promise<LeadSourceOption[]> {
-    // Only scrapers (/datasets/v3/scrapers). Marketplace /datasets/list entries
-    // often fail trigger with "This dataset does not support collection".
     const catalog = await this.client.listCollectableCatalog();
     const emailOnly = filterEmailContactCatalog(catalog);
 
@@ -78,16 +69,20 @@ export class BrightDataLeadSource implements LeadSourceProvider {
   async findContacts(context: LeadFindContext): Promise<RawLeadContact[]> {
     const options = await this.listOptions();
     const optionById = new Map(options.map((o) => [o.id, o]));
-    const profileUrls = await this.resolvePeopleProfileUrls(context);
+    const searchResult = await this.searchOrchestrator.discoverProfileUrls({
+      brandName: context.brandName,
+      website: context.website,
+      domain: context.domain,
+      limit: context.limit,
+      priorityRoles: [...DEFAULT_LEAD_PRIORITY_ROLES],
+    });
+    const profileUrls = searchResult.profileUrls;
     const companyUrl = await this.resolveCompanyUrl(context);
     const contacts: RawLeadContact[] = [];
 
     for (const optionId of context.optionIds) {
       const option = optionById.get(optionId);
-      const kind = classifyBrightDataOption(
-        optionId,
-        option?.name ?? optionId,
-      );
+      const kind = classifyBrightDataOption(optionId, option?.name ?? optionId);
 
       try {
         const inputs = this.buildInputs(kind, {
@@ -105,7 +100,7 @@ export class BrightDataLeadSource implements LeadSourceProvider {
 
         const records = await this.client.triggerAndCollect(optionId, inputs);
         for (const record of records) {
-          const mapped = this.mapRecord(record, optionId);
+          const mapped = this.mapRecord(record, optionId, searchResult.trace);
           if (mapped) {
             contacts.push(mapped);
           }
@@ -120,10 +115,6 @@ export class BrightDataLeadSource implements LeadSourceProvider {
     return contacts;
   }
 
-  /**
-   * LinkedIn people/contact scrapers reject `keyword` and company URLs.
-   * They expect only `{ url: "https://www.linkedin.com/in/..." }`.
-   */
   private buildInputs(
     kind: ReturnType<typeof classifyBrightDataOption>,
     args: {
@@ -139,83 +130,9 @@ export class BrightDataLeadSource implements LeadSourceProvider {
       return [{ url: args.companyUrl }];
     }
 
-    // people + contact (+ unknown treated as people/contact URL scrapers)
     return args.profileUrls.slice(0, Math.max(args.limit, 1)).map((url) => ({
       url,
     }));
-  }
-
-  private async resolvePeopleProfileUrls(
-    context: LeadFindContext,
-  ): Promise<string[]> {
-    const tavilyKey = this.configService.get<string>('TAVILY_API_KEY')?.trim();
-    if (!tavilyKey) {
-      this.logger.warn(
-        'TAVILY_API_KEY missing: cannot discover LinkedIn people URLs for email scrapers',
-      );
-      return [];
-    }
-
-    const urls = new Set<string>();
-    const queries = ROLE_QUERIES.map(
-      (role) => `${context.brandName} ${role} LinkedIn`,
-    ).slice(0, 5);
-
-    for (const query of queries) {
-      try {
-        const response = await fetch('https://api.tavily.com/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            api_key: tavilyKey,
-            query,
-            max_results: 5,
-          }),
-        });
-        if (!response.ok) {
-          continue;
-        }
-        const payload = (await response.json()) as {
-          results?: Array<{ url?: string }>;
-        };
-        for (const result of payload.results ?? []) {
-          const normalized = this.normalizePeopleLinkedInUrl(result.url);
-          if (normalized) {
-            urls.add(normalized);
-          }
-        }
-      } catch {
-        // continue other queries
-      }
-    }
-
-    return [...urls];
-  }
-
-  private normalizePeopleLinkedInUrl(url?: string): string | null {
-    if (!url) {
-      return null;
-    }
-    try {
-      const parsed = new URL(url);
-      if (!/linkedin\.com$/i.test(parsed.hostname.replace(/^www\./, ''))) {
-        // hostname may be www.linkedin.com
-      }
-      if (!parsed.hostname.includes('linkedin.com')) {
-        return null;
-      }
-      if (!/\/in\//i.test(parsed.pathname)) {
-        return null;
-      }
-      // Strip query/hash; keep /in/slug
-      const match = parsed.pathname.match(/\/in\/([^/]+)/i);
-      if (!match?.[1]) {
-        return null;
-      }
-      return `https://www.linkedin.com/in/${match[1]}`;
-    } catch {
-      return null;
-    }
   }
 
   private async resolveCompanyUrl(context: LeadFindContext): Promise<string> {
@@ -246,7 +163,9 @@ export class BrightDataLeadSource implements LeadSourceProvider {
         String(result.url ?? '').includes('linkedin.com/company'),
       )?.url;
 
-      return linkedIn ? linkedIn.split('?')[0]! : this.ensureHttps(context.website);
+      return linkedIn
+        ? linkedIn.split('?')[0]
+        : this.ensureHttps(context.website);
     } catch {
       return this.ensureHttps(context.website);
     }
@@ -259,6 +178,7 @@ export class BrightDataLeadSource implements LeadSourceProvider {
   private mapRecord(
     record: BrightDataRecord,
     optionId: string,
+    searchTrace: { searchRunId: string; fallbackActivated: boolean },
   ): RawLeadContact | null {
     const email = String(
       record.email ??
@@ -269,10 +189,6 @@ export class BrightDataLeadSource implements LeadSourceProvider {
     )
       .split(',')[0]
       ?.trim();
-
-    if (!email || !email.includes('@')) {
-      return null;
-    }
 
     const contactName = String(
       record.name ??
@@ -297,17 +213,38 @@ export class BrightDataLeadSource implements LeadSourceProvider {
         '',
     ).trim();
 
+    const hasEmail = Boolean(email && email.includes('@'));
+    const hasProfile = Boolean(profileUrl);
+
+    if (!hasEmail && !hasProfile) {
+      return null;
+    }
+
+    const company = record.current_company as
+      | { name?: string; link?: string }
+      | undefined;
+    const companyNameRaw =
+      company?.name ?? String(record.current_company_name ?? '').trim();
+    const companyName = companyNameRaw || undefined;
+    const companyLinkedInUrl = company?.link?.trim() || undefined;
+
     return {
       contactName,
       title: title || undefined,
-      email: email.toLowerCase(),
-      profileUrl: profileUrl || undefined,
+      email: hasEmail ? email.toLowerCase() : undefined,
+      profileUrl: hasProfile ? profileUrl : undefined,
+      companyName,
+      companyLinkedInUrl,
       fitReason: title
         ? `Contact found via Bright Data (${title})`
         : 'Contact found via Bright Data',
       sourceOptionId: optionId,
       source: 'brightdata',
-      metadata: { rawKeys: Object.keys(record).slice(0, 20) },
+      metadata: {
+        rawKeys: Object.keys(record).slice(0, 20),
+        searchRunId: searchTrace.searchRunId,
+        searchFallbackActivated: searchTrace.fallbackActivated,
+      },
     };
   }
 }

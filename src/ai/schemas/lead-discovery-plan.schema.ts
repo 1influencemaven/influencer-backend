@@ -1,10 +1,11 @@
 import { z } from 'zod';
 
 export const leadDiscoveryPlanSchema = z.object({
-  tavilyQueries: z.array(z.string().min(3)).min(1).max(8),
   scraperIds: z.array(z.string().min(3)).min(1).max(3),
-  priorityRoles: z.array(z.string()).max(12).optional().default([]),
+  priorityRoles: z.array(z.string().min(2)).min(1).max(12),
   notes: z.string().optional(),
+  /** Legacy field from older prompts; ignored by search layer */
+  tavilyQueries: z.array(z.string()).optional(),
 });
 
 export type LeadDiscoveryPlan = z.infer<typeof leadDiscoveryPlanSchema>;

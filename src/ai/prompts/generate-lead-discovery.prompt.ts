@@ -11,30 +11,31 @@ Business guidance:
 - Prefer contacts likely to answer a cold outreach email
 - Prefer corporate emails on the brand domain when possible
 - Deprioritize HR, support, legal, and generic inboxes (info@, hola@) as primary leads
-- Suggest focused LinkedIn people search queries (include brand name + role)
+- Suggest focused priority roles for LinkedIn people search (include brand context)
 - Only choose scrapers from the provided allowlist
 - Do not invent emails or profile URLs
-- Keep tavilyQueries between 3 and 6 items
+- Keep priorityRoles between 3 and 6 items
 - Keep scraperIds to 1 or 2 items from the allowlist`;
+
+export const DEFAULT_LEAD_PRIORITY_ROLES = [
+  'CEO',
+  'Founder',
+  'CMO',
+  'Marketing Manager',
+  'Influencer Marketing',
+  'Partnerships',
+];
+
+/** @deprecated Use DEFAULT_LEAD_PRIORITY_ROLES; search queries are built server-side */
+export const DEFAULT_TAVILY_LEAD_QUERIES = (brandName: string): string[] =>
+  DEFAULT_LEAD_PRIORITY_ROLES.map((role) => `${brandName} ${role} LinkedIn`);
 
 const OUTPUT_CONTRACT = `Respond with ONLY valid JSON (no markdown outside the JSON) matching this exact schema:
 {
-  "tavilyQueries": ["string"],
   "scraperIds": ["gd_..."],
   "priorityRoles": ["string"],
   "notes": "string"
 }`;
-
-export const DEFAULT_TAVILY_LEAD_QUERIES = (
-  brandName: string,
-): string[] => [
-  `${brandName} CEO LinkedIn`,
-  `${brandName} Founder LinkedIn`,
-  `${brandName} CMO LinkedIn`,
-  `${brandName} Marketing Manager LinkedIn`,
-  `${brandName} Influencer Marketing LinkedIn`,
-  `${brandName} Partnerships LinkedIn`,
-];
 
 export function buildPlanLeadDiscoveryPrompt(input: {
   brandName: string;

@@ -69,6 +69,47 @@ export const envValidationSchema = Joi.object({
 
   BRIGHTDATA_ZONE: Joi.string().optional().allow(''),
 
+  BRIGHTDATA_UNLOCKER_ZONE: Joi.string().optional().allow(''),
+
+  BRIGHTDATA_SEARCH_TIMEOUT_MS: Joi.number().integer().min(1000).default(30000),
+
+  BRIGHTDATA_SEARCH_MAX_RETRIES: Joi.number().integer().min(0).max(5).default(2),
+
+  BRIGHTDATA_SEARCH_RETRY_BACKOFF_MS: Joi.number()
+    .integer()
+    .min(0)
+    .default(1500),
+
+  BRIGHTDATA_SCRAPER_POLL_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(5000)
+    .default(120000),
+
+  BRIGHTDATA_SCRAPER_POLL_INTERVAL_MS: Joi.number()
+    .integer()
+    .min(500)
+    .default(3000),
+
+  MAX_EMAIL_DISCOVERY_PAGES: Joi.number().integer().min(1).max(20).default(6),
+
+  MAX_EMAIL_CANDIDATES: Joi.number().integer().min(1).max(100).default(20),
+
+  LEAD_DISCOVERY_SEARCH_FALLBACK: Joi.string()
+    .valid('none', 'tavily')
+    .default('tavily'),
+
+  LEAD_DISCOVERY_MAX_SEARCH_REQUESTS: Joi.number()
+    .integer()
+    .min(1)
+    .max(100)
+    .default(30),
+
+  LEAD_DISCOVERY_MAX_TAVILY_FALLBACK_REQUESTS: Joi.number()
+    .integer()
+    .min(0)
+    .max(30)
+    .default(10),
+
   LEAD_DISCOVERY_LIMIT: Joi.number().integer().min(1).max(20).default(10),
 
   APOLLO_API_KEY: Joi.string().optional().allow(''),

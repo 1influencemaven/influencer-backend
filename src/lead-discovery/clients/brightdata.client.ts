@@ -7,16 +7,38 @@ export type BrightDataCatalogItem = {
   id: string;
   name: string;
   kind: 'dataset' | 'scraper';
+  /** Bright Data `category` when present (e.g. ecomm, business). */
+  category?: string;
+  /** Bright Data target `domain` when present. */
+  domain?: string;
+  /** Bright Data `scraper_type` entries when present. */
+  scraperTypes?: string[];
 };
+
+type SnapshotProgressStatus =
+  | 'starting'
+  | 'running'
+  | 'ready'
+  | 'failed'
+  | 'canceled';
 
 @Injectable()
 export class BrightDataClient {
   private readonly logger = new Logger(BrightDataClient.name);
   private readonly apiKey: string;
   private readonly baseUrl = 'https://api.brightdata.com';
+  private readonly pollTimeoutMs: number;
+  private readonly pollIntervalMs: number;
 
   constructor(private readonly configService: ConfigService) {
-    this.apiKey = this.configService.get<string>('BRIGHTDATA_API_KEY')?.trim() ?? '';
+    this.apiKey =
+      this.configService.get<string>('BRIGHTDATA_API_KEY')?.trim() ?? '';
+    this.pollTimeoutMs =
+      this.configService.get<number>('BRIGHTDATA_SCRAPER_POLL_TIMEOUT_MS') ??
+      120000;
+    this.pollIntervalMs =
+      this.configService.get<number>('BRIGHTDATA_SCRAPER_POLL_INTERVAL_MS') ??
+      3000;
   }
 
   isConfigured(): boolean {
@@ -55,8 +77,12 @@ export class BrightDataClient {
 
     if (!response.ok) {
       const body = await response.text();
-      this.logger.error(`BrightData trigger failed: ${response.status} ${body}`);
-      throw new Error(`BrightData request failed with status ${response.status}`);
+      this.logger.error(
+        `BrightData trigger failed: ${response.status} ${body}`,
+      );
+      throw new Error(
+        `BrightData request failed with status ${response.status}`,
+      );
     }
 
     const payload: unknown = await response.json();
@@ -71,7 +97,7 @@ export class BrightDataClient {
         return asRecord.data as BrightDataRecord[];
       }
       if (typeof asRecord.snapshot_id === 'string') {
-        return this.pollSnapshot(asRecord.snapshot_id);
+        return this.pollSnapshot(asRecord.snapshot_id, datasetId);
       }
     }
 
@@ -105,7 +131,7 @@ export class BrightDataClient {
       : payload &&
           typeof payload === 'object' &&
           Array.isArray((payload as { data?: unknown }).data)
-        ? ((payload as { data: unknown[] }).data as unknown[])
+        ? (payload as { data: unknown[] }).data
         : [];
 
     return list
@@ -121,38 +147,197 @@ export class BrightDataClient {
         if (!id) {
           return null;
         }
-        return { id, name: name || id, kind };
+        const category = String(record.category ?? '')
+          .trim()
+          .toLowerCase();
+        const domain = String(record.domain ?? '')
+          .trim()
+          .toLowerCase();
+        const scraperTypes = Array.isArray(record.scraper_type)
+          ? record.scraper_type.map((value) => String(value).trim()).filter(Boolean)
+          : undefined;
+        return {
+          id,
+          name: name || id,
+          kind,
+          ...(category ? { category } : {}),
+          ...(domain ? { domain } : {}),
+          ...(scraperTypes && scraperTypes.length > 0
+            ? { scraperTypes }
+            : {}),
+        };
       })
       .filter((item): item is BrightDataCatalogItem => item !== null);
   }
 
-  private async pollSnapshot(snapshotId: string): Promise<BrightDataRecord[]> {
-    const maxAttempts = 8;
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+  private async pollSnapshot(
+    snapshotId: string,
+    scraperId: string,
+  ): Promise<BrightDataRecord[]> {
+    const startMs = Date.now();
+    const deadline = startMs + this.pollTimeoutMs;
+    let pollAttempt = 0;
 
-      const response = await fetch(
-        `${this.baseUrl}/datasets/v3/snapshot/${encodeURIComponent(snapshotId)}?format=json`,
-        {
-          headers: { Authorization: `Bearer ${this.apiKey}` },
-        },
-      );
+    while (Date.now() < deadline) {
+      pollAttempt += 1;
+      const elapsedMs = Date.now() - startMs;
 
-      if (response.status === 202) {
-        continue;
+      const progress = await this.fetchSnapshotProgress(snapshotId);
+      const status = progress.status;
+
+      this.logPollEvent({
+        snapshotId,
+        scraperId,
+        status,
+        pollAttempt,
+        elapsedMs,
+      });
+
+      if (status === 'ready') {
+        this.logPollEvent({
+          snapshotId,
+          scraperId,
+          status: 'ready',
+          elapsedMs: Date.now() - startMs,
+        });
+        return this.downloadSnapshot(snapshotId);
       }
 
-      if (!response.ok) {
-        const body = await response.text();
+      if (status === 'failed') {
         throw new Error(
-          `BrightData snapshot failed: ${response.status} ${body}`,
+          `BrightData snapshot failed (snapshot_id=${snapshotId})`,
         );
       }
 
-      const data: unknown = await response.json();
-      return Array.isArray(data) ? (data as BrightDataRecord[]) : [];
+      if (status === 'canceled') {
+        throw new Error(
+          `BrightData snapshot canceled (snapshot_id=${snapshotId})`,
+        );
+      }
+
+      if (status !== 'starting' && status !== 'running') {
+        this.logger.warn(
+          `Unexpected Bright Data snapshot status "${status}" for ${snapshotId}`,
+        );
+      }
+
+      if (Date.now() + this.pollIntervalMs > deadline) {
+        break;
+      }
+      await this.sleep(this.pollIntervalMs);
     }
 
+    const elapsedMs = Date.now() - startMs;
+    this.logPollEvent({
+      snapshotId,
+      scraperId,
+      status: 'timeout',
+      elapsedMs,
+    });
     throw new Error('BrightData snapshot polling timed out');
+  }
+
+  private async fetchSnapshotProgress(snapshotId: string): Promise<{
+    status: SnapshotProgressStatus | 'unknown';
+  }> {
+    const response = await fetch(
+      `${this.baseUrl}/datasets/v3/progress/${encodeURIComponent(snapshotId)}`,
+      {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `BrightData progress request failed: ${response.status} ${body}`,
+      );
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+    const rawStatus = String(payload.status ?? '').toLowerCase();
+    const status = this.normalizeProgressStatus(rawStatus);
+    return { status };
+  }
+
+  private normalizeProgressStatus(
+    raw: string,
+  ): SnapshotProgressStatus | 'unknown' {
+    if (
+      raw === 'starting' ||
+      raw === 'running' ||
+      raw === 'ready' ||
+      raw === 'failed' ||
+      raw === 'canceled'
+    ) {
+      return raw;
+    }
+    return 'unknown';
+  }
+
+  private async downloadSnapshot(snapshotId: string): Promise<BrightDataRecord[]> {
+    const response = await fetch(
+      `${this.baseUrl}/datasets/v3/snapshot/${encodeURIComponent(snapshotId)}?format=json`,
+      {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+      },
+    );
+
+    if (response.status === 202) {
+      throw new Error(
+        `BrightData snapshot not ready for download (snapshot_id=${snapshotId})`,
+      );
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        `BrightData snapshot download failed: ${response.status} ${body}`,
+      );
+    }
+
+    const text = await response.text();
+    try {
+      const data = JSON.parse(text) as unknown;
+      if (Array.isArray(data)) {
+        return data as BrightDataRecord[];
+      }
+      if (data && typeof data === 'object') {
+        return [data as BrightDataRecord];
+      }
+      return [];
+    } catch {
+      const lines = text
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (lines.length === 0) {
+        return [];
+      }
+      return lines.map((line) => JSON.parse(line) as BrightDataRecord);
+    }
+  }
+
+  private logPollEvent(event: {
+    snapshotId: string;
+    scraperId: string;
+    status: string;
+    pollAttempt?: number;
+    elapsedMs: number;
+  }): void {
+    this.logger.log(
+      JSON.stringify({
+        event: 'brightdata_snapshot_poll',
+        snapshotId: event.snapshotId,
+        scraperId: event.scraperId,
+        status: event.status,
+        pollAttempt: event.pollAttempt,
+        elapsedMs: event.elapsedMs,
+      }),
+    );
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

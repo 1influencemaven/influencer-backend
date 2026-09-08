@@ -12,8 +12,11 @@ export type LeadSourceOptionsResponse = {
 export type RawLeadContact = {
   contactName: string;
   title?: string;
-  email: string;
+  email?: string;
   profileUrl?: string;
+  companyName?: string;
+  companyLinkedInUrl?: string;
+  companyWebsite?: string;
   fitReason?: string;
   sourceOptionId?: string;
   source: string;
