@@ -57,6 +57,25 @@ enum LeadEmailConfidence {
   UNKNOWN
 }
 
+enum ContactChannelType {
+  LINKEDIN
+  EMAIL
+  WEBSITE
+}
+
+enum ContactChannelStatus {
+  ACTIVE
+  INVALID
+}
+
+enum ContactChannelSource {
+  LINKEDIN_SCRAPER
+  PUBLIC_WEB
+  MANUAL
+  LEGACY_MIGRATION
+  BRAND_WEBSITE
+}
+
 model User {
   id                 String              @id @default(uuid())
   name               String
@@ -198,10 +217,13 @@ model BrandCandidate {
   evidenceUrls   String[]
   status         BrandCandidateStatus  @default(UNDER_REVIEW)
   metadata       Json?
+  /// Lead selected for future outreach (ADR-0011). Orthogonal to Lead.status.
+  selectedLeadId String?               @unique
+  selectedLead   Lead?                 @relation("BrandCandidateSelectedLead", fields: [selectedLeadId], references: [id], onDelete: SetNull)
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
   leadDiscoveryRuns LeadDiscoveryRun[]
-  leads             Lead[]
+  leads             Lead[]             @relation("BrandCandidateLeads")
 
   @@index([influencerId])
   @@index([discoveryRunId])
@@ -234,16 +256,18 @@ model LeadDiscoveryRun {
 model Lead {
   id               String              @id @default(uuid())
   brandCandidateId String
-  brandCandidate   BrandCandidate      @relation(fields: [brandCandidateId], references: [id], onDelete: Cascade)
+  brandCandidate   BrandCandidate      @relation("BrandCandidateLeads", fields: [brandCandidateId], references: [id], onDelete: Cascade)
   influencerId     String
   influencer       Influencer          @relation(fields: [influencerId], references: [id], onDelete: Cascade)
   runId            String
   run              LeadDiscoveryRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
   contactName      String
   title            String?
-  email            String
+  /// Legacy mirror — future source of truth: ContactChannel (EMAIL). Nullable since ADR-0014.
+  email            String?
   emailConfidence  LeadEmailConfidence @default(UNKNOWN)
   isGeneric        Boolean             @default(false)
+  /// Legacy mirror — future source of truth: ContactChannel (LINKEDIN).
   profileUrl       String?
   providerId       String
   sourceOptionId   String?
@@ -251,6 +275,9 @@ model Lead {
   source           String
   status           LeadStatus          @default(UNDER_REVIEW)
   metadata         Json?
+  /// Inverse of BrandCandidate.selectedLead (ADR-0011). At most one brand points here.
+  selectedByBrandCandidate BrandCandidate? @relation("BrandCandidateSelectedLead")
+  contactChannels          ContactChannel[]
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
 
@@ -260,4 +287,24 @@ model Lead {
   @@index([status])
   @@index([email])
   @@index([createdAt])
+}
+
+model ContactChannel {
+  id              String               @id @default(uuid())
+  leadId          String
+  lead            Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type            ContactChannelType
+  value           String
+  valueNormalized String
+  status          ContactChannelStatus @default(ACTIVE)
+  source          ContactChannelSource
+  sourceUrl       String?
+  isGeneric       Boolean?
+  metadata        Json?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@unique([leadId, type, valueNormalized])
+  @@index([leadId])
+  @@index([type])
 }
