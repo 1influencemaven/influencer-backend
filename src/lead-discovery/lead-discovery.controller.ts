@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -34,6 +35,7 @@ import {
 } from './dto/query-lead-discovery.dto';
 import { SearchLeadsDto } from './dto/search-leads.dto';
 import { UpdateLeadStatusDto } from './dto/update-lead-status.dto';
+import { AddContactChannelDto } from './dto/add-contact-channel.dto';
 import { LeadDiscoveryService } from './lead-discovery.service';
 
 @ApiTags('Lead Discovery')
@@ -68,7 +70,9 @@ export class LeadDiscoveryController {
       'Encola find-leads por marca. Default provider ai+brightdata (autónomo; sin options). Manual brightdata requiere options.optionIds.',
   })
   @ApiAcceptedResponse({ description: 'Jobs encolados' })
-  @ApiBadRequestResponse({ description: 'Marca no APPROVED u options inválidas' })
+  @ApiBadRequestResponse({
+    description: 'Marca no APPROVED u options inválidas',
+  })
   @ApiConflictResponse({ description: 'Ya hay un run PROCESSING' })
   @ApiNotFoundResponse({ description: 'Marca no encontrada' })
   @ApiServiceUnavailableResponse({ description: 'Provider no configurado' })
@@ -87,14 +91,85 @@ export class LeadDiscoveryController {
     return this.leadDiscoveryService.listRuns(query);
   }
 
-  @ApiOperation({ summary: 'Listar leads' })
+  @ApiOperation({
+    summary: 'Listar leads',
+    description:
+      'Incluye `selectedForOutreach` derivado de BrandCandidate.selectedLeadId (ADR-0011).',
+  })
   @ApiOkResponse({ description: 'Lista de leads' })
   @Get('leads')
   listLeads(@Query() query: QueryLeadsDto) {
     return this.leadDiscoveryService.listLeads(query);
   }
 
-  @ApiOperation({ summary: 'Aprobar, descartar o marcar duplicado' })
+  @ApiOperation({
+    summary: 'Obtener lead con canales de contacto',
+    description:
+      'Incluye contactChannels, outreachReadiness (D1: READY nunca asignado) y campos legacy email/profileUrl.',
+  })
+  @ApiOkResponse({ description: 'Detalle del lead' })
+  @ApiNotFoundResponse({ description: 'Lead no encontrado' })
+  @Get('leads/:id')
+  getLeadById(@Param('id') id: string) {
+    return this.leadDiscoveryService.getLeadById(id);
+  }
+
+  @ApiOperation({
+    summary: 'Agregar canal de contacto a un lead',
+    description:
+      'EMAIL con source PUBLIC_WEB requiere metadata.evidences con email literal.',
+  })
+  @ApiOkResponse({ description: 'Lead actualizado con el nuevo canal' })
+  @ApiConflictResponse({ description: 'Canal duplicado' })
+  @ApiBadRequestResponse({ description: 'Validación o evidencia inválida' })
+  @ApiNotFoundResponse({ description: 'Lead no encontrado' })
+  @Post('leads/:id/contact-channels')
+  addContactChannel(
+    @Param('id') id: string,
+    @Body() dto: AddContactChannelDto,
+  ) {
+    return this.leadDiscoveryService.addContactChannel(id, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Seleccionar lead APPROVED para outreach futuro',
+    description:
+      'Establece BrandCandidate.selectedLeadId = lead.id (exclusivo). No envía email.',
+  })
+  @ApiOkResponse({
+    description: 'Lead seleccionado (selectedForOutreach=true)',
+  })
+  @ApiBadRequestResponse({
+    description: 'Lead no APPROVED',
+  })
+  @ApiNotFoundResponse({ description: 'Lead no encontrado' })
+  @Post('leads/:id/select')
+  selectForOutreach(@Param('id') id: string) {
+    return this.leadDiscoveryService.selectLeadForOutreach(id);
+  }
+
+  @ApiOperation({
+    summary: 'Deseleccionar lead como destino de outreach',
+    description:
+      'Pone BrandCandidate.selectedLeadId = null si este lead era el seleccionado. No cambia Lead.status.',
+  })
+  @ApiOkResponse({
+    description: 'Lead deseleccionado (selectedForOutreach=false)',
+  })
+  @ApiBadRequestResponse({
+    description: 'Lead no es el actualmente seleccionado',
+  })
+  @ApiNotFoundResponse({ description: 'Lead no encontrado' })
+  @Delete('leads/:id/select')
+  deselectForOutreach(@Param('id') id: string) {
+    return this.leadDiscoveryService.deselectLeadForOutreach(id);
+  }
+
+  @ApiOperation({
+    summary: 'Aprobar, descartar o marcar duplicado',
+    description:
+      'DISCARDED/DUPLICATE limpian selectedLeadId si este lead era el seleccionado.',
+  })
   @ApiOkResponse({ description: 'Lead actualizado' })
   @ApiNotFoundResponse({ description: 'Lead no encontrado' })
   @Patch('leads/:id')

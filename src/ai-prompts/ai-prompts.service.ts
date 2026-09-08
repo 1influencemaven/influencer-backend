@@ -116,16 +116,13 @@ export class AiPromptsService {
 
     return {
       ...template,
-      isDefault:
-        template.instructions === DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS,
+      isDefault: template.instructions === DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS,
     };
   }
 
   async getBrandDiscoveryInstructions(): Promise<string> {
     const template = await this.getBrandDiscoveryTemplate();
-    return (
-      template.instructions.trim() || DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS
-    );
+    return template.instructions.trim() || DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS;
   }
 
   async updateBrandDiscoveryTemplate(
@@ -150,8 +147,7 @@ export class AiPromptsService {
 
     return {
       ...template,
-      isDefault:
-        template.instructions === DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS,
+      isDefault: template.instructions === DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS,
     };
   }
 

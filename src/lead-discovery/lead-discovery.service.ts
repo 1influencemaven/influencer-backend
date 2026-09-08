@@ -14,6 +14,8 @@ import { PROSPECTING_JOBS } from '../bullmq/job-types';
 import { QUEUES } from '../bullmq/queue.constants';
 import {
   BrandCandidateStatus,
+  ContactChannelSource,
+  ContactChannelType,
   LeadDiscoveryStatus,
   LeadEmailConfidence,
   LeadStatus,
@@ -23,6 +25,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { normalizeDomain } from '../brand-discovery/utils/brand-domain.util';
 import { SearchLeadsDto } from './dto/search-leads.dto';
 import { UpdateLeadStatusDto } from './dto/update-lead-status.dto';
+import type { AddContactChannelDto } from './dto/add-contact-channel.dto';
+import {
+  ContactChannelService,
+  contactChannelSelect,
+  type CreateChannelInput,
+} from './contact-channel.service';
+import { normalizeChannelValue } from './utils/contact-channel-normalize.util';
+import type { OutreachReadiness } from './utils/outreach-readiness.util';
 import type { FindLeadsJobData } from './interfaces/find-leads-job.interface';
 import {
   assertOptionIds,
@@ -32,7 +42,10 @@ import {
 import { AI_BRIGHTDATA_PROVIDER_ID } from './providers/ai-plus-brightdata.lead-source';
 import { assessEmailConfidence } from './utils/email-confidence.util';
 import { isGenericEmail } from './utils/generic-email.util';
+import { toProfilePublicEmailInput } from './utils/profile-public-email-input.util';
 import { sortContactsByTitlePriority } from './utils/title-priority.util';
+import { PublicEmailEvidenceDiscoveryService } from './email-discovery/public-email-evidence-discovery.service';
+import type { RawLeadContact } from './interfaces/lead-source-provider.interface';
 
 export const leadDiscoveryRunSelect = {
   id: true,
@@ -80,6 +93,23 @@ export const leadSelect = {
   },
 } as const;
 
+export const leadDetailSelect = {
+  ...leadSelect,
+  brandCandidate: {
+    select: { id: true, name: true, website: true },
+  },
+  contactChannels: {
+    select: contactChannelSelect,
+    orderBy: { createdAt: 'asc' as const },
+  },
+} as const;
+
+type LeadRow = {
+  id: string;
+  brandCandidateId: string;
+  [key: string]: unknown;
+};
+
 @Injectable()
 export class LeadDiscoveryService {
   private readonly logger = new Logger(LeadDiscoveryService.name);
@@ -89,6 +119,8 @@ export class LeadDiscoveryService {
     private readonly configService: ConfigService,
     private readonly leadSourceRegistry: LeadSourceRegistry,
     private readonly aiPromptsService: AiPromptsService,
+    private readonly contactChannelService: ContactChannelService,
+    private readonly publicEmailEvidence: PublicEmailEvidenceDiscoveryService,
     @InjectQueue(QUEUES.PROSPECTING)
     private readonly prospectingQueue: Queue,
   ) {}
@@ -139,9 +171,7 @@ export class LeadDiscoveryService {
       optionNames: availableOptions
         .filter((o) => optionIds.includes(o.id))
         .map((o) => ({ id: o.id, name: o.name })),
-      ...(promptInstructions
-        ? { promptInstructionsSnapshot: true }
-        : {}),
+      ...(promptInstructions ? { promptInstructionsSnapshot: true } : {}),
     };
 
     const runs: Array<{
@@ -256,7 +286,7 @@ export class LeadDiscoveryService {
     runId?: string;
     status?: LeadStatus;
   }) {
-    return this.prisma.lead.findMany({
+    const leads = await this.prisma.lead.findMany({
       where: {
         ...(filters.brandCandidateId
           ? { brandCandidateId: filters.brandCandidateId }
@@ -269,22 +299,185 @@ export class LeadDiscoveryService {
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
+
+    return this.withSelectedForOutreach(leads);
+  }
+
+  async getLeadById(id: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id },
+      select: leadDetailSelect,
+    });
+    if (!lead) {
+      throw new NotFoundException(`Lead ${id} not found`);
+    }
+    const [withFlag] = await this.withSelectedForOutreach([lead]);
+    return this.toLeadDetailResponse(withFlag);
+  }
+
+  async addContactChannel(leadId: string, dto: AddContactChannelDto) {
+    await this.contactChannelService.addChannel(leadId, dto);
+    return this.getLeadById(leadId);
+  }
+
+  private toLeadDetailResponse(
+    lead: Prisma.LeadGetPayload<{ select: typeof leadDetailSelect }> & {
+      selectedForOutreach: boolean;
+    },
+  ) {
+    const outreachReadiness: OutreachReadiness =
+      this.contactChannelService.computeReadiness(lead.contactChannels);
+
+    return {
+      id: lead.id,
+      brandCandidateId: lead.brandCandidateId,
+      influencerId: lead.influencerId,
+      runId: lead.runId,
+      status: lead.status,
+      selectedForOutreach: lead.selectedForOutreach,
+      person: {
+        name: lead.contactName,
+        position: lead.title,
+        company: lead.brandCandidate.name,
+      },
+      contactChannels: lead.contactChannels,
+      outreachReadiness,
+      email: lead.email,
+      profileUrl: lead.profileUrl,
+      emailConfidence: lead.emailConfidence,
+      isGeneric: lead.isGeneric,
+      providerId: lead.providerId,
+      sourceOptionId: lead.sourceOptionId,
+      fitReason: lead.fitReason,
+      source: lead.source,
+      metadata: lead.metadata,
+      createdAt: lead.createdAt,
+      updatedAt: lead.updatedAt,
+      brandCandidate: lead.brandCandidate,
+      influencer: lead.influencer,
+    };
   }
 
   async updateLeadStatus(id: string, dto: UpdateLeadStatusDto) {
     const existing = await this.prisma.lead.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, brandCandidateId: true },
     });
     if (!existing) {
       throw new NotFoundException(`Lead ${id} not found`);
     }
 
-    return this.prisma.lead.update({
-      where: { id },
-      data: { status: dto.status },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const lead = await tx.lead.update({
+        where: { id },
+        data: { status: dto.status },
+        select: leadSelect,
+      });
+
+      if (
+        dto.status === LeadStatus.DISCARDED ||
+        dto.status === LeadStatus.DUPLICATE
+      ) {
+        await tx.brandCandidate.updateMany({
+          where: {
+            id: existing.brandCandidateId,
+            selectedLeadId: id,
+          },
+          data: { selectedLeadId: null },
+        });
+      }
+
+      return lead;
+    });
+
+    const [withFlag] = await this.withSelectedForOutreach([updated]);
+    return withFlag;
+  }
+
+  /**
+   * Select an APPROVED lead as the exclusive outreach target for its brand.
+   * Replaces any previous BrandCandidate.selectedLeadId (ADR-0011).
+   */
+  async selectLeadForOutreach(leadId: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: { id: true, brandCandidateId: true, status: true },
+    });
+    if (!lead) {
+      throw new NotFoundException(`Lead ${leadId} not found`);
+    }
+    if (lead.status !== LeadStatus.APPROVED) {
+      throw new BadRequestException(
+        `Only APPROVED leads can be selected for outreach (current status: ${lead.status})`,
+      );
+    }
+
+    await this.prisma.brandCandidate.update({
+      where: { id: lead.brandCandidateId },
+      data: { selectedLeadId: lead.id },
+    });
+
+    const full = await this.prisma.lead.findUniqueOrThrow({
+      where: { id: leadId },
       select: leadSelect,
     });
+    return { ...full, selectedForOutreach: true };
+  }
+
+  /**
+   * Clear BrandCandidate.selectedLeadId when this lead is the current selection.
+   */
+  async deselectLeadForOutreach(leadId: string) {
+    const lead = await this.prisma.lead.findUnique({
+      where: { id: leadId },
+      select: {
+        id: true,
+        brandCandidateId: true,
+        brandCandidate: { select: { selectedLeadId: true } },
+      },
+    });
+    if (!lead) {
+      throw new NotFoundException(`Lead ${leadId} not found`);
+    }
+    if (lead.brandCandidate.selectedLeadId !== lead.id) {
+      throw new BadRequestException(
+        `Lead ${leadId} is not the selected outreach lead for this brand`,
+      );
+    }
+
+    await this.prisma.brandCandidate.update({
+      where: { id: lead.brandCandidateId },
+      data: { selectedLeadId: null },
+    });
+
+    const full = await this.prisma.lead.findUniqueOrThrow({
+      where: { id: leadId },
+      select: leadSelect,
+    });
+    return { ...full, selectedForOutreach: false };
+  }
+
+  private async withSelectedForOutreach<T extends LeadRow>(
+    leads: T[],
+  ): Promise<Array<T & { selectedForOutreach: boolean }>> {
+    if (leads.length === 0) {
+      return [];
+    }
+
+    const brandIds = [...new Set(leads.map((lead) => lead.brandCandidateId))];
+    const brands = await this.prisma.brandCandidate.findMany({
+      where: { id: { in: brandIds } },
+      select: { id: true, selectedLeadId: true },
+    });
+    const selectedByBrand = new Map(
+      brands.map((brand) => [brand.id, brand.selectedLeadId]),
+    );
+
+    return leads.map((lead) => ({
+      ...lead,
+      selectedForOutreach:
+        selectedByBrand.get(lead.brandCandidateId) === lead.id,
+    }));
   }
 
   async executeDiscovery(
@@ -332,9 +525,7 @@ export class LeadDiscoveryService {
       const { provider } = this.leadSourceRegistry.resolve(run.providerId);
       const options = run.providerOptions as { optionIds?: string[] };
       const autonomous = isAutonomousLeadProvider(run.providerId);
-      const optionIds = autonomous
-        ? ['autonomous']
-        : (options.optionIds ?? []);
+      const optionIds = autonomous ? ['autonomous'] : (options.optionIds ?? []);
 
       if (!autonomous) {
         assertOptionIds(optionIds);
@@ -361,28 +552,71 @@ export class LeadDiscoveryService {
 
       const existing = await this.prisma.lead.findMany({
         where: { brandCandidateId: run.brandCandidateId },
-        select: { email: true },
+        select: {
+          email: true,
+          profileUrl: true,
+          contactChannels: {
+            select: { type: true, valueNormalized: true },
+          },
+        },
       });
-      const existingEmails = new Set(
-        existing.map((lead) => lead.email.toLowerCase()),
-      );
+      const existingEmails = new Set<string>();
+      const existingLinkedIn = new Set<string>();
+      for (const lead of existing) {
+        if (lead.email) {
+          existingEmails.add(lead.email.toLowerCase());
+        }
+        if (lead.profileUrl) {
+          existingLinkedIn.add(
+            normalizeChannelValue(
+              ContactChannelType.LINKEDIN,
+              lead.profileUrl,
+            ),
+          );
+        }
+        for (const channel of lead.contactChannels) {
+          if (channel.type === ContactChannelType.EMAIL) {
+            existingEmails.add(channel.valueNormalized);
+          }
+          if (channel.type === ContactChannelType.LINKEDIN) {
+            existingLinkedIn.add(channel.valueNormalized);
+          }
+        }
+      }
 
       const enriched = rawContacts
         .map((contact) => {
-          const email = contact.email.trim().toLowerCase();
-          const isGeneric = isGenericEmail(email);
+          const email = contact.email?.trim().toLowerCase();
+          const isGeneric = email ? isGenericEmail(email) : false;
           return {
             ...contact,
             email,
             isGeneric,
-            emailConfidence: assessEmailConfidence(email, domain),
+            emailConfidence: email
+              ? assessEmailConfidence(email, domain)
+              : LeadEmailConfidence.UNKNOWN,
           };
         })
         .filter((contact) => {
-          if (existingEmails.has(contact.email)) {
+          const email = contact.email;
+          const profileUrl = contact.profileUrl?.trim();
+          const profileNormalized = profileUrl
+            ? normalizeChannelValue(ContactChannelType.LINKEDIN, profileUrl)
+            : undefined;
+
+          if (!email && !profileNormalized) {
             return false;
           }
-          if (contact.emailConfidence === LeadEmailConfidence.INVALID) {
+          if (email && existingEmails.has(email)) {
+            return false;
+          }
+          if (profileNormalized && existingLinkedIn.has(profileNormalized)) {
+            return false;
+          }
+          if (
+            email &&
+            contact.emailConfidence === LeadEmailConfidence.INVALID
+          ) {
             return false;
           }
           return true;
@@ -390,19 +624,22 @@ export class LeadDiscoveryService {
 
       const sorted = sortContactsByTitlePriority(enriched).slice(0, run.limit);
 
+      const createdLeads: Array<{ leadId: string; contact: RawLeadContact }> =
+        [];
+
       await this.prisma.$transaction(async (tx) => {
-        if (sorted.length > 0) {
-          await tx.lead.createMany({
-            data: sorted.map((contact) => ({
+        for (const contact of sorted) {
+          const lead = await tx.lead.create({
+            data: {
               brandCandidateId: run.brandCandidateId,
               influencerId: run.influencerId,
               runId: run.id,
               contactName: contact.contactName,
               title: contact.title,
-              email: contact.email,
+              email: contact.email ?? null,
               emailConfidence: contact.emailConfidence,
               isGeneric: contact.isGeneric,
-              profileUrl: contact.profileUrl,
+              profileUrl: contact.profileUrl ?? null,
               providerId: run.providerId,
               sourceOptionId: contact.sourceOptionId,
               fitReason: contact.fitReason,
@@ -411,17 +648,87 @@ export class LeadDiscoveryService {
               metadata: (contact.metadata ?? undefined) as
                 | Prisma.InputJsonValue
                 | undefined,
-            })),
+            },
           });
+
+          const channels: CreateChannelInput[] = [];
+          if (contact.profileUrl?.trim()) {
+            channels.push({
+              type: ContactChannelType.LINKEDIN,
+              value: contact.profileUrl.trim(),
+              source: ContactChannelSource.LINKEDIN_SCRAPER,
+            });
+          }
+          if (contact.email) {
+            channels.push({
+              type: ContactChannelType.EMAIL,
+              value: contact.email,
+              source: ContactChannelSource.LINKEDIN_SCRAPER,
+              isGeneric: contact.isGeneric,
+            });
+          }
+          if (channels.length > 0) {
+            await this.contactChannelService.createChannelsForLead(
+              tx,
+              lead.id,
+              channels,
+            );
+          }
+
+          createdLeads.push({ leadId: lead.id, contact });
+        }
+      });
+
+      for (const { leadId, contact } of createdLeads) {
+        if (!contact.profileUrl?.trim()) {
+          continue;
         }
 
-        await tx.leadDiscoveryRun.update({
-          where: { id: run.id },
-          data: {
-            status: LeadDiscoveryStatus.COMPLETED,
-            errorMessage: null,
-          },
-        });
+        try {
+          const input = toProfilePublicEmailInput(contact);
+          const result = await this.publicEmailEvidence.discoverForProfile(input);
+          const stats = await this.prisma.$transaction((tx) =>
+            this.contactChannelService.persistPublicEmailEnrichment(
+              tx,
+              leadId,
+              result,
+            ),
+          );
+
+          this.logger.log(
+            JSON.stringify({
+              event: 'contact_channels_enriched',
+              runId: run.id,
+              leadId,
+              contactName: contact.contactName,
+              channelsAdded: stats.channelsAdded,
+              genericEmails: stats.genericEmails,
+              nonGenericEmails: stats.nonGenericEmails,
+              pagesAttempted: stats.pagesAttempted,
+              pagesSucceeded: stats.pagesSucceeded,
+              errors: stats.errors,
+            }),
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.warn(
+            JSON.stringify({
+              event: 'public_email_enrichment_failed',
+              runId: run.id,
+              leadId,
+              contactName: contact.contactName,
+              error: message,
+            }),
+          );
+        }
+      }
+
+      await this.prisma.leadDiscoveryRun.update({
+        where: { id: run.id },
+        data: {
+          status: LeadDiscoveryStatus.COMPLETED,
+          errorMessage: null,
+        },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

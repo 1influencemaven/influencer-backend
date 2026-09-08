@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -16,6 +17,7 @@ import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -85,5 +87,18 @@ export class BrandDiscoveryController {
     @Body() dto: UpdateBrandCandidateStatusDto,
   ) {
     return this.brandDiscoveryService.updateCandidateStatus(id, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Borrar marca candidata',
+    description:
+      'Hard delete en cualquier status. Cascada a LeadDiscoveryRun, Lead y ContactChannel de esa marca. El BrandDiscoveryRun se conserva. Libera el domain para una búsqueda posterior.',
+  })
+  @ApiNoContentResponse({ description: 'Candidata eliminada' })
+  @ApiNotFoundResponse({ description: 'Candidata no encontrada' })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('candidates/:id')
+  remove(@Param('id') id: string) {
+    return this.brandDiscoveryService.removeCandidate(id);
   }
 }

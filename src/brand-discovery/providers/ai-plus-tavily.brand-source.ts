@@ -1,19 +1,14 @@
 import { Injectable } from '@nestjs/common';
 
 import { AiService } from '../../ai/ai.service';
-import {
-  buildBrandDiscoveryQueries,
-} from '../../ai/prompts/generate-brand-discovery.prompt';
+import { buildBrandDiscoveryQueries } from '../../ai/prompts/generate-brand-discovery.prompt';
 import type {
   BrandSourceContext,
   BrandSourceProvider,
   RawBrandCandidate,
 } from '../interfaces/brand-source-provider.interface';
 import type { WebSearchProvider } from '../interfaces/web-search-provider.interface';
-import {
-  ensureWebsiteUrl,
-  normalizeDomain,
-} from '../utils/brand-domain.util';
+import { ensureWebsiteUrl, normalizeDomain } from '../utils/brand-domain.util';
 
 @Injectable()
 export class AiPlusTavilyBrandSource implements BrandSourceProvider {

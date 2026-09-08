@@ -23,10 +23,7 @@ import { SearchBrandsDto } from './dto/search-brands.dto';
 import { UpdateBrandCandidateStatusDto } from './dto/update-brand-candidate-status.dto';
 import type { FindBrandsJobData } from './interfaces/find-brands-job.interface';
 import type { IbpCriteriaSnapshot } from './interfaces/brand-source-provider.interface';
-import {
-  dedupeByDomain,
-  normalizeDomain,
-} from './utils/brand-domain.util';
+import { dedupeByDomain, excludeExistingDomains, normalizeDomain } from './utils/brand-domain.util';
 
 export const brandDiscoveryRunSelect = {
   id: true,
@@ -213,10 +210,7 @@ export class BrandDiscoveryService {
     });
   }
 
-  async updateCandidateStatus(
-    id: string,
-    dto: UpdateBrandCandidateStatusDto,
-  ) {
+  async updateCandidateStatus(id: string, dto: UpdateBrandCandidateStatusDto) {
     const existing = await this.prisma.brandCandidate.findUnique({
       where: { id },
       select: { id: true },
@@ -230,6 +224,27 @@ export class BrandDiscoveryService {
       where: { id },
       data: { status: dto.status },
       select: brandCandidateSelect,
+    });
+  }
+
+  async removeCandidate(id: string): Promise<void> {
+    const existing = await this.prisma.brandCandidate.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Brand candidate not found');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.brandCandidate.update({
+        where: { id },
+        data: { selectedLeadId: null },
+      });
+      await tx.brandCandidate.delete({
+        where: { id },
+      });
     });
   }
 
@@ -261,24 +276,34 @@ export class BrandDiscoveryService {
     const { provider: brandSource } = this.brandSourceRegistry.resolve();
 
     try {
+      const existingRows = await this.prisma.brandCandidate.findMany({
+        where: { influencerId },
+        select: { domain: true },
+      });
+      const existingDomains = new Set(
+        existingRows
+          .map((row) => normalizeDomain(row.domain))
+          .filter(Boolean),
+      );
+
+      const fetchLimit = Math.min(Math.max(run.limit * 2, run.limit), 20);
       const rawCandidates = await brandSource.discover({
         influencerName: influencer.name,
         influencerNiche: influencer.niche,
         ibp,
-        limit: run.limit,
+        limit: fetchLimit,
         promptInstructions: instructions,
       });
 
       const filtered = this.applyHardFilters(rawCandidates, ibp);
-      const unique = dedupeByDomain(filtered).slice(
-        0,
-        run.limit,
-      ) as typeof filtered;
+      const unique = dedupeByDomain(filtered) as typeof filtered;
+      const novel = excludeExistingDomains(unique, existingDomains);
+      const toPersist = novel.slice(0, run.limit);
 
       await this.prisma.$transaction(async (tx) => {
-        if (unique.length > 0) {
+        if (toPersist.length > 0) {
           await tx.brandCandidate.createMany({
-            data: unique.map((candidate) => ({
+            data: toPersist.map((candidate) => ({
               influencerId,
               discoveryRunId: runId,
               name: candidate.name,

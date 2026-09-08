@@ -19,7 +19,8 @@ export class MockWebSearchProvider implements WebSearchProvider {
       {
         title: 'FitLife Spain',
         url: 'https://www.fitlife.es',
-        content: 'Spanish fitness and wellness brand with influencer campaigns.',
+        content:
+          'Spanish fitness and wellness brand with influencer campaigns.',
       },
     ];
   }

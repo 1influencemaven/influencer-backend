@@ -34,3 +34,23 @@ export function dedupeByDomain(
     return true;
   });
 }
+
+/**
+ * Drops candidates whose domain (or website hostname) already exists
+ * for the influencer across prior Brand Discovery runs.
+ */
+export function excludeExistingDomains<
+  T extends { domain?: string; website?: string },
+>(candidates: T[], existingDomains: ReadonlySet<string>): T[] {
+  return candidates.filter((candidate) => {
+    const raw = candidate.domain || candidate.website || '';
+    if (!raw) {
+      return false;
+    }
+    const domain = normalizeDomain(raw);
+    if (!domain || existingDomains.has(domain)) {
+      return false;
+    }
+    return true;
+  });
+}

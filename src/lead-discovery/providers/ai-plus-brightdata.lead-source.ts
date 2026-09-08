@@ -2,10 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { AiService } from '../../ai/ai.service';
-import {
-  DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
-  DEFAULT_TAVILY_LEAD_QUERIES,
-} from '../../ai/prompts/generate-lead-discovery.prompt';
+import { DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS } from '../../ai/prompts/generate-lead-discovery.prompt';
 import { BrightDataClient } from '../clients/brightdata.client';
 import type {
   LeadFindContext,
@@ -13,6 +10,7 @@ import type {
   LeadSourceProvider,
   RawLeadContact,
 } from '../interfaces/lead-source-provider.interface';
+import { LeadDiscoverySearchOrchestrator } from '../search/lead-discovery-search.orchestrator';
 import {
   EMAIL_CONTACT_DATASET_IDS,
   LINKEDIN_PEOPLE_SCRAPER_IDS,
@@ -32,6 +30,7 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
     private readonly client: BrightDataClient,
     private readonly configService: ConfigService,
     private readonly aiService: AiService,
+    private readonly searchOrchestrator: LeadDiscoverySearchOrchestrator,
   ) {}
 
   isConfigured(): boolean {
@@ -57,11 +56,21 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
       return [];
     }
 
+    this.logger.log(
+      JSON.stringify({
+        event: 'lead_scraper_allowlist',
+        scrapers: allowlist.map((item) => ({
+          scraperId: item.id,
+          name: item.name,
+        })),
+      }),
+    );
+
     const instructions =
       context.promptInstructions?.trim() || DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS;
 
-    let tavilyQueries = DEFAULT_TAVILY_LEAD_QUERIES(context.brandName);
-    let scraperIds = [allowlist[0]!.id];
+    let priorityRoles: string[] = [];
+    let scraperIds = [allowlist[0].id];
 
     try {
       const plan = await this.aiService.planLeadDiscovery({
@@ -77,8 +86,8 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
       if (plannedScrapers.length > 0) {
         scraperIds = plannedScrapers;
       }
-      if (plan.tavilyQueries.length > 0) {
-        tavilyQueries = plan.tavilyQueries.slice(0, 6);
+      if (plan.priorityRoles.length > 0) {
+        priorityRoles = plan.priorityRoles.slice(0, 6);
       }
     } catch (error) {
       this.logger.warn(
@@ -86,24 +95,45 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
       );
     }
 
-    const profileUrls = await this.searchPeopleProfileUrls(tavilyQueries);
+    const searchResult = await this.searchOrchestrator.discoverProfileUrls({
+      brandName: context.brandName,
+      website: context.website,
+      domain: context.domain,
+      limit: context.limit,
+      priorityRoles,
+    });
+
+    const profileUrls = searchResult.profileUrls;
     if (profileUrls.length === 0) {
       this.logger.warn(
-        `No LinkedIn people URLs found via Tavily for ${context.brandName}`,
+        `No LinkedIn people URLs found via Bright Data search for ${context.brandName}`,
       );
       return [];
     }
 
+    this.logger.log(
+      JSON.stringify({
+        event: 'lead_search_complete',
+        brand: context.brandName,
+        searchRunId: searchResult.trace.searchRunId,
+        fallbackActivated: searchResult.trace.fallbackActivated,
+        profileUrlCount: profileUrls.length,
+        scraperIds,
+      }),
+    );
+
     const contacts: RawLeadContact[] = [];
-    const inputs = profileUrls.slice(0, Math.max(context.limit, 1)).map((url) => ({
-      url,
-    }));
+    const inputs = profileUrls
+      .slice(0, Math.max(context.limit, 1))
+      .map((url) => ({
+        url,
+      }));
 
     for (const scraperId of scraperIds) {
       try {
         const records = await this.client.triggerAndCollect(scraperId, inputs);
         for (const record of records) {
-          const mapped = this.mapRecord(record, scraperId);
+          const mapped = this.mapRecord(record, scraperId, searchResult.trace);
           if (mapped) {
             contacts.push(mapped);
           }
@@ -134,73 +164,16 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
       return [{ id: fallbackId, name: `Configured scraper (${fallbackId})` }];
     }
 
-    // Prefer known IDs if somehow catalog empty but keys exist
     return [
       ...[...EMAIL_CONTACT_DATASET_IDS],
       ...[...LINKEDIN_PEOPLE_SCRAPER_IDS],
     ].map((id) => ({ id, name: id }));
   }
 
-  private async searchPeopleProfileUrls(queries: string[]): Promise<string[]> {
-    const tavilyKey = this.configService.get<string>('TAVILY_API_KEY')?.trim();
-    if (!tavilyKey) {
-      this.logger.warn('TAVILY_API_KEY missing for autonomous lead discovery');
-      return [];
-    }
-
-    const urls = new Set<string>();
-    for (const query of queries.slice(0, 6)) {
-      try {
-        const response = await fetch('https://api.tavily.com/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            api_key: tavilyKey,
-            query,
-            max_results: 5,
-          }),
-        });
-        if (!response.ok) {
-          continue;
-        }
-        const payload = (await response.json()) as {
-          results?: Array<{ url?: string }>;
-        };
-        for (const result of payload.results ?? []) {
-          const normalized = this.normalizePeopleLinkedInUrl(result.url);
-          if (normalized) {
-            urls.add(normalized);
-          }
-        }
-      } catch {
-        // continue
-      }
-    }
-    return [...urls];
-  }
-
-  private normalizePeopleLinkedInUrl(url?: string): string | null {
-    if (!url) {
-      return null;
-    }
-    try {
-      const parsed = new URL(url);
-      if (!parsed.hostname.includes('linkedin.com')) {
-        return null;
-      }
-      const match = parsed.pathname.match(/\/in\/([^/]+)/i);
-      if (!match?.[1]) {
-        return null;
-      }
-      return `https://www.linkedin.com/in/${match[1]}`;
-    } catch {
-      return null;
-    }
-  }
-
   private mapRecord(
     record: BrightDataRecord,
     optionId: string,
+    searchTrace: { searchRunId: string; fallbackActivated: boolean },
   ): RawLeadContact | null {
     const email = String(
       record.email ??
@@ -211,10 +184,6 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
     )
       .split(',')[0]
       ?.trim();
-
-    if (!email || !email.includes('@')) {
-      return null;
-    }
 
     const contactName = String(
       record.name ??
@@ -239,17 +208,38 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
         '',
     ).trim();
 
+    const hasEmail = Boolean(email && email.includes('@'));
+    const hasProfile = Boolean(profileUrl);
+
+    if (!hasEmail && !hasProfile) {
+      return null;
+    }
+
+    const company = record.current_company as
+      | { name?: string; link?: string }
+      | undefined;
+    const companyNameRaw =
+      company?.name ?? String(record.current_company_name ?? '').trim();
+    const companyName = companyNameRaw || undefined;
+    const companyLinkedInUrl = company?.link?.trim() || undefined;
+
     return {
       contactName,
       title: title || undefined,
-      email: email.toLowerCase(),
-      profileUrl: profileUrl || undefined,
+      email: hasEmail ? email.toLowerCase() : undefined,
+      profileUrl: hasProfile ? profileUrl : undefined,
+      companyName,
+      companyLinkedInUrl,
       fitReason: title
         ? `Autonomous lead discovery (${title})`
         : 'Autonomous lead discovery',
       sourceOptionId: optionId,
       source: AI_BRIGHTDATA_PROVIDER_ID,
-      metadata: { rawKeys: Object.keys(record).slice(0, 20) },
+      metadata: {
+        rawKeys: Object.keys(record).slice(0, 20),
+        searchRunId: searchTrace.searchRunId,
+        searchFallbackActivated: searchTrace.fallbackActivated,
+      },
     };
   }
 }

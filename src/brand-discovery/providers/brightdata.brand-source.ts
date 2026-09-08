@@ -7,10 +7,7 @@ import type {
   BrandSourceProvider,
   RawBrandCandidate,
 } from '../interfaces/brand-source-provider.interface';
-import {
-  ensureWebsiteUrl,
-  normalizeDomain,
-} from '../utils/brand-domain.util';
+import { ensureWebsiteUrl, normalizeDomain } from '../utils/brand-domain.util';
 
 type BrightDataRecord = Record<string, unknown>;
 
@@ -106,8 +103,12 @@ export class BrightDataBrandSource implements BrandSourceProvider {
 
     if (!response.ok) {
       const body = await response.text();
-      this.logger.error(`BrightData trigger failed: ${response.status} ${body}`);
-      throw new Error(`BrightData request failed with status ${response.status}`);
+      this.logger.error(
+        `BrightData trigger failed: ${response.status} ${body}`,
+      );
+      throw new Error(
+        `BrightData request failed with status ${response.status}`,
+      );
     }
 
     const payload: unknown = await response.json();

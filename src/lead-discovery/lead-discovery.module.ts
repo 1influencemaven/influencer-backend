@@ -6,15 +6,17 @@ import { AiModule } from '../ai/ai.module';
 import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUES } from '../bullmq/queue.constants';
+import { AiService } from '../ai/ai.service';
 import { BrightDataClient } from './clients/brightdata.client';
+import { BrightDataSearchClient } from './clients/brightdata-search.client';
 import { LeadDiscoveryController } from './lead-discovery.controller';
 import { LeadDiscoveryService } from './lead-discovery.service';
+import { ContactChannelService } from './contact-channel.service';
 import {
   hasConfiguredApiKey,
   LeadSourceRegistry,
 } from './lead-source.registry';
 import type { LeadSourceProvider } from './interfaces/lead-source-provider.interface';
-import { AiService } from '../ai/ai.service';
 import {
   AI_BRIGHTDATA_PROVIDER_ID,
   AiPlusBrightDataLeadSource,
@@ -22,6 +24,8 @@ import {
 import { BrightDataLeadSource } from './providers/brightdata.lead-source';
 import { MockAiPlusBrightDataLeadSource } from './providers/mock-ai-plus-brightdata.lead-source';
 import { MockLeadSource } from './providers/mock.lead-source';
+import { LeadDiscoverySearchOrchestrator } from './search/lead-discovery-search.orchestrator';
+import { PublicEmailEvidenceDiscoveryService } from './email-discovery/public-email-evidence-discovery.service';
 
 @Module({
   imports: [
@@ -34,14 +38,24 @@ import { MockLeadSource } from './providers/mock.lead-source';
   controllers: [LeadDiscoveryController],
   providers: [
     LeadDiscoveryService,
+    ContactChannelService,
     BrightDataClient,
+    BrightDataSearchClient,
+    LeadDiscoverySearchOrchestrator,
+    PublicEmailEvidenceDiscoveryService,
     {
       provide: LeadSourceRegistry,
-      inject: [ConfigService, BrightDataClient, AiService],
+      inject: [
+        ConfigService,
+        BrightDataClient,
+        AiService,
+        LeadDiscoverySearchOrchestrator,
+      ],
       useFactory: (
         configService: ConfigService,
         brightDataClient: BrightDataClient,
         aiService: AiService,
+        searchOrchestrator: LeadDiscoverySearchOrchestrator,
       ) => {
         const providers = new Map<string, LeadSourceProvider>();
 
@@ -61,15 +75,18 @@ import { MockLeadSource } from './providers/mock.lead-source';
               brightDataClient,
               configService,
               aiService,
+              searchOrchestrator,
             ),
           );
           providers.set(
             'brightdata',
-            new BrightDataLeadSource(brightDataClient, configService),
+            new BrightDataLeadSource(
+              brightDataClient,
+              configService,
+              searchOrchestrator,
+            ),
           );
         }
-
-        // Apollo: reserved (ADR-0009). Register when APOLLO_API_KEY + implementation exist.
 
         return new LeadSourceRegistry(providers, configService);
       },

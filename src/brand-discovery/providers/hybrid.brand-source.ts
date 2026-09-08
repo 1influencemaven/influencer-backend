@@ -42,6 +42,9 @@ export class HybridBrandSource implements BrandSourceProvider {
       })),
     ];
 
-    return dedupeByDomain(merged).slice(0, context.limit) as RawBrandCandidate[];
+    return dedupeByDomain(merged).slice(
+      0,
+      context.limit,
+    ) as RawBrandCandidate[];
   }
 }
