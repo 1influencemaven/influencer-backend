@@ -1,5 +1,6 @@
 import type {
   LeadFindContext,
+  LeadFindResult,
   LeadSourceOption,
   LeadSourceProvider,
   RawLeadContact,
@@ -23,9 +24,9 @@ export class MockAiPlusBrightDataLeadSource implements LeadSourceProvider {
     ];
   }
 
-  async findContacts(context: LeadFindContext): Promise<RawLeadContact[]> {
+  async findContacts(context: LeadFindContext): Promise<LeadFindResult> {
     const domain = context.domain || 'example.com';
-    return [
+    const contacts: RawLeadContact[] = [
       {
         contactName: 'Alex Rivera',
         title: 'Influencer Marketing Manager',
@@ -44,5 +45,7 @@ export class MockAiPlusBrightDataLeadSource implements LeadSourceProvider {
         source: AI_BRIGHTDATA_PROVIDER_ID,
       },
     ].slice(0, Math.max(context.limit, 1));
+
+    return { contacts, searchMetadata: null };
   }
 }

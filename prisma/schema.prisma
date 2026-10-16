@@ -76,6 +76,15 @@ enum ContactChannelSource {
   BRAND_WEBSITE
 }
 
+/// Commercial value for outreach prioritization (ADR-0016).
+/// Orthogonal to isGeneric (technical company/role inbox flag).
+enum CommercialRelevance {
+  HIGH
+  NEUTRAL
+  LOW
+  UNKNOWN
+}
+
 model User {
   id                 String              @id @default(uuid())
   name               String
@@ -224,8 +233,9 @@ model BrandCandidate {
   selectedLead   Lead?                 @relation("BrandCandidateSelectedLead", fields: [selectedLeadId], references: [id], onDelete: SetNull)
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
-  leadDiscoveryRuns LeadDiscoveryRun[]
-  leads             Lead[]             @relation("BrandCandidateLeads")
+  leadDiscoveryRuns     LeadDiscoveryRun[]
+  leads                 Lead[]                  @relation("BrandCandidateLeads")
+  brandBusinessContacts BrandBusinessContact[]
 
   @@index([influencerId])
   @@index([discoveryRunId])
@@ -244,6 +254,8 @@ model LeadDiscoveryRun {
   providerId       String
   providerOptions  Json
   limit            Int                 @default(10)
+  /// Contact Discovery audit (ADR-0017). Null on historical / FAILED runs.
+  searchMetadata   Json?
   errorMessage     String?
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
@@ -292,21 +304,46 @@ model Lead {
 }
 
 model ContactChannel {
-  id              String               @id @default(uuid())
-  leadId          String
-  lead            Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  type            ContactChannelType
-  value           String
-  valueNormalized String
-  status          ContactChannelStatus @default(ACTIVE)
-  source          ContactChannelSource
-  sourceUrl       String?
-  isGeneric       Boolean?
-  metadata        Json?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  id                  String               @id @default(uuid())
+  leadId              String
+  lead                Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type                ContactChannelType
+  value               String
+  valueNormalized     String
+  status              ContactChannelStatus @default(ACTIVE)
+  source              ContactChannelSource
+  sourceUrl           String?
+  isGeneric           Boolean?
+  /// Business priority; independent of isGeneric. Default UNKNOWN for historical rows (ADR-0016).
+  commercialRelevance CommercialRelevance  @default(UNKNOWN)
+  metadata            Json?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   @@unique([leadId, type, valueNormalized])
   @@index([leadId])
   @@index([type])
+}
+
+/// Company-level commercial contact without an identified person (Contact Discovery 2A).
+/// Must NOT be modeled as a Lead (Lead = person only). See ADR-0016.
+model BrandBusinessContact {
+  id                  String                 @id @default(uuid())
+  brandCandidateId    String
+  brandCandidate      BrandCandidate         @relation(fields: [brandCandidateId], references: [id], onDelete: Cascade)
+  email               String
+  emailNormalized     String
+  /// Optional display label (e.g. "Partnerships") — not a person name.
+  label               String?
+  isGeneric           Boolean                @default(true)
+  commercialRelevance CommercialRelevance    @default(UNKNOWN)
+  source              ContactChannelSource
+  sourceUrl           String?
+  metadata            Json?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@unique([brandCandidateId, emailNormalized])
+  @@index([brandCandidateId])
+  @@index([emailNormalized])
 }

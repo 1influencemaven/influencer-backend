@@ -5,10 +5,13 @@ import { DEFAULT_LEAD_PRIORITY_ROLES } from '../../ai/prompts/generate-lead-disc
 import { BrightDataClient } from '../clients/brightdata.client';
 import type {
   LeadFindContext,
+  LeadFindResult,
+  LeadSearchMetadata,
   LeadSourceOption,
   LeadSourceProvider,
   RawLeadContact,
 } from '../interfaces/lead-source-provider.interface';
+import { resolveLeadFallbackReason } from '../interfaces/lead-source-provider.interface';
 import { LeadDiscoverySearchOrchestrator } from '../search/lead-discovery-search.orchestrator';
 import {
   classifyBrightDataOption,
@@ -66,15 +69,21 @@ export class BrightDataLeadSource implements LeadSourceProvider {
     return [];
   }
 
-  async findContacts(context: LeadFindContext): Promise<RawLeadContact[]> {
+  async findContacts(context: LeadFindContext): Promise<LeadFindResult> {
     const options = await this.listOptions();
     const optionById = new Map(options.map((o) => [o.id, o]));
+    const priorityRoles = [...DEFAULT_LEAD_PRIORITY_ROLES];
     const searchResult = await this.searchOrchestrator.discoverProfileUrls({
       brandName: context.brandName,
       website: context.website,
       domain: context.domain,
       limit: context.limit,
-      priorityRoles: [...DEFAULT_LEAD_PRIORITY_ROLES],
+      priorityRoles,
+    });
+    const searchMetadata = this.buildSearchMetadata({
+      priorityRoles,
+      scraperIds: context.optionIds,
+      searchResult,
     });
     const profileUrls = searchResult.profileUrls;
     const companyUrl = await this.resolveCompanyUrl(context);
@@ -112,7 +121,29 @@ export class BrightDataLeadSource implements LeadSourceProvider {
       }
     }
 
-    return contacts;
+    return { contacts, searchMetadata };
+  }
+
+  private buildSearchMetadata(args: {
+    priorityRoles: string[];
+    scraperIds: string[];
+    searchResult: Awaited<
+      ReturnType<LeadDiscoverySearchOrchestrator['discoverProfileUrls']>
+    >;
+  }): LeadSearchMetadata {
+    const searchTavily = args.searchResult.trace.fallbackActivated;
+    return {
+      strategy: 'manual',
+      tracks: ['2B'],
+      priorityRoles: args.priorityRoles,
+      scraperIds: args.scraperIds,
+      plannedQueriesCount: args.searchResult.plannedQueries.length,
+      validatedQueriesCount: args.searchResult.executedQueries.length,
+      queries: args.searchResult.executedQueries,
+      fallbackUsed: searchTavily,
+      fallbackReason: resolveLeadFallbackReason(false, searchTavily),
+      searchHitsCount: args.searchResult.searchHitsCount,
+    };
   }
 
   private buildInputs(

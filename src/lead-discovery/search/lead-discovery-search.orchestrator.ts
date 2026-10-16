@@ -19,6 +19,13 @@ export type LeadDiscoverySearchInput = {
   priorityRoles?: string[];
 };
 
+type TavilyFallbackResult = {
+  candidates: LinkedInCandidate[];
+  executedQueries: string[];
+  searchHitsCount: number;
+  requestsAttempted: number;
+};
+
 @Injectable()
 export class LeadDiscoverySearchOrchestrator {
   private readonly logger = new Logger(LeadDiscoverySearchOrchestrator.name);
@@ -48,12 +55,14 @@ export class LeadDiscoverySearchOrchestrator {
     input: LeadDiscoverySearchInput,
   ): Promise<LeadSearchDiscoveryResult> {
     const searchRunId = randomUUID();
-    const queries = this.ladderBuilder.build({
+    const plannedQueries = this.ladderBuilder.build({
       brandName: input.brandName,
       priorityRoles: input.priorityRoles,
     });
 
     const failures: SearchFailure[] = [];
+    const executedQueries: string[] = [];
+    let searchHitsCount = 0;
     let brightDataRequests = 0;
     let tavilyRequests = 0;
     let queriesExecuted = 0;
@@ -62,7 +71,7 @@ export class LeadDiscoverySearchOrchestrator {
     const minRequired = Math.max(1, Math.min(input.limit, 3));
     const maxCandidates = input.limit * 3;
 
-    for (const queryText of queries) {
+    for (const queryText of plannedQueries) {
       if (brightDataRequests >= this.maxBrightDataRequests) {
         break;
       }
@@ -75,8 +84,10 @@ export class LeadDiscoverySearchOrchestrator {
 
       queriesExecuted += 1;
       brightDataRequests += 1;
+      executedQueries.push(queryText);
 
       const result = await this.brightDataSearch.search({ text: queryText });
+      searchHitsCount += result.items.length;
       this.logSearchAttempt(searchRunId, result.meta);
 
       if (result.meta.emptyBody) {
@@ -105,14 +116,16 @@ export class LeadDiscoverySearchOrchestrator {
 
     if (qualified.length < minRequired && this.shouldUseTavilyFallback()) {
       fallbackActivated = true;
-      const tavilyCandidates = await this.runTavilyFallback(
-        queries,
+      const tavilyResult = await this.runTavilyFallback(
+        plannedQueries,
         input.brandName,
         failures,
         input.priorityRoles,
       );
-      tavilyRequests = Math.min(queries.length, this.maxTavilyRequests);
-      allCandidates.push(...tavilyCandidates);
+      tavilyRequests = tavilyResult.requestsAttempted;
+      executedQueries.push(...tavilyResult.executedQueries);
+      searchHitsCount += tavilyResult.searchHitsCount;
+      allCandidates.push(...tavilyResult.candidates);
       deduped = this.ranker.dedupeCandidates(allCandidates);
       qualified = this.ranker.filterByThreshold(deduped);
     }
@@ -122,6 +135,9 @@ export class LeadDiscoverySearchOrchestrator {
 
     return {
       profileUrls,
+      plannedQueries,
+      executedQueries,
+      searchHitsCount,
       trace: {
         searchRunId,
         brightDataRequests,
@@ -144,18 +160,26 @@ export class LeadDiscoverySearchOrchestrator {
     brandName: string,
     failures: SearchFailure[],
     priorityRoles?: string[],
-  ): Promise<LinkedInCandidate[]> {
+  ): Promise<TavilyFallbackResult> {
     const tavilyKey = this.configService.get<string>('TAVILY_API_KEY')?.trim();
     if (!tavilyKey) {
       this.logger.warn('Tavily fallback skipped: TAVILY_API_KEY missing');
-      return [];
+      return {
+        candidates: [],
+        executedQueries: [],
+        searchHitsCount: 0,
+        requestsAttempted: Math.min(queries.length, this.maxTavilyRequests),
+      };
     }
 
     const candidates: LinkedInCandidate[] = [];
+    const executedQueries: string[] = [];
+    let searchHitsCount = 0;
     const limit = Math.min(queries.length, this.maxTavilyRequests);
 
     for (let i = 0; i < limit; i += 1) {
       const queryText = queries[i];
+      executedQueries.push(queryText);
       try {
         const response = await fetch('https://api.tavily.com/search', {
           method: 'POST',
@@ -193,6 +217,7 @@ export class LeadDiscoverySearchOrchestrator {
           position: index + 1,
           domain: '',
         }));
+        searchHitsCount += items.length;
 
         candidates.push(
           ...this.ranker.rank({
@@ -217,7 +242,12 @@ export class LeadDiscoverySearchOrchestrator {
     this.logger.log(
       `Tavily fallback executed for brand search (${candidates.length} candidates)`,
     );
-    return candidates;
+    return {
+      candidates,
+      executedQueries,
+      searchHitsCount,
+      requestsAttempted: limit,
+    };
   }
 
   private logSearchAttempt(

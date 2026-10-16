@@ -71,4 +71,13 @@ export type LeadSearchRunTrace = {
 export type LeadSearchDiscoveryResult = {
   profileUrls: string[];
   trace: LeadSearchRunTrace;
+  /** Full ladder before early-stop. */
+  plannedQueries: string[];
+  /** Query strings actually sent to BD and/or Tavily (in execution order). */
+  executedQueries: string[];
+  /**
+   * Sum of search-result items returned by providers during this run
+   * (Bright Data items + Tavily items). Not leads / profiles / emails.
+   */
+  searchHitsCount: number;
 };

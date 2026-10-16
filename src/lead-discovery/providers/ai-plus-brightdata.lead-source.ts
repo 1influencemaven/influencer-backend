@@ -6,10 +6,13 @@ import { DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS } from '../../ai/prompts/generate-l
 import { BrightDataClient } from '../clients/brightdata.client';
 import type {
   LeadFindContext,
+  LeadFindResult,
+  LeadSearchMetadata,
   LeadSourceOption,
   LeadSourceProvider,
   RawLeadContact,
 } from '../interfaces/lead-source-provider.interface';
+import { resolveLeadFallbackReason } from '../interfaces/lead-source-provider.interface';
 import { LeadDiscoverySearchOrchestrator } from '../search/lead-discovery-search.orchestrator';
 import {
   EMAIL_CONTACT_DATASET_IDS,
@@ -47,13 +50,13 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
     ];
   }
 
-  async findContacts(context: LeadFindContext): Promise<RawLeadContact[]> {
+  async findContacts(context: LeadFindContext): Promise<LeadFindResult> {
     const allowlist = await this.resolveScraperAllowlist();
     if (allowlist.length === 0) {
       this.logger.warn(
         'No collectable Bright Data scrapers available for autonomous lead discovery',
       );
-      return [];
+      return { contacts: [], searchMetadata: null };
     }
 
     this.logger.log(
@@ -71,6 +74,7 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
 
     let priorityRoles: string[] = [];
     let scraperIds = [allowlist[0].id];
+    let aiPlanFailed = false;
 
     try {
       const plan = await this.aiService.planLeadDiscovery({
@@ -90,6 +94,7 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
         priorityRoles = plan.priorityRoles.slice(0, 6);
       }
     } catch (error) {
+      aiPlanFailed = true;
       this.logger.warn(
         `LLM lead plan failed; using default playbook: ${String(error)}`,
       );
@@ -103,12 +108,19 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
       priorityRoles,
     });
 
+    const searchMetadata = this.buildSearchMetadata({
+      priorityRoles,
+      scraperIds,
+      aiPlanFailed,
+      searchResult,
+    });
+
     const profileUrls = searchResult.profileUrls;
     if (profileUrls.length === 0) {
       this.logger.warn(
         `No LinkedIn people URLs found via Bright Data search for ${context.brandName}`,
       );
-      return [];
+      return { contacts: [], searchMetadata };
     }
 
     this.logger.log(
@@ -145,7 +157,31 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
       }
     }
 
-    return contacts;
+    return { contacts, searchMetadata };
+  }
+
+  private buildSearchMetadata(args: {
+    priorityRoles: string[];
+    scraperIds: string[];
+    aiPlanFailed: boolean;
+    searchResult: Awaited<
+      ReturnType<LeadDiscoverySearchOrchestrator['discoverProfileUrls']>
+    >;
+  }): LeadSearchMetadata {
+    const searchTavily = args.searchResult.trace.fallbackActivated;
+    const fallbackUsed = args.aiPlanFailed || searchTavily;
+    return {
+      strategy: 'llm',
+      tracks: ['2B'],
+      priorityRoles: args.priorityRoles,
+      scraperIds: args.scraperIds,
+      plannedQueriesCount: args.searchResult.plannedQueries.length,
+      validatedQueriesCount: args.searchResult.executedQueries.length,
+      queries: args.searchResult.executedQueries,
+      fallbackUsed,
+      fallbackReason: resolveLeadFallbackReason(args.aiPlanFailed, searchTavily),
+      searchHitsCount: args.searchResult.searchHitsCount,
+    };
   }
 
   private async resolveScraperAllowlist(): Promise<

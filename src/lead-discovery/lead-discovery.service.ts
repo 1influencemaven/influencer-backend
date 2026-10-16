@@ -45,7 +45,13 @@ import { isGenericEmail } from './utils/generic-email.util';
 import { toProfilePublicEmailInput } from './utils/profile-public-email-input.util';
 import { sortContactsByTitlePriority } from './utils/title-priority.util';
 import { PublicEmailEvidenceDiscoveryService } from './email-discovery/public-email-evidence-discovery.service';
-import type { RawLeadContact } from './interfaces/lead-source-provider.interface';
+import { BrandBusinessContactDiscoveryService } from './brand-business-contact-discovery.service';
+import { BrandBusinessContactService } from './brand-business-contact.service';
+import type {
+  BusinessContactDiscoverySummary,
+  LeadSearchMetadata,
+  RawLeadContact,
+} from './interfaces/lead-source-provider.interface';
 
 export const leadDiscoveryRunSelect = {
   id: true,
@@ -55,6 +61,7 @@ export const leadDiscoveryRunSelect = {
   providerId: true,
   providerOptions: true,
   limit: true,
+  searchMetadata: true,
   errorMessage: true,
   createdAt: true,
   updatedAt: true,
@@ -121,6 +128,8 @@ export class LeadDiscoveryService {
     private readonly aiPromptsService: AiPromptsService,
     private readonly contactChannelService: ContactChannelService,
     private readonly publicEmailEvidence: PublicEmailEvidenceDiscoveryService,
+    private readonly brandBusinessContactDiscovery: BrandBusinessContactDiscoveryService,
+    private readonly brandBusinessContactService: BrandBusinessContactService,
     @InjectQueue(QUEUES.PROSPECTING)
     private readonly prospectingQueue: Queue,
   ) {}
@@ -541,14 +550,69 @@ export class LeadDiscoveryService {
         run.brandCandidate.domain ||
         normalizeDomain(run.brandCandidate.website);
 
-      const rawContacts = await provider.findContacts({
-        brandName: run.brandCandidate.name,
-        website: run.brandCandidate.website,
-        domain,
-        limit: run.limit,
-        optionIds,
-        promptInstructions: instructions,
-      });
+      let businessContactDiscovery: BusinessContactDiscoverySummary | undefined;
+      try {
+        const discovery = await this.brandBusinessContactDiscovery.discover({
+          brandCandidateId: run.brandCandidateId,
+          website: run.brandCandidate.website,
+          domain,
+        });
+        let contactsCreated = 0;
+        let contactsUpdated = 0;
+        for (const candidate of discovery.candidates) {
+          const result =
+            await this.brandBusinessContactService.upsertFromDiscovery({
+              brandCandidateId: run.brandCandidateId,
+              email: candidate.emailNormalized,
+              sourceUrl: candidate.sourceUrl,
+              evidenceSnippet: candidate.evidenceSnippet,
+              commercialRelevance: candidate.commercialRelevance,
+              isGeneric: candidate.isGeneric,
+            });
+          if (result.created) {
+            contactsCreated += 1;
+          } else if (result.updated) {
+            contactsUpdated += 1;
+          }
+        }
+        businessContactDiscovery = {
+          ...discovery.summary,
+          contactsCreated,
+          contactsUpdated,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          JSON.stringify({
+            event: 'brand_business_contact_discovery_failed',
+            runId: run.id,
+            error: message,
+          }),
+        );
+        businessContactDiscovery = {
+          pagesAttempted: 0,
+          pagesSucceeded: 0,
+          pagesFailed: 0,
+          emailsFound: 0,
+          contactsCreated: 0,
+          contactsUpdated: 0,
+        };
+      }
+
+      const { contacts: rawContacts, searchMetadata: peopleSearchMetadata } =
+        await provider.findContacts({
+          brandName: run.brandCandidate.name,
+          website: run.brandCandidate.website,
+          domain,
+          limit: run.limit,
+          optionIds,
+          promptInstructions: instructions,
+        });
+
+      const searchMetadata = this.mergeSearchMetadata(
+        peopleSearchMetadata,
+        businessContactDiscovery,
+      );
 
       const existing = await this.prisma.lead.findMany({
         where: { brandCandidateId: run.brandCandidateId },
@@ -728,6 +792,12 @@ export class LeadDiscoveryService {
         data: {
           status: LeadDiscoveryStatus.COMPLETED,
           errorMessage: null,
+          ...(searchMetadata
+            ? {
+                searchMetadata:
+                  searchMetadata as unknown as Prisma.InputJsonValue,
+              }
+            : {}),
         },
       });
     } catch (error) {
@@ -742,5 +812,43 @@ export class LeadDiscoveryService {
       });
       throw error;
     }
+  }
+
+  private mergeSearchMetadata(
+    peopleSearchMetadata: LeadSearchMetadata | null,
+    businessContactDiscovery: BusinessContactDiscoverySummary | undefined,
+  ): LeadSearchMetadata | null {
+    const attempted2A = Boolean(businessContactDiscovery);
+    if (!peopleSearchMetadata && !attempted2A) {
+      return null;
+    }
+
+    const tracks: Array<'2A' | '2B' | '2C'> = [];
+    if (attempted2A) {
+      tracks.push('2A');
+    }
+    tracks.push('2B');
+
+    if (peopleSearchMetadata) {
+      return {
+        ...peopleSearchMetadata,
+        tracks,
+        ...(attempted2A ? { businessContactDiscovery } : {}),
+      };
+    }
+
+    return {
+      strategy: 'unknown',
+      tracks,
+      priorityRoles: [],
+      scraperIds: [],
+      plannedQueriesCount: 0,
+      validatedQueriesCount: 0,
+      queries: [],
+      fallbackUsed: false,
+      fallbackReason: null,
+      searchHitsCount: 0,
+      ...(attempted2A ? { businessContactDiscovery } : {}),
+    };
   }
 }

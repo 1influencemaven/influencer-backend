@@ -96,6 +96,18 @@ export const envValidationSchema = Joi.object({
 
   MAX_EMAIL_CANDIDATES: Joi.number().integer().min(1).max(100).default(20),
 
+  MAX_BRAND_BUSINESS_CONTACT_PAGES: Joi.number()
+    .integer()
+    .min(1)
+    .max(20)
+    .default(12),
+
+  MAX_BRAND_BUSINESS_CONTACTS: Joi.number()
+    .integer()
+    .min(1)
+    .max(50)
+    .default(15),
+
   LEAD_DISCOVERY_SEARCH_FALLBACK: Joi.string()
     .valid('none', 'tavily')
     .default('tavily'),

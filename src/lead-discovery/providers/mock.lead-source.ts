@@ -1,5 +1,6 @@
 import type {
   LeadFindContext,
+  LeadFindResult,
   LeadSourceOption,
   LeadSourceProvider,
   RawLeadContact,
@@ -23,7 +24,7 @@ export class MockLeadSource implements LeadSourceProvider {
     ];
   }
 
-  async findContacts(context: LeadFindContext): Promise<RawLeadContact[]> {
+  async findContacts(context: LeadFindContext): Promise<LeadFindResult> {
     const domain = context.domain || 'example.com';
     const base: RawLeadContact[] = [
       {
@@ -61,6 +62,9 @@ export class MockLeadSource implements LeadSourceProvider {
       },
     ];
 
-    return base.slice(0, Math.max(context.limit, 1));
+    return {
+      contacts: base.slice(0, Math.max(context.limit, 1)),
+      searchMetadata: null,
+    };
   }
 }

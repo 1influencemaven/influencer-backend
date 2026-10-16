@@ -34,6 +34,7 @@ export const contactChannelSelect = {
   source: true,
   sourceUrl: true,
   isGeneric: true,
+  commercialRelevance: true,
   metadata: true,
   createdAt: true,
   updatedAt: true,

@@ -5,6 +5,7 @@ jest.mock('../prisma/prisma.service', () => ({
 import { BadRequestException, ConflictException } from '@nestjs/common';
 
 import {
+  CommercialRelevance,
   ContactChannelSource,
   ContactChannelStatus,
   ContactChannelType,
@@ -60,6 +61,7 @@ describe('ContactChannelService', () => {
       source: ContactChannelSource.PUBLIC_WEB,
       sourceUrl: 'https://company.com/contact',
       isGeneric: true,
+      commercialRelevance: CommercialRelevance.UNKNOWN,
       metadata: {},
       createdAt: new Date(),
       updatedAt: new Date(),

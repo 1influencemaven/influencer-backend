@@ -12,6 +12,8 @@ import { BrightDataSearchClient } from './clients/brightdata-search.client';
 import { LeadDiscoveryController } from './lead-discovery.controller';
 import { LeadDiscoveryService } from './lead-discovery.service';
 import { ContactChannelService } from './contact-channel.service';
+import { BrandBusinessContactService } from './brand-business-contact.service';
+import { BrandBusinessContactDiscoveryService } from './brand-business-contact-discovery.service';
 import {
   hasConfiguredApiKey,
   LeadSourceRegistry,
@@ -39,6 +41,8 @@ import { PublicEmailEvidenceDiscoveryService } from './email-discovery/public-em
   providers: [
     LeadDiscoveryService,
     ContactChannelService,
+    BrandBusinessContactService,
+    BrandBusinessContactDiscoveryService,
     BrightDataClient,
     BrightDataSearchClient,
     LeadDiscoverySearchOrchestrator,

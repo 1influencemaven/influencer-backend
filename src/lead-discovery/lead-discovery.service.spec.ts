@@ -95,6 +95,37 @@ describe('LeadDiscoveryService', () => {
     }),
   };
 
+  const brandBusinessContactDiscovery = {
+    discover: jest.fn().mockResolvedValue({
+      candidates: [
+        {
+          email: 'partnerships@acme.com',
+          emailNormalized: 'partnerships@acme.com',
+          isGeneric: true,
+          commercialRelevance: 'HIGH',
+          sourceUrl: 'https://acme.com/partnerships',
+          evidenceSnippet: 'partnerships@acme.com',
+        },
+      ],
+      summary: {
+        pagesAttempted: 12,
+        pagesSucceeded: 1,
+        pagesFailed: 11,
+        emailsFound: 1,
+        contactsCreated: 0,
+        contactsUpdated: 0,
+      },
+    }),
+  };
+
+  const brandBusinessContactService = {
+    upsertFromDiscovery: jest.fn().mockResolvedValue({
+      id: 'bbc1',
+      created: true,
+      updated: false,
+    }),
+  };
+
   let service: LeadDiscoveryService;
 
   const leadRow = {
@@ -132,6 +163,8 @@ describe('LeadDiscoveryService', () => {
       aiPromptsService as never,
       contactChannelService as never,
       publicEmailEvidence as never,
+      brandBusinessContactDiscovery as never,
+      brandBusinessContactService as never,
       queue as never,
     );
   });
@@ -501,13 +534,173 @@ describe('LeadDiscoveryService', () => {
       expect(prisma.lead.create).toHaveBeenCalled();
       expect(publicEmailEvidence.discoverForProfile).toHaveBeenCalled();
       expect(contactChannelService.persistPublicEmailEnrichment).toHaveBeenCalled();
+      expect(brandBusinessContactDiscovery.discover).toHaveBeenCalled();
+      expect(brandBusinessContactService.upsertFromDiscovery).toHaveBeenCalled();
       expect(prisma.leadDiscoveryRun.update).toHaveBeenCalledWith({
         where: { id: 'run1' },
         data: {
           status: LeadDiscoveryStatus.COMPLETED,
           errorMessage: null,
+          searchMetadata: expect.objectContaining({
+            tracks: ['2A', '2B'],
+            businessContactDiscovery: expect.objectContaining({
+              contactsCreated: 1,
+              emailsFound: 1,
+            }),
+          }),
         },
       });
+    });
+
+    it('runs 2A without creating Leads from business contacts', async () => {
+      await service.executeDiscovery('run1');
+
+      expect(brandBusinessContactService.upsertFromDiscovery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'partnerships@acme.com',
+          sourceUrl: 'https://acme.com/partnerships',
+        }),
+      );
+      const createdNames = prisma.lead.create.mock.calls.map(
+        (call: [{ data: { contactName: string } }]) => call[0].data.contactName,
+      );
+      expect(createdNames).not.toContain('Partnerships');
+      expect(createdNames).not.toContain('partnerships@acme.com');
+    });
+
+    it('continues 2B when 2A discovery throws', async () => {
+      brandBusinessContactDiscovery.discover.mockRejectedValueOnce(
+        new Error('unlocker down'),
+      );
+
+      await service.executeDiscovery('run1');
+
+      expect(prisma.lead.create).toHaveBeenCalled();
+      expect(prisma.leadDiscoveryRun.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: LeadDiscoveryStatus.COMPLETED,
+            searchMetadata: expect.objectContaining({
+              tracks: ['2A', '2B'],
+              businessContactDiscovery: expect.objectContaining({
+                contactsCreated: 0,
+                emailsFound: 0,
+              }),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('skips 2A upserts when website is missing and still completes 2B', async () => {
+      prisma.leadDiscoveryRun.findUnique.mockResolvedValue({
+        ...runRow,
+        brandCandidate: {
+          ...runRow.brandCandidate,
+          website: '',
+          domain: '',
+        },
+      });
+      brandBusinessContactDiscovery.discover.mockResolvedValueOnce({
+        candidates: [],
+        summary: {
+          pagesAttempted: 0,
+          pagesSucceeded: 0,
+          pagesFailed: 0,
+          emailsFound: 0,
+          contactsCreated: 0,
+          contactsUpdated: 0,
+        },
+      });
+
+      await service.executeDiscovery('run1');
+
+      expect(brandBusinessContactDiscovery.discover).toHaveBeenCalled();
+      expect(brandBusinessContactService.upsertFromDiscovery).not.toHaveBeenCalled();
+      expect(prisma.lead.create).toHaveBeenCalled();
+      expect(prisma.leadDiscoveryRun.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: LeadDiscoveryStatus.COMPLETED,
+            searchMetadata: expect.objectContaining({
+              tracks: ['2A', '2B'],
+              businessContactDiscovery: expect.objectContaining({
+                pagesAttempted: 0,
+                emailsFound: 0,
+              }),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('persists searchMetadata on COMPLETED when provider returns it', async () => {
+      const searchMetadata = {
+        strategy: 'manual' as const,
+        tracks: ['2B' as const],
+        priorityRoles: ['CEO'],
+        scraperIds: ['gd_me5ppxjr2ge6icjuh0'],
+        plannedQueriesCount: 4,
+        validatedQueriesCount: 2,
+        queries: ['q1', 'q2'],
+        fallbackUsed: false,
+        fallbackReason: null,
+        searchHitsCount: 12,
+      };
+      jest.spyOn(mockSource, 'findContacts').mockResolvedValueOnce({
+        contacts: [
+          {
+            contactName: 'Ada',
+            title: 'CMO',
+            email: 'ada@acme.com',
+            profileUrl: 'https://linkedin.com/in/ada',
+            source: 'brightdata',
+            sourceOptionId: 'gd_me5ppxjr2ge6icjuh0',
+          },
+        ],
+        searchMetadata,
+      });
+
+      await service.executeDiscovery('run1');
+
+      expect(prisma.leadDiscoveryRun.update).toHaveBeenCalledWith({
+        where: { id: 'run1' },
+        data: {
+          status: LeadDiscoveryStatus.COMPLETED,
+          errorMessage: null,
+          searchMetadata: expect.objectContaining({
+            strategy: 'manual',
+            tracks: ['2A', '2B'],
+            searchHitsCount: 12,
+            businessContactDiscovery: expect.objectContaining({
+              contactsCreated: 1,
+            }),
+          }),
+        },
+      });
+    });
+
+    it('does not write searchMetadata on FAILED', async () => {
+      jest.spyOn(mockSource, 'findContacts').mockRejectedValueOnce(
+        new Error('provider boom'),
+      );
+
+      await expect(service.executeDiscovery('run1')).rejects.toThrow(
+        'provider boom',
+      );
+
+      expect(prisma.leadDiscoveryRun.update).toHaveBeenCalledWith({
+        where: { id: 'run1' },
+        data: {
+          status: LeadDiscoveryStatus.FAILED,
+          errorMessage: 'provider boom',
+        },
+      });
+      expect(prisma.leadDiscoveryRun.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ searchMetadata: expect.anything() }),
+        }),
+      );
     });
 
     it('keeps lead when public email enrichment fails', async () => {

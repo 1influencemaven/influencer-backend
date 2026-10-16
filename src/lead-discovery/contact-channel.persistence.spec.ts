@@ -119,6 +119,23 @@ describe('ContactChannel persistence (D2)', () => {
     ).rejects.toMatchObject({ code: '23505' });
   });
 
+  it('defaults commercialRelevance to UNKNOWN for historical-compatible inserts', async () => {
+    const { leadId } = await seedLead();
+    const channelId = await insertChannel(
+      leadId,
+      'EMAIL',
+      'info@test.com',
+      'info@test.com',
+    );
+
+    const res = await pool.query<{ commercialRelevance: string }>(
+      `SELECT "commercialRelevance" FROM "ContactChannel" WHERE id = $1`,
+      [channelId],
+    );
+
+    expect(res.rows[0]?.commercialRelevance).toBe('UNKNOWN');
+  });
+
   it('cascades delete when Lead is removed', async () => {
     const { leadId } = await seedLead();
     const channelId = await insertChannel(
