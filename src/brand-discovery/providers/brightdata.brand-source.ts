@@ -3,9 +3,9 @@ import { ConfigService } from '@nestjs/config';
 
 import { AiService } from '../../ai/ai.service';
 import type {
+  BrandDiscoverResult,
   BrandSourceContext,
   BrandSourceProvider,
-  RawBrandCandidate,
 } from '../interfaces/brand-source-provider.interface';
 import { ensureWebsiteUrl, normalizeDomain } from '../utils/brand-domain.util';
 
@@ -28,7 +28,7 @@ export class BrightDataBrandSource implements BrandSourceProvider {
     );
   }
 
-  async discover(context: BrandSourceContext): Promise<RawBrandCandidate[]> {
+  async discover(context: BrandSourceContext): Promise<BrandDiscoverResult> {
     const records = await this.fetchCompanyRecords(context);
     const seedBrands = records
       .map((record) => this.mapRecord(record))
@@ -37,7 +37,7 @@ export class BrightDataBrandSource implements BrandSourceProvider {
 
     if (seedBrands.length === 0) {
       this.logger.warn('BrightData returned no mappable company records');
-      return [];
+      return { candidates: [], searchMetadata: null };
     }
 
     const scored = await this.aiService.scoreBrandCandidates({
@@ -56,7 +56,7 @@ export class BrightDataBrandSource implements BrandSourceProvider {
       instructions: context.promptInstructions,
     });
 
-    return scored.brands.map((brand) => {
+    const candidates = scored.brands.map((brand) => {
       const website = ensureWebsiteUrl(brand.website);
       return {
         name: brand.name,
@@ -73,6 +73,8 @@ export class BrightDataBrandSource implements BrandSourceProvider {
           : [website],
       };
     });
+
+    return { candidates, searchMetadata: null };
   }
 
   private async fetchCompanyRecords(

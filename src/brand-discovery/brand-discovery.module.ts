@@ -7,6 +7,7 @@ import { AiService } from '../ai/ai.service';
 import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUES } from '../bullmq/queue.constants';
+import { BrightDataSearchClient } from '../lead-discovery/clients/brightdata-search.client';
 import { LeadDiscoveryModule } from '../lead-discovery/lead-discovery.module';
 import { BrandDiscoveryController } from './brand-discovery.controller';
 import { BrandDiscoveryService } from './brand-discovery.service';
@@ -18,8 +19,8 @@ import {
 import type { BrandSourceProvider } from './interfaces/brand-source-provider.interface';
 import { FindBrandsProcessor } from './processors/find-brands.processor';
 import { AiPlusTavilyBrandSource } from './providers/ai-plus-tavily.brand-source';
+import { BrightDataWebSearchProvider } from './providers/brightdata-web-search.provider';
 import { MockBrandSource } from './providers/mock.brand-source';
-import { TavilyWebSearchProvider } from './providers/tavily-web-search.provider';
 
 @Module({
   imports: [
@@ -41,18 +42,20 @@ import { TavilyWebSearchProvider } from './providers/tavily-web-search.provider'
         const providers = new Map<BrandSourceId, BrandSourceProvider>();
 
         if (configService.get<string>('NODE_ENV') === 'test') {
-          providers.set('tavily', new MockBrandSource());
+          providers.set('brightdata', new MockBrandSource());
           return new BrandSourceRegistry(providers, configService);
         }
 
-        if (!hasConfiguredApiKey(configService, 'TAVILY_API_KEY')) {
+        if (!hasConfiguredApiKey(configService, 'BRIGHTDATA_API_KEY')) {
           return new BrandSourceRegistry(providers, configService);
         }
 
-        const webSearch = new TavilyWebSearchProvider(configService);
+        const webSearch = new BrightDataWebSearchProvider(
+          new BrightDataSearchClient(configService),
+        );
         providers.set(
-          'tavily',
-          new AiPlusTavilyBrandSource(webSearch, aiService),
+          'brightdata',
+          new AiPlusTavilyBrandSource(webSearch, aiService, configService),
         );
 
         return new BrandSourceRegistry(providers, configService);

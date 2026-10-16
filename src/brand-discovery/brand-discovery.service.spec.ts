@@ -140,10 +140,13 @@ describe('BrandDiscoveryService.executeDiscovery cross-run dedupe', () => {
       { domain: 'infinixmobility.com' },
     ]);
 
-    discover.mockResolvedValue([
-      candidate('Movavi', 'movavi.com'),
-      candidate('Senic', 'senic.com'),
-    ]);
+    discover.mockResolvedValue({
+      candidates: [
+        candidate('Movavi', 'movavi.com'),
+        candidate('Senic', 'senic.com'),
+      ],
+      searchMetadata: null,
+    });
 
     await service.executeDiscovery('run-2', 'inf-1');
 
@@ -165,17 +168,46 @@ describe('BrandDiscoveryService.executeDiscovery cross-run dedupe', () => {
     });
   });
 
+  it('persists searchMetadata on COMPLETED when provider returns it', async () => {
+    prismaService.brandCandidate.findMany.mockResolvedValue([]);
+    const searchMetadata = {
+      strategy: 'llm' as const,
+      queries: ['software brands Global creator partnerships'],
+      plannedQueriesCount: 1,
+      validatedQueriesCount: 1,
+      fallbackUsed: false,
+      searchHitsCount: 6,
+    };
+    discover.mockResolvedValue({
+      candidates: [candidate('Senic', 'senic.com')],
+      searchMetadata,
+    });
+
+    await service.executeDiscovery('run-2', 'inf-1');
+
+    expect(prismaService.brandDiscoveryRun.update).toHaveBeenCalledWith({
+      where: { id: 'run-2' },
+      data: {
+        status: BrandDiscoveryStatus.COMPLETED,
+        searchMetadata,
+      },
+    });
+  });
+
   it('fills up to run.limit with novel brands after excluding existing', async () => {
     prismaService.brandCandidate.findMany.mockResolvedValue([
       { domain: 'movavi.com' },
     ]);
 
-    discover.mockResolvedValue([
-      candidate('Movavi', 'movavi.com', { score: 95 }),
-      candidate('Senic', 'senic.com', { score: 90 }),
-      candidate('Acme', 'acme.com', { score: 85 }),
-      candidate('Beta', 'beta.com', { score: 70 }),
-    ]);
+    discover.mockResolvedValue({
+      candidates: [
+        candidate('Movavi', 'movavi.com', { score: 95 }),
+        candidate('Senic', 'senic.com', { score: 90 }),
+        candidate('Acme', 'acme.com', { score: 85 }),
+        candidate('Beta', 'beta.com', { score: 70 }),
+      ],
+      searchMetadata: null,
+    });
 
     await service.executeDiscovery('run-2', 'inf-1');
 
@@ -192,10 +224,13 @@ describe('BrandDiscoveryService.executeDiscovery cross-run dedupe', () => {
       { domain: 'movavi.com' },
       { domain: 'senic.com' },
     ]);
-    discover.mockResolvedValue([
-      candidate('Movavi', 'movavi.com'),
-      candidate('Senic', 'www.senic.com'),
-    ]);
+    discover.mockResolvedValue({
+      candidates: [
+        candidate('Movavi', 'movavi.com'),
+        candidate('Senic', 'www.senic.com'),
+      ],
+      searchMetadata: null,
+    });
 
     await service.executeDiscovery('run-2', 'inf-1');
 

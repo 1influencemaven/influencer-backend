@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 
 import type {
+  BrandDiscoverResult,
   BrandSourceContext,
   BrandSourceProvider,
-  RawBrandCandidate,
 } from '../interfaces/brand-source-provider.interface';
 import { normalizeDomain } from '../utils/brand-domain.util';
 
@@ -11,11 +11,11 @@ import { normalizeDomain } from '../utils/brand-domain.util';
 export class MockBrandSource implements BrandSourceProvider {
   readonly name = 'mock';
 
-  async discover(context: BrandSourceContext): Promise<RawBrandCandidate[]> {
+  async discover(context: BrandSourceContext): Promise<BrandDiscoverResult> {
     const sector = context.ibp.targetSectors[0] ?? 'lifestyle';
     const market = context.ibp.markets[0] ?? 'Spain';
 
-    return [
+    const candidates = [
       {
         name: 'Demo Wellness Co',
         website: 'https://www.demowellness.example',
@@ -41,5 +41,10 @@ export class MockBrandSource implements BrandSourceProvider {
         evidenceUrls: ['https://www.fitlife.es'],
       },
     ].slice(0, context.limit);
+
+    return {
+      candidates,
+      searchMetadata: null,
+    };
   }
 }

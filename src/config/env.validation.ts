@@ -54,14 +54,16 @@ export const envValidationSchema = Joi.object({
 
   ANTHROPIC_MODEL: Joi.string().default('claude-sonnet-4-20250514'),
 
-  BRAND_SOURCE: Joi.string().valid('tavily').default('tavily'),
+  // Runtime always uses Bright Data Search. `tavily` is accepted so leftover .env files still boot.
+  BRAND_SOURCE: Joi.string().valid('brightdata', 'tavily').default('brightdata'),
 
-  // Brand Discovery: solo Tavily. Bright Data se reserva a Lead Discovery.
-  TAVILY_API_KEY: Joi.string().when('NODE_ENV', {
-    is: 'test',
-    then: Joi.optional().allow(''),
-    otherwise: Joi.required(),
-  }),
+  // Brand Discovery search-query planning: llm (default) or deterministic templates.
+  BRAND_SEARCH_STRATEGY: Joi.string()
+    .valid('llm', 'templates')
+    .default('llm'),
+
+  // Optional: Lead Discovery search fallback only. Brand Discovery uses Bright Data.
+  TAVILY_API_KEY: Joi.string().optional().allow(''),
 
   BRIGHTDATA_API_KEY: Joi.string().optional().allow(''),
 

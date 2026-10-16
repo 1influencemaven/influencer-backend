@@ -3,8 +3,8 @@ import { ConfigService } from '@nestjs/config';
 
 import type { BrandSourceProvider } from './interfaces/brand-source-provider.interface';
 
-/** Brand Discovery Fase A: única fuente operativa. */
-export const BRAND_SOURCE_IDS = ['tavily'] as const;
+/** Brand Discovery Fase A: única fuente operativa (Unlocker Search). */
+export const BRAND_SOURCE_IDS = ['brightdata'] as const;
 export type BrandSourceId = (typeof BRAND_SOURCE_IDS)[number];
 
 export function isBrandSourceId(value: string): value is BrandSourceId {
@@ -28,28 +28,29 @@ export class BrandSourceRegistry {
   }
 
   getDefault(): BrandSourceId {
-    if (!this.providers.has('tavily')) {
+    if (!this.providers.has('brightdata')) {
       throw new BadRequestException(
-        'Tavily is not configured. Set TAVILY_API_KEY for Brand Discovery.',
+        'Bright Data is not configured. Set BRIGHTDATA_API_KEY for Brand Discovery.',
       );
     }
-    return 'tavily';
+    return 'brightdata';
   }
 
   /**
-   * Brand Discovery is Tavily-only. Legacy `source` values on old runs are ignored.
+   * Brand Discovery is Bright Data Search only. Legacy `tavily` source
+   * values on old runs are ignored.
    */
   resolve(_source?: string | null): {
     id: BrandSourceId;
     provider: BrandSourceProvider;
   } {
-    const provider = this.providers.get('tavily');
+    const provider = this.providers.get('brightdata');
     if (!provider) {
       throw new BadRequestException(
-        'Tavily is not configured. Set TAVILY_API_KEY for Brand Discovery.',
+        'Bright Data is not configured. Set BRIGHTDATA_API_KEY for Brand Discovery.',
       );
     }
-    return { id: 'tavily', provider };
+    return { id: 'brightdata', provider };
   }
 
   listSources(): BrandSourcesResponse {

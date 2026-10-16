@@ -13,6 +13,10 @@ import {
   buildScoreBrandsPrompt,
 } from './prompts/generate-brand-discovery.prompt';
 import {
+  buildBrandSearchStrategyCorrectionPrompt,
+  buildBrandSearchStrategyPrompt,
+} from './prompts/generate-brand-search-strategy.prompt';
+import {
   buildGenerateIbpPrompt,
   buildIbpCorrectionPrompt,
   DEFAULT_IBP_INSTRUCTIONS,
@@ -26,6 +30,10 @@ import {
   parseBrandDiscoveryOutput,
   type BrandDiscoveryOutput,
 } from './schemas/brand-discovery-output.schema';
+import {
+  parseBrandSearchStrategyPlan,
+  type BrandSearchStrategyPlan,
+} from './schemas/brand-search-strategy.schema';
 import { parseIbpOutput, type IbpOutput } from './schemas/ibp-output.schema';
 import {
   parseLeadDiscoveryPlan,
@@ -112,6 +120,35 @@ export class AiService {
         buildBrandDiscoveryCorrectionPrompt(rawResponse, errorMessage),
       );
       return parseBrandDiscoveryOutput(rawResponse);
+    }
+  }
+
+  /**
+   * Plans Bright Data search queries only. Does not search, score, or persist.
+   */
+  async planBrandSearch(input: {
+    influencerName: string;
+    niche?: string | null;
+    ibp: IbpCriteriaSnapshot;
+    maxQueries: number;
+  }): Promise<BrandSearchStrategyPlan> {
+    const prompt = buildBrandSearchStrategyPrompt(input);
+    let rawResponse = await this.llmProvider.complete(prompt);
+
+    try {
+      return parseBrandSearchStrategyPlan(rawResponse);
+    } catch (firstError) {
+      const errorMessage =
+        firstError instanceof Error ? firstError.message : 'Invalid JSON';
+
+      this.logger.warn(
+        `Brand search strategy parse failed, retrying: ${errorMessage}`,
+      );
+
+      rawResponse = await this.llmProvider.complete(
+        buildBrandSearchStrategyCorrectionPrompt(rawResponse, errorMessage),
+      );
+      return parseBrandSearchStrategyPlan(rawResponse);
     }
   }
 

@@ -32,6 +32,7 @@ export const brandDiscoveryRunSelect = {
   source: true,
   limit: true,
   ibpSnapshot: true,
+  searchMetadata: true,
   errorMessage: true,
   createdAt: true,
   updatedAt: true,
@@ -89,6 +90,7 @@ export class BrandDiscoveryService {
       source: string;
       limit: number;
       ibpSnapshot: Prisma.JsonValue;
+      searchMetadata: Prisma.JsonValue | null;
       errorMessage: string | null;
       createdAt: Date;
       updatedAt: Date;
@@ -287,13 +289,14 @@ export class BrandDiscoveryService {
       );
 
       const fetchLimit = Math.min(Math.max(run.limit * 2, run.limit), 20);
-      const rawCandidates = await brandSource.discover({
-        influencerName: influencer.name,
-        influencerNiche: influencer.niche,
-        ibp,
-        limit: fetchLimit,
-        promptInstructions: instructions,
-      });
+      const { candidates: rawCandidates, searchMetadata } =
+        await brandSource.discover({
+          influencerName: influencer.name,
+          influencerNiche: influencer.niche,
+          ibp,
+          limit: fetchLimit,
+          promptInstructions: instructions,
+        });
 
       const filtered = this.applyHardFilters(rawCandidates, ibp);
       const unique = dedupeByDomain(filtered) as typeof filtered;
@@ -323,7 +326,15 @@ export class BrandDiscoveryService {
 
         await tx.brandDiscoveryRun.update({
           where: { id: runId },
-          data: { status: BrandDiscoveryStatus.COMPLETED },
+          data: {
+            status: BrandDiscoveryStatus.COMPLETED,
+            ...(searchMetadata
+              ? {
+                  searchMetadata:
+                    searchMetadata as unknown as Prisma.InputJsonValue,
+                }
+              : {}),
+          },
         });
       });
     } catch (error) {

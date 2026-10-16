@@ -10,33 +10,34 @@ describe('BrandSourceRegistry', () => {
     discover: jest.fn(),
   });
 
-  function createRegistry(withTavily: boolean) {
+  function createRegistry(withBrightData: boolean) {
     const configService = {
       get: jest.fn(),
     } as unknown as ConfigService;
 
     const providers = new Map();
-    if (withTavily) {
-      providers.set('tavily', createProvider('ai+tavily'));
+    if (withBrightData) {
+      providers.set('brightdata', createProvider('ai+brightdata'));
     }
 
     return new BrandSourceRegistry(providers, configService);
   }
 
-  it('lists only tavily when configured', () => {
+  it('lists only brightdata when configured', () => {
     const registry = createRegistry(true);
-    expect(registry.listAvailable()).toEqual(['tavily']);
-    expect(registry.getDefault()).toBe('tavily');
+    expect(registry.listAvailable()).toEqual(['brightdata']);
+    expect(registry.getDefault()).toBe('brightdata');
   });
 
-  it('always resolves tavily even if another source is requested', () => {
+  it('always resolves brightdata even if another source is requested', () => {
     const registry = createRegistry(true);
-    expect(registry.resolve('brightdata').id).toBe('tavily');
-    expect(registry.resolve().id).toBe('tavily');
+    expect(registry.resolve('tavily').id).toBe('brightdata');
+    expect(registry.resolve().id).toBe('brightdata');
   });
 
-  it('throws when tavily is not configured', () => {
+  it('throws when Bright Data is not configured', () => {
     const registry = createRegistry(false);
     expect(() => registry.resolve()).toThrow(BadRequestException);
+    expect(() => registry.resolve()).toThrow(/BRIGHTDATA_API_KEY/);
   });
 });

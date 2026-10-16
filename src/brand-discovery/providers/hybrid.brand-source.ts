@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import type {
+  BrandDiscoverResult,
   BrandSourceContext,
   BrandSourceProvider,
   RawBrandCandidate,
@@ -16,13 +17,16 @@ export class HybridBrandSource implements BrandSourceProvider {
     private readonly brightDataSource: BrandSourceProvider,
   ) {}
 
-  async discover(context: BrandSourceContext): Promise<RawBrandCandidate[]> {
+  async discover(context: BrandSourceContext): Promise<BrandDiscoverResult> {
     const half = Math.max(1, Math.ceil(context.limit / 2));
 
-    const [tavilyResults, brightDataResults] = await Promise.all([
+    const [tavilyResult, brightDataResult] = await Promise.all([
       this.tavilySource.discover({ ...context, limit: half }),
       this.brightDataSource.discover({ ...context, limit: half }),
     ]);
+
+    const tavilyResults = tavilyResult.candidates;
+    const brightDataResults = brightDataResult.candidates;
 
     const merged = [
       ...brightDataResults.map((item) => ({
@@ -42,9 +46,11 @@ export class HybridBrandSource implements BrandSourceProvider {
       })),
     ];
 
-    return dedupeByDomain(merged).slice(
+    const candidates = dedupeByDomain(merged).slice(
       0,
       context.limit,
     ) as RawBrandCandidate[];
+
+    return { candidates, searchMetadata: null };
   }
 }

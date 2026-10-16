@@ -182,17 +182,19 @@ model LeadDiscoveryPromptTemplate {
 }
 
 model BrandDiscoveryRun {
-  id            String                @id @default(uuid())
-  influencerId  String
-  influencer    Influencer            @relation(fields: [influencerId], references: [id], onDelete: Cascade)
-  status        BrandDiscoveryStatus  @default(PROCESSING)
-  source        String
-  limit         Int                   @default(20)
-  ibpSnapshot   Json
-  errorMessage  String?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  candidates    BrandCandidate[]
+  id             String                @id @default(uuid())
+  influencerId   String
+  influencer     Influencer            @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  status         BrandDiscoveryStatus  @default(PROCESSING)
+  source         String
+  limit          Int                   @default(20)
+  ibpSnapshot    Json
+  /// Search strategy audit: strategy, queries used, counts, fallback. Null on historical runs.
+  searchMetadata Json?
+  errorMessage   String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  candidates     BrandCandidate[]
 
   @@index([influencerId])
   @@index([status])
