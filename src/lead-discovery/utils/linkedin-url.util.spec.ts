@@ -26,6 +26,19 @@ describe('linkedin-url.util', () => {
     ).toBeNull();
   });
 
+  it('rejects linkedin jobs and school pages', () => {
+    expect(
+      normalizePeopleLinkedInUrl('https://www.linkedin.com/jobs/view/12345'),
+    ).toBeNull();
+    expect(
+      normalizePeopleLinkedInUrl('https://www.linkedin.com/school/acme-u'),
+    ).toBeNull();
+  });
+
+  it('rejects non-linkedin hosts', () => {
+    expect(normalizePeopleLinkedInUrl('https://example.com/in/fake')).toBeNull();
+  });
+
   it('extracts slug', () => {
     expect(
       extractLinkedInSlug('https://www.linkedin.com/in/colleen-finlon'),

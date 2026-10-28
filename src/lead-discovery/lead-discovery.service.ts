@@ -52,6 +52,7 @@ import type {
   LeadSearchMetadata,
   RawLeadContact,
 } from './interfaces/lead-source-provider.interface';
+import { classifyLeadDiscoveryOutcome } from './utils/lead-discovery-outcome.util';
 
 export const leadDiscoveryRunSelect = {
   id: true,
@@ -609,11 +610,6 @@ export class LeadDiscoveryService {
           promptInstructions: instructions,
         });
 
-      const searchMetadata = this.mergeSearchMetadata(
-        peopleSearchMetadata,
-        businessContactDiscovery,
-      );
-
       const existing = await this.prisma.lead.findMany({
         where: { brandCandidateId: run.brandCandidateId },
         select: {
@@ -787,6 +783,24 @@ export class LeadDiscoveryService {
         }
       }
 
+      const personLeadsCreated = createdLeads.length;
+      const businessContactsCreated =
+        businessContactDiscovery?.contactsCreated ?? 0;
+
+      const classification = classifyLeadDiscoveryOutcome({
+        leadsPersisted: personLeadsCreated,
+        businessContactsCreated,
+        businessContactDiscovery,
+        peopleSearchTrace: peopleSearchMetadata?.peopleSearchTrace,
+      });
+
+      const searchMetadata = this.mergeSearchMetadata(
+        peopleSearchMetadata,
+        businessContactDiscovery,
+        classification,
+        { personLeadsCreated, businessContactsCreated },
+      );
+
       await this.prisma.leadDiscoveryRun.update({
         where: { id: run.id },
         data: {
@@ -817,10 +831,34 @@ export class LeadDiscoveryService {
   private mergeSearchMetadata(
     peopleSearchMetadata: LeadSearchMetadata | null,
     businessContactDiscovery: BusinessContactDiscoverySummary | undefined,
+    classification: ReturnType<typeof classifyLeadDiscoveryOutcome>,
+    counts: {
+      personLeadsCreated: number;
+      businessContactsCreated: number;
+    },
   ): LeadSearchMetadata | null {
     const attempted2A = Boolean(businessContactDiscovery);
+    const countFields = {
+      personLeadsCreated: counts.personLeadsCreated,
+      businessContactsCreated: counts.businessContactsCreated,
+    };
     if (!peopleSearchMetadata && !attempted2A) {
-      return null;
+      return {
+        strategy: 'unknown',
+        tracks: ['2B'],
+        priorityRoles: [],
+        scraperIds: [],
+        plannedQueriesCount: 0,
+        validatedQueriesCount: 0,
+        queries: [],
+        fallbackUsed: false,
+        fallbackReason: null,
+        searchHitsCount: 0,
+        outcome: classification.outcome,
+        warningCode: classification.warningCode,
+        warningMessage: classification.warningMessage,
+        ...countFields,
+      };
     }
 
     const tracks: Array<'2A' | '2B' | '2C'> = [];
@@ -829,10 +867,18 @@ export class LeadDiscoveryService {
     }
     tracks.push('2B');
 
+    const outcomeFields = {
+      outcome: classification.outcome,
+      warningCode: classification.warningCode,
+      warningMessage: classification.warningMessage,
+      ...countFields,
+    };
+
     if (peopleSearchMetadata) {
       return {
         ...peopleSearchMetadata,
         tracks,
+        ...outcomeFields,
         ...(attempted2A ? { businessContactDiscovery } : {}),
       };
     }
@@ -848,6 +894,7 @@ export class LeadDiscoveryService {
       fallbackUsed: false,
       fallbackReason: null,
       searchHitsCount: 0,
+      ...outcomeFields,
       ...(attempted2A ? { businessContactDiscovery } : {}),
     };
   }

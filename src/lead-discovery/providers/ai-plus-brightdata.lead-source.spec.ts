@@ -49,10 +49,13 @@ describe('AiPlusBrightDataLeadSource searchMetadata', () => {
       trace: {
         searchRunId: 'sr-1',
         brightDataRequests: 2,
+        brightDataSearchFailures: 0,
         tavilyRequests: 0,
         fallbackActivated: false,
         queriesExecuted: 2,
+        linkedinUrlValidated: 1,
         linkedinCandidatesFound: 1,
+        qualifiedCandidates: 1,
         selectedUrls: ['https://linkedin.com/in/ada'],
         failures: [],
       },
@@ -75,18 +78,31 @@ describe('AiPlusBrightDataLeadSource searchMetadata', () => {
 
     const result = await provider.findContacts(ctx);
 
-    expect(result.searchMetadata).toEqual({
-      strategy: 'llm',
-      tracks: ['2B'],
-      priorityRoles: ['Partnerships', 'CMO'],
-      scraperIds: ['gd_people'],
-      plannedQueriesCount: 3,
-      validatedQueriesCount: 2,
-      queries: ['q1', 'q2'],
-      fallbackUsed: false,
-      fallbackReason: null,
-      searchHitsCount: 28,
-    });
+    expect(result.searchMetadata).toEqual(
+      expect.objectContaining({
+        strategy: 'llm',
+        tracks: ['2B'],
+        priorityRoles: ['Partnerships', 'CMO'],
+        scraperIds: ['gd_people'],
+        plannedQueriesCount: 3,
+        validatedQueriesCount: 2,
+        queries: ['q1', 'q2'],
+        fallbackUsed: false,
+        fallbackReason: null,
+        searchHitsCount: 28,
+        peopleSearchTrace: expect.objectContaining({
+          searchHitsReceived: 28,
+          linkedinUrlValidated: 1,
+          scoredCandidates: 1,
+          qualifiedCandidates: 1,
+          selectedProfileUrlsCount: 1,
+          scraperInvocations: 1,
+          scraperSuccesses: 1,
+          scraperFailures: 0,
+          brightDataSearchFailures: 0,
+        }),
+      }),
+    );
     expect(result.contacts).toHaveLength(1);
   });
 
@@ -114,10 +130,13 @@ describe('AiPlusBrightDataLeadSource searchMetadata', () => {
       trace: {
         searchRunId: 'sr-2',
         brightDataRequests: 1,
+        brightDataSearchFailures: 1,
         tavilyRequests: 1,
         fallbackActivated: true,
         queriesExecuted: 1,
+        linkedinUrlValidated: 1,
         linkedinCandidatesFound: 1,
+        qualifiedCandidates: 1,
         selectedUrls: ['https://linkedin.com/in/ada'],
         failures: [],
       },
@@ -142,12 +161,15 @@ describe('AiPlusBrightDataLeadSource searchMetadata', () => {
       trace: {
         searchRunId: 'sr-3',
         brightDataRequests: 1,
+        brightDataSearchFailures: 1,
         tavilyRequests: 0,
         fallbackActivated: false,
         queriesExecuted: 1,
+        linkedinUrlValidated: 0,
         linkedinCandidatesFound: 0,
+        qualifiedCandidates: 0,
         selectedUrls: [],
-        failures: [],
+        failures: [{ code: 'NETWORK_ERROR', message: 'x', retryable: true, query: 'q1' }],
       },
     });
 
@@ -156,5 +178,38 @@ describe('AiPlusBrightDataLeadSource searchMetadata', () => {
     expect(result.contacts).toEqual([]);
     expect(result.searchMetadata?.strategy).toBe('llm');
     expect(result.searchMetadata?.tracks).toEqual(['2B']);
+    expect(result.searchMetadata?.peopleSearchTrace).toEqual(
+      expect.objectContaining({
+        searchHitsReceived: 0,
+        linkedinUrlValidated: 0,
+        selectedProfileUrlsCount: 0,
+        scraperInvocations: 0,
+        scraperSuccesses: 0,
+        scraperFailures: 0,
+        brightDataSearchFailures: 1,
+        searchFailureCodes: ['NETWORK_ERROR'],
+      }),
+    );
+  });
+
+  it('records scraper failure with zero successes', async () => {
+    aiService.planLeadDiscovery.mockResolvedValue({
+      scraperIds: ['gd_people'],
+      priorityRoles: ['CEO'],
+    });
+    client.triggerAndCollect.mockRejectedValueOnce(new TypeError('fetch failed'));
+
+    const result = await provider.findContacts(ctx);
+
+    expect(result.contacts).toEqual([]);
+    expect(result.searchMetadata?.peopleSearchTrace).toEqual(
+      expect.objectContaining({
+        selectedProfileUrlsCount: 1,
+        scraperInvocations: 1,
+        scraperSuccesses: 0,
+        scraperFailures: 1,
+        scraperErrorCodes: ['TypeError'],
+      }),
+    );
   });
 });

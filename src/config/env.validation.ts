@@ -129,4 +129,7 @@ export const envValidationSchema = Joi.object({
   APOLLO_API_KEY: Joi.string().optional().allow(''),
 
   BRAND_DISCOVERY_LIMIT: Joi.number().integer().min(1).max(20).default(20),
+
+  // ADMIN Unlocker diagnostic probe (local only; ignored / forbidden in production).
+  UNLOCKER_DIAGNOSTICS_ENABLED: Joi.boolean().default(false),
 });

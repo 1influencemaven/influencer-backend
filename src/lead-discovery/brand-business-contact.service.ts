@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import {
   CommercialRelevance,
@@ -17,6 +17,20 @@ export type BusinessContactEvidence = {
   sourceUrl: string;
   evidenceSnippet: string;
   discoveredAt: string;
+};
+
+export type BrandBusinessContactResponse = {
+  id: string;
+  brandCandidateId: string;
+  email: string;
+  label: string | null;
+  isGeneric: boolean;
+  commercialRelevance: CommercialRelevance;
+  source: ContactChannelSource;
+  sourceUrl: string | null;
+  evidences: BusinessContactEvidence[];
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 export type UpsertBrandBusinessContactInput = {
@@ -60,6 +74,54 @@ function pickStrongerRelevance(
 @Injectable()
 export class BrandBusinessContactService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Read-only Visibility (v2 Phase 1).
+   * 404 if BrandCandidate missing; empty array if none persisted.
+   */
+  async listByBrandCandidateId(
+    brandCandidateId: string,
+  ): Promise<BrandBusinessContactResponse[]> {
+    const brand = await this.prisma.brandCandidate.findUnique({
+      where: { id: brandCandidateId },
+      select: { id: true },
+    });
+    if (!brand) {
+      throw new NotFoundException(
+        `Brand candidate ${brandCandidateId} not found`,
+      );
+    }
+
+    const rows = await this.prisma.brandBusinessContact.findMany({
+      where: { brandCandidateId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Prefer HIGH first (business rank, not Prisma enum ordinal).
+    const ranked = [...rows].sort((a, b) => {
+      const rankDiff =
+        relevanceRank(b.commercialRelevance) -
+        relevanceRank(a.commercialRelevance);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+      return b.createdAt.getTime() - a.createdAt.getTime();
+    });
+
+    return ranked.map((row) => ({
+      id: row.id,
+      brandCandidateId: row.brandCandidateId,
+      email: row.email,
+      label: row.label,
+      isGeneric: row.isGeneric,
+      commercialRelevance: row.commercialRelevance,
+      source: row.source,
+      sourceUrl: row.sourceUrl,
+      evidences: this.readEvidences(row.metadata),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+  }
 
   async upsertFromDiscovery(
     input: UpsertBrandBusinessContactInput,

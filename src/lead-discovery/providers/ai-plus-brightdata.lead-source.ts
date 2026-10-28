@@ -19,6 +19,7 @@ import {
   LINKEDIN_PEOPLE_SCRAPER_IDS,
   filterEmailContactCatalog,
 } from '../utils/brightdata-catalog.util';
+import { buildPeopleSearchTrace } from '../utils/lead-discovery-outcome.util';
 
 type BrightDataRecord = Record<string, unknown>;
 
@@ -108,54 +109,74 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
       priorityRoles,
     });
 
+    const profileUrls = searchResult.profileUrls;
+    let scraperInvocations = 0;
+    let scraperSuccesses = 0;
+    let scraperFailures = 0;
+    const scraperErrorCodes: string[] = [];
+    const contacts: RawLeadContact[] = [];
+
+    if (profileUrls.length === 0) {
+      this.logger.warn(
+        `No LinkedIn people URLs found via Bright Data search for ${context.brandName}`,
+      );
+    } else {
+      this.logger.log(
+        JSON.stringify({
+          event: 'lead_search_complete',
+          brand: context.brandName,
+          searchRunId: searchResult.trace.searchRunId,
+          fallbackActivated: searchResult.trace.fallbackActivated,
+          profileUrlCount: profileUrls.length,
+          scraperIds,
+        }),
+      );
+
+      const inputs = profileUrls
+        .slice(0, Math.max(context.limit, 1))
+        .map((url) => ({
+          url,
+        }));
+
+      for (const scraperId of scraperIds) {
+        scraperInvocations += 1;
+        try {
+          const records = await this.client.triggerAndCollect(scraperId, inputs);
+          scraperSuccesses += 1;
+          for (const record of records) {
+            const mapped = this.mapRecord(
+              record,
+              scraperId,
+              searchResult.trace,
+            );
+            if (mapped) {
+              contacts.push(mapped);
+            }
+          }
+        } catch (error) {
+          scraperFailures += 1;
+          const code =
+            error instanceof Error && error.name
+              ? error.name.slice(0, 64)
+              : 'scraper_error';
+          scraperErrorCodes.push(code);
+          this.logger.warn(
+            `Autonomous Bright Data scraper ${scraperId} failed: ${String(error)}`,
+          );
+        }
+      }
+    }
+
     const searchMetadata = this.buildSearchMetadata({
       priorityRoles,
       scraperIds,
       aiPlanFailed,
       searchResult,
+      scraperInvocations,
+      scraperSuccesses,
+      scraperFailures,
+      scraperErrorCodes,
     });
-
-    const profileUrls = searchResult.profileUrls;
-    if (profileUrls.length === 0) {
-      this.logger.warn(
-        `No LinkedIn people URLs found via Bright Data search for ${context.brandName}`,
-      );
-      return { contacts: [], searchMetadata };
-    }
-
-    this.logger.log(
-      JSON.stringify({
-        event: 'lead_search_complete',
-        brand: context.brandName,
-        searchRunId: searchResult.trace.searchRunId,
-        fallbackActivated: searchResult.trace.fallbackActivated,
-        profileUrlCount: profileUrls.length,
-        scraperIds,
-      }),
-    );
-
-    const contacts: RawLeadContact[] = [];
-    const inputs = profileUrls
-      .slice(0, Math.max(context.limit, 1))
-      .map((url) => ({
-        url,
-      }));
-
-    for (const scraperId of scraperIds) {
-      try {
-        const records = await this.client.triggerAndCollect(scraperId, inputs);
-        for (const record of records) {
-          const mapped = this.mapRecord(record, scraperId, searchResult.trace);
-          if (mapped) {
-            contacts.push(mapped);
-          }
-        }
-      } catch (error) {
-        this.logger.warn(
-          `Autonomous Bright Data scraper ${scraperId} failed: ${String(error)}`,
-        );
-      }
-    }
 
     return { contacts, searchMetadata };
   }
@@ -167,9 +188,14 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
     searchResult: Awaited<
       ReturnType<LeadDiscoverySearchOrchestrator['discoverProfileUrls']>
     >;
+    scraperInvocations: number;
+    scraperSuccesses: number;
+    scraperFailures: number;
+    scraperErrorCodes: string[];
   }): LeadSearchMetadata {
     const searchTavily = args.searchResult.trace.fallbackActivated;
     const fallbackUsed = args.aiPlanFailed || searchTavily;
+    const trace = args.searchResult.trace;
     return {
       strategy: 'llm',
       tracks: ['2B'],
@@ -181,6 +207,26 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
       fallbackUsed,
       fallbackReason: resolveLeadFallbackReason(args.aiPlanFailed, searchTavily),
       searchHitsCount: args.searchResult.searchHitsCount,
+      peopleSearchTrace: buildPeopleSearchTrace({
+        searchHitsReceived: args.searchResult.searchHitsCount,
+        linkedinUrlValidated: trace.linkedinUrlValidated,
+        scoredCandidates: trace.linkedinUrlValidated,
+        qualifiedCandidates: trace.qualifiedCandidates,
+        selectedProfileUrls: trace.selectedUrls,
+        brightDataSearchRequests: trace.brightDataRequests,
+        brightDataSearchFailures: trace.brightDataSearchFailures,
+        tavilyFallbackRequests: trace.tavilyRequests,
+        scraperInvocations: args.scraperInvocations,
+        scraperSuccesses: args.scraperSuccesses,
+        scraperFailures: args.scraperFailures,
+        searchFailureCodes: trace.failures.map((f) => f.code),
+        scraperErrorCodes: args.scraperErrorCodes,
+        brightDataDiagnostics: trace.brightDataDiagnostics,
+        tavilyDiagnostics:
+          trace.fallbackActivated && trace.tavilyRequests > 0
+            ? trace.tavilyDiagnostics
+            : undefined,
+      }),
     };
   }
 

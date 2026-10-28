@@ -2,11 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import type {
+  BrightDataSearchResultCategory,
   SearchQuery,
   SearchResult,
   SearchResultItem,
 } from '../interfaces/lead-search.interface';
 import { domainFromUrl } from '../utils/linkedin-url.util';
+import {
+  classifyUnlockerException,
+  classifyUnlockerHttpResult,
+  sanitizeUnlockerErrorMessage,
+  type UnlockerFetchResult,
+} from '../utils/unlocker-fetch.util';
 
 const BASE_URL = 'https://api.brightdata.com';
 
@@ -41,13 +48,12 @@ export class BrightDataSearchClient {
     return Boolean(this.apiKey);
   }
 
-  /** Fetch raw HTML via Web Unlocker (same zone as Search). */
-  async fetchRawHtml(url: string): Promise<{
-    html: string;
-    httpStatus: number;
-    elapsedMs: number;
-    emptyBody: boolean;
-  }> {
+  /**
+   * Fetch raw HTML via Web Unlocker (same zone as Search).
+   * `httpStatus` is the Bright Data API status for `/request`, not the target site.
+   * Legacy fields (`html`, `emptyBody`, …) preserved; `outcome` carries the cause.
+   */
+  async fetchRawHtml(url: string): Promise<UnlockerFetchResult> {
     const start = Date.now();
     try {
       const response = await fetch(`${BASE_URL}/request`, {
@@ -66,18 +72,93 @@ export class BrightDataSearchClient {
       });
 
       const html = await response.text();
-      return {
+      const bodyLength = html.length;
+      const emptyBody = bodyLength === 0;
+      const outcome = classifyUnlockerHttpResult({
+        httpStatus: response.status,
+        bodyLength,
+      });
+      const result: UnlockerFetchResult = {
         html,
         httpStatus: response.status,
         elapsedMs: Date.now() - start,
-        emptyBody: html.length === 0,
+        emptyBody,
+        bodyLength,
+        zone: this.zone,
+        outcome,
       };
+
+      if (outcome !== 'ok') {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'brightdata_unlocker_fetch',
+            url,
+            zone: this.zone,
+            outcome,
+            apiHttpStatus: response.status,
+            bodyLength,
+            elapsedMs: result.elapsedMs,
+          }),
+        );
+      }
+
+      return result;
     } catch (error) {
+      const classified = classifyUnlockerException(error);
+      const elapsedMs = Date.now() - start;
+      this.logger.warn(
+        JSON.stringify({
+          event: 'brightdata_unlocker_fetch',
+          url,
+          zone: this.zone,
+          outcome: classified.outcome,
+          apiHttpStatus: 0,
+          bodyLength: 0,
+          elapsedMs,
+          errorName: classified.errorName,
+          errorMessage: classified.errorMessage,
+          ...(classified.causeName
+            ? { causeName: classified.causeName }
+            : {}),
+          ...(classified.causeCode
+            ? { causeCode: classified.causeCode }
+            : {}),
+          ...(classified.causeSyscall
+            ? { causeSyscall: classified.causeSyscall }
+            : {}),
+          ...(classified.causeHostname
+            ? { causeHostname: classified.causeHostname }
+            : {}),
+          ...(classified.causePort !== undefined
+            ? { causePort: classified.causePort }
+            : {}),
+        }),
+      );
       return {
         html: '',
         httpStatus: 0,
-        elapsedMs: Date.now() - start,
+        elapsedMs,
         emptyBody: true,
+        bodyLength: 0,
+        zone: this.zone,
+        outcome: classified.outcome,
+        errorName: classified.errorName,
+        errorMessage: sanitizeUnlockerErrorMessage(classified.errorMessage),
+        ...(classified.causeName
+          ? { causeName: classified.causeName }
+          : {}),
+        ...(classified.causeCode
+          ? { causeCode: classified.causeCode }
+          : {}),
+        ...(classified.causeSyscall
+          ? { causeSyscall: classified.causeSyscall }
+          : {}),
+        ...(classified.causeHostname
+          ? { causeHostname: classified.causeHostname }
+          : {}),
+        ...(classified.causePort !== undefined
+          ? { causePort: classified.causePort }
+          : {}),
       };
     }
   }
@@ -140,14 +221,29 @@ export class BrightDataSearchClient {
       const text = await response.text();
       const elapsedMs = Date.now() - start;
       const emptyBody = text.length === 0;
+      const httpStatus = response.status;
+
+      if (httpStatus < 200 || httpStatus >= 300) {
+        return this.emptyResult(
+          query,
+          attempt,
+          httpStatus,
+          elapsedMs,
+          emptyBody,
+          text.length,
+          'http_error',
+        );
+      }
 
       if (emptyBody) {
         return this.emptyResult(
           query,
           attempt,
-          response.status,
+          httpStatus,
           elapsedMs,
           true,
+          0,
+          'empty_body',
         );
       }
 
@@ -163,9 +259,30 @@ export class BrightDataSearchClient {
           error instanceof Error ? error.message : 'Invalid JSON response';
       }
 
+      if (parseError) {
+        return {
+          items: [],
+          meta: {
+            provider: 'brightdata',
+            zone: this.zone,
+            attempt,
+            httpStatus,
+            responseBytes: text.length,
+            elapsedMs,
+            emptyBody: false,
+            parseError,
+            query: query.text,
+            resultCategory: 'parse_error',
+          },
+        };
+      }
+
       const items = organic
         .map((entry, index) => this.mapOrganic(entry, index + 1))
         .filter((item): item is SearchResultItem => item !== null);
+
+      const resultCategory: BrightDataSearchResultCategory =
+        items.length > 0 ? 'ok' : 'organic_empty';
 
       return {
         items,
@@ -173,12 +290,12 @@ export class BrightDataSearchClient {
           provider: 'brightdata',
           zone: this.zone,
           attempt,
-          httpStatus: response.status,
+          httpStatus,
           responseBytes: text.length,
           elapsedMs,
           emptyBody: false,
-          parseError,
           query: query.text,
+          resultCategory,
         },
       };
     } catch (error) {
@@ -199,6 +316,7 @@ export class BrightDataSearchClient {
           parseError:
             error instanceof Error ? error.message : 'Request failed',
           query: query.text,
+          resultCategory: 'network_error',
         },
       };
     }
@@ -229,6 +347,8 @@ export class BrightDataSearchClient {
     httpStatus: number,
     elapsedMs: number,
     emptyBody: boolean,
+    responseBytes = 0,
+    resultCategory: BrightDataSearchResultCategory = 'empty_body',
   ): SearchResult {
     return {
       items: [],
@@ -237,10 +357,11 @@ export class BrightDataSearchClient {
         zone: this.zone,
         attempt,
         httpStatus,
-        responseBytes: 0,
+        responseBytes,
         elapsedMs,
         emptyBody,
         query: query.text,
+        resultCategory,
       },
     };
   }

@@ -4,9 +4,13 @@ import { randomUUID } from 'node:crypto';
 
 import { BrightDataSearchClient } from '../clients/brightdata-search.client';
 import type {
+  BrightDataSearchDiagnostics,
+  BrightDataSearchResultCategory,
   LeadSearchDiscoveryResult,
   LinkedInCandidate,
+  SearchExecutionMetadata,
   SearchFailure,
+  TavilySearchDiagnostics,
 } from '../interfaces/lead-search.interface';
 import { CandidateProfileRanker } from './candidate-profile.ranker';
 import { PersonQueryLadderBuilder } from './person-query-ladder.builder';
@@ -24,7 +28,138 @@ type TavilyFallbackResult = {
   executedQueries: string[];
   searchHitsCount: number;
   requestsAttempted: number;
+  diagnostics: TavilySearchDiagnostics;
 };
+
+function emptyBrightDataDiagnostics(): BrightDataSearchDiagnostics {
+  return {
+    requests: 0,
+    hits: 0,
+    emptyBody: 0,
+    parseError: 0,
+    organicEmpty: 0,
+    networkError: 0,
+    httpError: 0,
+    httpStatusCounts: {},
+  };
+}
+
+function emptyTavilyDiagnostics(): TavilySearchDiagnostics {
+  return {
+    requests: 0,
+    hits: 0,
+    httpOkWithResults: 0,
+    httpOkEmptyResults: 0,
+    httpError: 0,
+    networkError: 0,
+    timeout: 0,
+  };
+}
+
+function bumpStatusCount(
+  counts: Record<string, number>,
+  httpStatus: number,
+): void {
+  const key = String(httpStatus);
+  counts[key] = (counts[key] ?? 0) + 1;
+}
+
+function tallyBrightDataAttempt(
+  diagnostics: BrightDataSearchDiagnostics,
+  meta: SearchExecutionMetadata,
+  itemCount: number,
+): void {
+  diagnostics.requests += 1;
+  diagnostics.hits += itemCount;
+  bumpStatusCount(diagnostics.httpStatusCounts, meta.httpStatus);
+
+  const category: BrightDataSearchResultCategory =
+    meta.resultCategory ??
+    (meta.httpStatus === 0
+      ? 'network_error'
+      : meta.emptyBody
+        ? 'empty_body'
+        : meta.parseError
+          ? 'parse_error'
+          : 'organic_empty');
+
+  switch (category) {
+    case 'empty_body':
+      diagnostics.emptyBody += 1;
+      break;
+    case 'parse_error':
+      diagnostics.parseError += 1;
+      break;
+    case 'organic_empty':
+      diagnostics.organicEmpty += 1;
+      break;
+    case 'network_error':
+      diagnostics.networkError += 1;
+      break;
+    case 'http_error':
+      diagnostics.httpError += 1;
+      break;
+    case 'ok':
+      break;
+  }
+}
+
+function isBrightDataSearchFailure(
+  meta: SearchExecutionMetadata,
+): SearchFailure | null {
+  const category = meta.resultCategory;
+  if (
+    category === 'empty_body' ||
+    (category === undefined && meta.emptyBody && meta.httpStatus !== 0)
+  ) {
+    return {
+      code: 'EMPTY_BODY',
+      message: 'Bright Data returned empty body',
+      retryable: true,
+      query: meta.query,
+      httpStatus: meta.httpStatus,
+    };
+  }
+  if (category === 'network_error' || meta.httpStatus === 0) {
+    return {
+      code: 'NETWORK_ERROR',
+      message: 'Bright Data search network failure',
+      retryable: true,
+      query: meta.query,
+      httpStatus: meta.httpStatus,
+    };
+  }
+  if (category === 'parse_error' || meta.parseError) {
+    return {
+      code: 'PARSE_ERROR',
+      message: 'Bright Data search parse error',
+      retryable: true,
+      query: meta.query,
+      httpStatus: meta.httpStatus,
+    };
+  }
+  if (category === 'http_error') {
+    return {
+      code: 'HTTP_ERROR',
+      message: `Bright Data search HTTP ${meta.httpStatus}`,
+      retryable: meta.httpStatus === 429 || meta.httpStatus >= 500,
+      query: meta.query,
+      httpStatus: meta.httpStatus,
+    };
+  }
+  return null;
+}
+
+function isTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return (
+    error.name === 'TimeoutError' ||
+    error.name === 'AbortError' ||
+    /timeout/i.test(error.message)
+  );
+}
 
 @Injectable()
 export class LeadDiscoverySearchOrchestrator {
@@ -64,9 +199,12 @@ export class LeadDiscoverySearchOrchestrator {
     const executedQueries: string[] = [];
     let searchHitsCount = 0;
     let brightDataRequests = 0;
+    let brightDataSearchFailures = 0;
     let tavilyRequests = 0;
     let queriesExecuted = 0;
     const allCandidates: LinkedInCandidate[] = [];
+    const brightDataDiagnostics = emptyBrightDataDiagnostics();
+    let tavilyDiagnostics = emptyTavilyDiagnostics();
 
     const minRequired = Math.max(1, Math.min(input.limit, 3));
     const maxCandidates = input.limit * 3;
@@ -89,15 +227,16 @@ export class LeadDiscoverySearchOrchestrator {
       const result = await this.brightDataSearch.search({ text: queryText });
       searchHitsCount += result.items.length;
       this.logSearchAttempt(searchRunId, result.meta);
+      tallyBrightDataAttempt(
+        brightDataDiagnostics,
+        result.meta,
+        result.items.length,
+      );
 
-      if (result.meta.emptyBody) {
-        failures.push({
-          code: 'EMPTY_BODY',
-          message: 'Bright Data returned empty body',
-          retryable: true,
-          query: queryText,
-          httpStatus: result.meta.httpStatus,
-        });
+      const failure = isBrightDataSearchFailure(result.meta);
+      if (failure) {
+        brightDataSearchFailures += 1;
+        failures.push(failure);
       }
 
       const ranked = this.ranker.rank({
@@ -123,6 +262,7 @@ export class LeadDiscoverySearchOrchestrator {
         input.priorityRoles,
       );
       tavilyRequests = tavilyResult.requestsAttempted;
+      tavilyDiagnostics = tavilyResult.diagnostics;
       executedQueries.push(...tavilyResult.executedQueries);
       searchHitsCount += tavilyResult.searchHitsCount;
       allCandidates.push(...tavilyResult.candidates);
@@ -141,12 +281,19 @@ export class LeadDiscoverySearchOrchestrator {
       trace: {
         searchRunId,
         brightDataRequests,
+        brightDataSearchFailures,
         tavilyRequests: fallbackActivated ? tavilyRequests : 0,
         fallbackActivated,
         queriesExecuted,
+        linkedinUrlValidated: allCandidates.length,
         linkedinCandidatesFound: deduped.length,
+        qualifiedCandidates: qualified.length,
         selectedUrls: profileUrls,
         failures,
+        brightDataDiagnostics,
+        tavilyDiagnostics: fallbackActivated
+          ? tavilyDiagnostics
+          : emptyTavilyDiagnostics(),
       },
     };
   }
@@ -161,6 +308,7 @@ export class LeadDiscoverySearchOrchestrator {
     failures: SearchFailure[],
     priorityRoles?: string[],
   ): Promise<TavilyFallbackResult> {
+    const diagnostics = emptyTavilyDiagnostics();
     const tavilyKey = this.configService.get<string>('TAVILY_API_KEY')?.trim();
     if (!tavilyKey) {
       this.logger.warn('Tavily fallback skipped: TAVILY_API_KEY missing');
@@ -169,6 +317,7 @@ export class LeadDiscoverySearchOrchestrator {
         executedQueries: [],
         searchHitsCount: 0,
         requestsAttempted: Math.min(queries.length, this.maxTavilyRequests),
+        diagnostics,
       };
     }
 
@@ -180,6 +329,7 @@ export class LeadDiscoverySearchOrchestrator {
     for (let i = 0; i < limit; i += 1) {
       const queryText = queries[i];
       executedQueries.push(queryText);
+      diagnostics.requests += 1;
       try {
         const response = await fetch('https://api.tavily.com/search', {
           method: 'POST',
@@ -192,6 +342,7 @@ export class LeadDiscoverySearchOrchestrator {
         });
 
         if (!response.ok) {
+          diagnostics.httpError += 1;
           failures.push({
             code: 'HTTP_ERROR',
             message: `Tavily HTTP ${response.status}`,
@@ -218,6 +369,13 @@ export class LeadDiscoverySearchOrchestrator {
           domain: '',
         }));
         searchHitsCount += items.length;
+        diagnostics.hits += items.length;
+
+        if (items.length > 0) {
+          diagnostics.httpOkWithResults += 1;
+        } else {
+          diagnostics.httpOkEmptyResults += 1;
+        }
 
         candidates.push(
           ...this.ranker.rank({
@@ -229,38 +387,52 @@ export class LeadDiscoverySearchOrchestrator {
           }),
         );
       } catch (error) {
-        failures.push({
-          code: 'HTTP_ERROR',
-          message:
-            error instanceof Error ? error.message : 'Tavily request failed',
-          retryable: false,
-          query: queryText,
-        });
+        if (isTimeoutError(error)) {
+          diagnostics.timeout += 1;
+          failures.push({
+            code: 'TIMEOUT',
+            message: 'Tavily request timed out',
+            retryable: true,
+            query: queryText,
+          });
+        } else {
+          diagnostics.networkError += 1;
+          failures.push({
+            code: 'NETWORK_ERROR',
+            message:
+              error instanceof Error ? error.message : 'Tavily request failed',
+            retryable: false,
+            query: queryText,
+          });
+        }
       }
     }
 
     this.logger.log(
-      `Tavily fallback executed for brand search (${candidates.length} candidates)`,
+      JSON.stringify({
+        event: 'tavily_fallback_summary',
+        candidates: candidates.length,
+        requests: diagnostics.requests,
+        httpOkWithResults: diagnostics.httpOkWithResults,
+        httpOkEmptyResults: diagnostics.httpOkEmptyResults,
+        httpError: diagnostics.httpError,
+        networkError: diagnostics.networkError,
+        timeout: diagnostics.timeout,
+        hits: diagnostics.hits,
+      }),
     );
     return {
       candidates,
       executedQueries,
       searchHitsCount,
       requestsAttempted: limit,
+      diagnostics,
     };
   }
 
   private logSearchAttempt(
     searchRunId: string,
-    meta: {
-      provider: string;
-      query: string;
-      attempt: number;
-      httpStatus: number;
-      emptyBody: boolean;
-      responseBytes: number;
-      elapsedMs: number;
-    },
+    meta: SearchExecutionMetadata,
   ): void {
     this.logger.log(
       JSON.stringify({
@@ -272,6 +444,7 @@ export class LeadDiscoverySearchOrchestrator {
         emptyBody: meta.emptyBody,
         resultBytes: meta.responseBytes,
         latencyMs: meta.elapsedMs,
+        resultCategory: meta.resultCategory ?? null,
       }),
     );
   }

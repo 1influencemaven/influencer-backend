@@ -17,6 +17,7 @@ import {
   classifyBrightDataOption,
   filterEmailContactCatalog,
 } from '../utils/brightdata-catalog.util';
+import { buildPeopleSearchTrace } from '../utils/lead-discovery-outcome.util';
 
 type BrightDataRecord = Record<string, unknown>;
 
@@ -80,34 +81,35 @@ export class BrightDataLeadSource implements LeadSourceProvider {
       limit: context.limit,
       priorityRoles,
     });
-    const searchMetadata = this.buildSearchMetadata({
-      priorityRoles,
-      scraperIds: context.optionIds,
-      searchResult,
-    });
     const profileUrls = searchResult.profileUrls;
     const companyUrl = await this.resolveCompanyUrl(context);
     const contacts: RawLeadContact[] = [];
+    let scraperInvocations = 0;
+    let scraperSuccesses = 0;
+    let scraperFailures = 0;
+    const scraperErrorCodes: string[] = [];
 
     for (const optionId of context.optionIds) {
       const option = optionById.get(optionId);
       const kind = classifyBrightDataOption(optionId, option?.name ?? optionId);
 
+      const inputs = this.buildInputs(kind, {
+        profileUrls,
+        companyUrl,
+        limit: context.limit,
+      });
+
+      if (inputs.length === 0) {
+        this.logger.warn(
+          `No valid inputs for Bright Data option ${optionId} (kind=${kind})`,
+        );
+        continue;
+      }
+
+      scraperInvocations += 1;
       try {
-        const inputs = this.buildInputs(kind, {
-          profileUrls,
-          companyUrl,
-          limit: context.limit,
-        });
-
-        if (inputs.length === 0) {
-          this.logger.warn(
-            `No valid inputs for Bright Data option ${optionId} (kind=${kind})`,
-          );
-          continue;
-        }
-
         const records = await this.client.triggerAndCollect(optionId, inputs);
+        scraperSuccesses += 1;
         for (const record of records) {
           const mapped = this.mapRecord(record, optionId, searchResult.trace);
           if (mapped) {
@@ -115,11 +117,27 @@ export class BrightDataLeadSource implements LeadSourceProvider {
           }
         }
       } catch (error) {
+        scraperFailures += 1;
+        const code =
+          error instanceof Error && error.name
+            ? error.name.slice(0, 64)
+            : 'scraper_error';
+        scraperErrorCodes.push(code);
         this.logger.warn(
           `Bright Data option ${optionId} failed: ${String(error)}`,
         );
       }
     }
+
+    const searchMetadata = this.buildSearchMetadata({
+      priorityRoles,
+      scraperIds: context.optionIds,
+      searchResult,
+      scraperInvocations,
+      scraperSuccesses,
+      scraperFailures,
+      scraperErrorCodes,
+    });
 
     return { contacts, searchMetadata };
   }
@@ -130,8 +148,13 @@ export class BrightDataLeadSource implements LeadSourceProvider {
     searchResult: Awaited<
       ReturnType<LeadDiscoverySearchOrchestrator['discoverProfileUrls']>
     >;
+    scraperInvocations: number;
+    scraperSuccesses: number;
+    scraperFailures: number;
+    scraperErrorCodes: string[];
   }): LeadSearchMetadata {
     const searchTavily = args.searchResult.trace.fallbackActivated;
+    const trace = args.searchResult.trace;
     return {
       strategy: 'manual',
       tracks: ['2B'],
@@ -143,6 +166,26 @@ export class BrightDataLeadSource implements LeadSourceProvider {
       fallbackUsed: searchTavily,
       fallbackReason: resolveLeadFallbackReason(false, searchTavily),
       searchHitsCount: args.searchResult.searchHitsCount,
+      peopleSearchTrace: buildPeopleSearchTrace({
+        searchHitsReceived: args.searchResult.searchHitsCount,
+        linkedinUrlValidated: trace.linkedinUrlValidated,
+        scoredCandidates: trace.linkedinUrlValidated,
+        qualifiedCandidates: trace.qualifiedCandidates,
+        selectedProfileUrls: trace.selectedUrls,
+        brightDataSearchRequests: trace.brightDataRequests,
+        brightDataSearchFailures: trace.brightDataSearchFailures,
+        tavilyFallbackRequests: trace.tavilyRequests,
+        scraperInvocations: args.scraperInvocations,
+        scraperSuccesses: args.scraperSuccesses,
+        scraperFailures: args.scraperFailures,
+        searchFailureCodes: trace.failures.map((f) => f.code),
+        scraperErrorCodes: args.scraperErrorCodes,
+        brightDataDiagnostics: trace.brightDataDiagnostics,
+        tavilyDiagnostics:
+          trace.fallbackActivated && trace.tavilyRequests > 0
+            ? trace.tavilyDiagnostics
+            : undefined,
+      }),
     };
   }
 

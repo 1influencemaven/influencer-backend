@@ -30,13 +30,20 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Role } from '../generated/prisma/enums';
 import {
+  QueryBrandBusinessContactsDto,
   QueryLeadDiscoveryRunsDto,
   QueryLeadsDto,
 } from './dto/query-lead-discovery.dto';
 import { SearchLeadsDto } from './dto/search-leads.dto';
 import { UpdateLeadStatusDto } from './dto/update-lead-status.dto';
 import { AddContactChannelDto } from './dto/add-contact-channel.dto';
+import { BrandBusinessContactService } from './brand-business-contact.service';
+import {
+  UnlockerDiagnosticRequestDto,
+  UnlockerDiagnosticResponseDto,
+} from './dto/unlocker-diagnostic.dto';
 import { LeadDiscoveryService } from './lead-discovery.service';
+import { UnlockerDiagnosticsService } from './unlocker-diagnostics.service';
 
 @ApiTags('Lead Discovery')
 @ApiBearerAuth()
@@ -44,13 +51,62 @@ import { LeadDiscoveryService } from './lead-discovery.service';
 @Roles(Role.USER, Role.ADMIN)
 @Controller({ path: 'lead-discovery', version: '1' })
 export class LeadDiscoveryController {
-  constructor(private readonly leadDiscoveryService: LeadDiscoveryService) {}
+  constructor(
+    private readonly leadDiscoveryService: LeadDiscoveryService,
+    private readonly brandBusinessContactService: BrandBusinessContactService,
+    private readonly unlockerDiagnosticsService: UnlockerDiagnosticsService,
+  ) {}
 
   @ApiOperation({ summary: 'Listar providers de leads disponibles' })
   @ApiOkResponse({ description: 'Providers configurados' })
   @Get('providers')
   listProviders() {
     return this.leadDiscoveryService.listProviders();
+  }
+
+  @ApiOperation({
+    summary: 'Sonda Unlocker (diagnóstico ADMIN, local)',
+    description:
+      'Una sola llamada a fetchRawHtml para la URL allowlisted. ' +
+      'Requiere ADMIN, NODE_ENV≠production y UNLOCKER_DIAGNOSTICS_ENABLED=true. ' +
+      'No persiste en DB; no ejecuta 2A/2B/PEE. Respuesta sin HTML ni secretos.',
+  })
+  @ApiOkResponse({
+    description: 'Resultado tipado de la sonda (sin cuerpo HTML)',
+    type: UnlockerDiagnosticResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'URL fuera de allowlist' })
+  @ApiForbiddenResponse({
+    description: 'No ADMIN, producción, o diagnóstico deshabilitado',
+  })
+  @ApiServiceUnavailableResponse({ description: 'Unlocker no configurado' })
+  @ApiUnauthorizedResponse({ description: 'No autenticado' })
+  @Roles(Role.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Post('diagnostics/unlocker')
+  probeUnlocker(
+    @Body() dto: UnlockerDiagnosticRequestDto,
+  ): Promise<UnlockerDiagnosticResponseDto> {
+    return this.unlockerDiagnosticsService.probe(dto.url);
+  }
+
+  @ApiOperation({
+    summary: 'Listar contactos comerciales de marca (BrandBusinessContact)',
+    description:
+      'Visibility v2 Phase 1. Buzones de marca sin persona (ADR-0016/0018). ' +
+      'No son Leads. 404 si la marca no existe; [] si no hay contactos.',
+  })
+  @ApiOkResponse({
+    description: 'Lista de BrandBusinessContact (posiblemente vacía)',
+  })
+  @ApiBadRequestResponse({ description: 'brandCandidateId inválido' })
+  @ApiNotFoundResponse({ description: 'Marca candidata no encontrada' })
+  @ApiUnauthorizedResponse({ description: 'No autenticado' })
+  @Get('business-contacts')
+  listBusinessContacts(@Query() query: QueryBrandBusinessContactsDto) {
+    return this.brandBusinessContactService.listByBrandCandidateId(
+      query.brandCandidateId,
+    );
   }
 
   @ApiOperation({

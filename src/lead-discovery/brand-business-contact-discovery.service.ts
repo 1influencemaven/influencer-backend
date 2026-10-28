@@ -19,6 +19,13 @@ import {
 import { normalizeWebsiteBase } from './utils/public-email-page-urls.util';
 import { isAllowedBrandBusinessContactEmailDomain } from './utils/brand-business-contact-domain.util';
 import type { BusinessContactDiscoverySummary } from './interfaces/lead-source-provider.interface';
+import {
+  classifyUnlockerHttpResult,
+  sanitizeUnlockerErrorMessage,
+  tallyPageOutcomes,
+  type BusinessContactPageResult,
+  type UnlockerFetchResult,
+} from './utils/unlocker-fetch.util';
 
 export type BrandBusinessContactDiscoveryInput = {
   brandCandidateId: string;
@@ -39,6 +46,51 @@ export type BrandBusinessContactDiscoveryResult = {
   candidates: DiscoveredBrandBusinessContact[];
   summary: BusinessContactDiscoverySummary;
 };
+
+function resolveFetchOutcome(
+  fetched: UnlockerFetchResult,
+): UnlockerFetchResult['outcome'] {
+  if (fetched.outcome) {
+    return fetched.outcome;
+  }
+  const bodyLength =
+    fetched.bodyLength ??
+    (typeof fetched.html === 'string' ? fetched.html.length : 0);
+  return classifyUnlockerHttpResult({
+    httpStatus: fetched.httpStatus,
+    bodyLength,
+  });
+}
+
+function pageResultFromFetch(
+  url: string,
+  fetched: UnlockerFetchResult,
+  outcome: BusinessContactPageResult['outcome'] = resolveFetchOutcome(fetched),
+): BusinessContactPageResult {
+  const bodyLength =
+    fetched.bodyLength ??
+    (typeof fetched.html === 'string' ? fetched.html.length : 0);
+  const result: BusinessContactPageResult = {
+    url,
+    outcome,
+    apiHttpStatus: fetched.httpStatus,
+    bodyLength,
+    elapsedMs: fetched.elapsedMs,
+    zone: fetched.zone ?? '',
+  };
+  if (fetched.errorName) {
+    result.errorName = fetched.errorName;
+  }
+  if (fetched.errorMessage) {
+    result.errorMessage = sanitizeUnlockerErrorMessage(fetched.errorMessage);
+  }
+  if (fetched.causeName) result.causeName = fetched.causeName;
+  if (fetched.causeCode) result.causeCode = fetched.causeCode;
+  if (fetched.causeSyscall) result.causeSyscall = fetched.causeSyscall;
+  if (fetched.causeHostname) result.causeHostname = fetched.causeHostname;
+  if (fetched.causePort !== undefined) result.causePort = fetched.causePort;
+  return result;
+}
 
 @Injectable()
 export class BrandBusinessContactDiscoveryService {
@@ -85,18 +137,22 @@ export class BrandBusinessContactDiscoveryService {
       maxPages,
     );
     const byEmail = new Map<string, DiscoveredBrandBusinessContact>();
+    const pageResults: BusinessContactPageResult[] = [];
     let pagesSucceeded = 0;
     let pagesFailed = 0;
+    let unlockerZone: string | undefined;
 
     for (const pageUrl of pageUrls) {
       try {
         const fetched = await this.unlocker.fetchRawHtml(pageUrl);
-        if (
-          fetched.emptyBody ||
-          fetched.httpStatus < 200 ||
-          fetched.httpStatus >= 300
-        ) {
+        unlockerZone = fetched.zone || unlockerZone;
+        const fetchOutcome = resolveFetchOutcome(fetched);
+
+        if (fetchOutcome !== 'ok') {
           pagesFailed += 1;
+          pageResults.push(
+            pageResultFromFetch(pageUrl, fetched, fetchOutcome),
+          );
           continue;
         }
 
@@ -106,10 +162,15 @@ export class BrandBusinessContactDiscoveryService {
         );
         if (!normalizedFinal) {
           pagesFailed += 1;
+          pageResults.push(
+            pageResultFromFetch(pageUrl, fetched, 'url_normalization_error'),
+          );
           continue;
         }
 
         pagesSucceeded += 1;
+        pageResults.push(pageResultFromFetch(pageUrl, fetched, 'ok'));
+
         const matches = extractLiteralEmailsFromText(fetched.html);
         for (const match of matches) {
           const emailNormalized = normalizeBusinessEmail(match.email);
@@ -151,12 +212,28 @@ export class BrandBusinessContactDiscoveryService {
         }
       } catch (error) {
         pagesFailed += 1;
+        const errorName = error instanceof Error ? error.name : 'Error';
+        const errorMessage = sanitizeUnlockerErrorMessage(
+          error instanceof Error ? error.message : String(error),
+        );
+        pageResults.push({
+          url: pageUrl,
+          outcome: 'unknown_error',
+          apiHttpStatus: 0,
+          bodyLength: 0,
+          elapsedMs: 0,
+          zone: unlockerZone ?? '',
+          errorName,
+          errorMessage,
+        });
         this.logger.warn(
           JSON.stringify({
             event: 'brand_business_contact_page_failed',
             brandCandidateId: input.brandCandidateId,
             pageUrl,
-            error: error instanceof Error ? error.message : String(error),
+            outcome: 'unknown_error',
+            errorName,
+            errorMessage,
           }),
         );
       }
@@ -168,6 +245,7 @@ export class BrandBusinessContactDiscoveryService {
       return rank(b.commercialRelevance) - rank(a.commercialRelevance);
     });
     const candidates = ranked.slice(0, Math.max(maxContacts, 1));
+    const failureCountsByCategory = tallyPageOutcomes(pageResults);
 
     return {
       candidates,
@@ -178,6 +256,9 @@ export class BrandBusinessContactDiscoveryService {
         emailsFound: byEmail.size,
         contactsCreated: 0,
         contactsUpdated: 0,
+        unlockerZone,
+        failureCountsByCategory,
+        pageResults,
       },
     };
   }

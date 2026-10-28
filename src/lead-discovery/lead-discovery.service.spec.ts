@@ -114,6 +114,26 @@ describe('LeadDiscoveryService', () => {
         emailsFound: 1,
         contactsCreated: 0,
         contactsUpdated: 0,
+        unlockerZone: 'mcp_unlocker',
+        failureCountsByCategory: { http_error: 11 },
+        pageResults: [
+          {
+            url: 'https://acme.com/partnerships',
+            outcome: 'ok',
+            apiHttpStatus: 200,
+            bodyLength: 1200,
+            elapsedMs: 400,
+            zone: 'mcp_unlocker',
+          },
+          {
+            url: 'https://acme.com/contact',
+            outcome: 'http_error',
+            apiHttpStatus: 403,
+            bodyLength: 0,
+            elapsedMs: 120,
+            zone: 'mcp_unlocker',
+          },
+        ],
       },
     }),
   };
@@ -543,9 +563,29 @@ describe('LeadDiscoveryService', () => {
           errorMessage: null,
           searchMetadata: expect.objectContaining({
             tracks: ['2A', '2B'],
+            outcome: 'FULL',
+            warningCode: null,
+            warningMessage: null,
             businessContactDiscovery: expect.objectContaining({
               contactsCreated: 1,
               emailsFound: 1,
+              pagesAttempted: 12,
+              pagesSucceeded: 1,
+              pagesFailed: 11,
+              unlockerZone: 'mcp_unlocker',
+              failureCountsByCategory: { http_error: 11 },
+              pageResults: expect.arrayContaining([
+                expect.objectContaining({
+                  url: 'https://acme.com/partnerships',
+                  outcome: 'ok',
+                  elapsedMs: 400,
+                }),
+                expect.objectContaining({
+                  url: 'https://acme.com/contact',
+                  outcome: 'http_error',
+                  apiHttpStatus: 403,
+                }),
+              ]),
             }),
           }),
         },
@@ -585,11 +625,23 @@ describe('LeadDiscoveryService', () => {
               businessContactDiscovery: expect.objectContaining({
                 contactsCreated: 0,
                 emailsFound: 0,
+                pagesAttempted: 0,
+                pagesSucceeded: 0,
+                pagesFailed: 0,
               }),
             }),
           }),
         }),
       );
+      // Global 2A failure must not invent per-page Unlocker diagnostics.
+      const completedUpdate = prisma.leadDiscoveryRun.update.mock.calls.find(
+        (call: [{ data: { status: string } }]) =>
+          call[0].data.status === LeadDiscoveryStatus.COMPLETED,
+      );
+      const bbc = completedUpdate?.[0]?.data?.searchMetadata
+        ?.businessContactDiscovery as Record<string, unknown> | undefined;
+      expect(bbc?.pageResults).toBeUndefined();
+      expect(bbc?.failureCountsByCategory).toBeUndefined();
     });
 
     it('skips 2A upserts when website is missing and still completes 2B', async () => {
@@ -672,12 +724,185 @@ describe('LeadDiscoveryService', () => {
             strategy: 'manual',
             tracks: ['2A', '2B'],
             searchHitsCount: 12,
+            outcome: 'FULL',
+            warningCode: null,
             businessContactDiscovery: expect.objectContaining({
               contactsCreated: 1,
             }),
           }),
         },
       });
+    });
+
+    it('marks PROVIDER_FAILURE when all Unlocker pages fail and keeps COMPLETED', async () => {
+      brandBusinessContactDiscovery.discover.mockResolvedValueOnce({
+        candidates: [],
+        summary: {
+          pagesAttempted: 12,
+          pagesSucceeded: 0,
+          pagesFailed: 12,
+          emailsFound: 0,
+          contactsCreated: 0,
+          contactsUpdated: 0,
+          unlockerZone: 'mcp_unlocker',
+          failureCountsByCategory: { network_error: 12 },
+        },
+      });
+      jest.spyOn(mockSource, 'findContacts').mockResolvedValueOnce({
+        contacts: [],
+        searchMetadata: {
+          strategy: 'llm',
+          tracks: ['2B'],
+          priorityRoles: [],
+          scraperIds: ['gd_x'],
+          plannedQueriesCount: 20,
+          validatedQueriesCount: 30,
+          queries: ['q1'],
+          fallbackUsed: true,
+          fallbackReason: 'search_tavily',
+          searchHitsCount: 50,
+          peopleSearchTrace: {
+            searchHitsReceived: 50,
+            linkedinUrlValidated: 0,
+            scoredCandidates: 0,
+            qualifiedCandidates: 0,
+            selectedProfileUrlsCount: 0,
+            selectedProfileUrls: [],
+            brightDataSearchRequests: 20,
+            brightDataSearchFailures: 20,
+            tavilyFallbackRequests: 10,
+            scraperInvocations: 0,
+            scraperSuccesses: 0,
+            scraperFailures: 0,
+            searchFailureCodes: ['NETWORK_ERROR'],
+            scraperErrorCodes: [],
+          },
+        },
+      });
+
+      await service.executeDiscovery('run1');
+
+      expect(prisma.lead.create).not.toHaveBeenCalled();
+      expect(prisma.leadDiscoveryRun.update).toHaveBeenCalledWith({
+        where: { id: 'run1' },
+        data: {
+          status: LeadDiscoveryStatus.COMPLETED,
+          errorMessage: null,
+          searchMetadata: expect.objectContaining({
+            outcome: 'PROVIDER_FAILURE',
+            warningCode: 'unlocker_all_pages_failed',
+            warningMessage: expect.stringMatching(/Unlocker failed/i),
+            businessContactDiscovery: expect.objectContaining({
+              pagesAttempted: 12,
+              pagesSucceeded: 0,
+              pagesFailed: 12,
+              failureCountsByCategory: { network_error: 12 },
+            }),
+            peopleSearchTrace: expect.objectContaining({
+              searchHitsReceived: 50,
+              linkedinUrlValidated: 0,
+              scraperInvocations: 0,
+            }),
+          }),
+        },
+      });
+    });
+
+    it('marks EMPTY_LEGITIMATE when providers succeed with zero results', async () => {
+      brandBusinessContactDiscovery.discover.mockResolvedValueOnce({
+        candidates: [],
+        summary: {
+          pagesAttempted: 4,
+          pagesSucceeded: 4,
+          pagesFailed: 0,
+          emailsFound: 0,
+          contactsCreated: 0,
+          contactsUpdated: 0,
+        },
+      });
+      jest.spyOn(mockSource, 'findContacts').mockResolvedValueOnce({
+        contacts: [],
+        searchMetadata: {
+          strategy: 'llm',
+          tracks: ['2B'],
+          priorityRoles: ['CEO'],
+          scraperIds: ['gd_x'],
+          plannedQueriesCount: 4,
+          validatedQueriesCount: 2,
+          queries: ['q1', 'q2'],
+          fallbackUsed: false,
+          fallbackReason: null,
+          searchHitsCount: 10,
+          peopleSearchTrace: {
+            searchHitsReceived: 10,
+            linkedinUrlValidated: 0,
+            scoredCandidates: 0,
+            qualifiedCandidates: 0,
+            selectedProfileUrlsCount: 0,
+            selectedProfileUrls: [],
+            brightDataSearchRequests: 2,
+            brightDataSearchFailures: 0,
+            tavilyFallbackRequests: 0,
+            scraperInvocations: 0,
+            scraperSuccesses: 0,
+            scraperFailures: 0,
+            searchFailureCodes: [],
+            scraperErrorCodes: [],
+          },
+        },
+      });
+
+      await service.executeDiscovery('run1');
+
+      expect(prisma.leadDiscoveryRun.update).toHaveBeenCalledWith({
+        where: { id: 'run1' },
+        data: {
+          status: LeadDiscoveryStatus.COMPLETED,
+          errorMessage: null,
+          searchMetadata: expect.objectContaining({
+            outcome: 'EMPTY_LEGITIMATE',
+            warningCode: null,
+            warningMessage: null,
+          }),
+        },
+      });
+    });
+
+    it('keeps polling contract: PROCESSING→COMPLETED even on PROVIDER_FAILURE', async () => {
+      brandBusinessContactDiscovery.discover.mockResolvedValueOnce({
+        candidates: [],
+        summary: {
+          pagesAttempted: 3,
+          pagesSucceeded: 0,
+          pagesFailed: 3,
+          emailsFound: 0,
+          contactsCreated: 0,
+          contactsUpdated: 0,
+        },
+      });
+      jest.spyOn(mockSource, 'findContacts').mockResolvedValueOnce({
+        contacts: [],
+        searchMetadata: null,
+      });
+
+      await service.executeDiscovery('run1');
+
+      const statuses = prisma.leadDiscoveryRun.update.mock.calls.map(
+        (call: [{ data: { status: string } }]) => call[0].data.status,
+      );
+      expect(statuses).toContain(LeadDiscoveryStatus.COMPLETED);
+      expect(statuses).not.toContain(LeadDiscoveryStatus.FAILED);
+      expect(prisma.leadDiscoveryRun.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: LeadDiscoveryStatus.COMPLETED,
+            errorMessage: null,
+            searchMetadata: expect.objectContaining({
+              outcome: 'PROVIDER_FAILURE',
+            }),
+          }),
+        }),
+      );
     });
 
     it('does not write searchMetadata on FAILED', async () => {

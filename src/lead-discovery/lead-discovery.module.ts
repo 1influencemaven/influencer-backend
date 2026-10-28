@@ -28,6 +28,7 @@ import { MockAiPlusBrightDataLeadSource } from './providers/mock-ai-plus-brightd
 import { MockLeadSource } from './providers/mock.lead-source';
 import { LeadDiscoverySearchOrchestrator } from './search/lead-discovery-search.orchestrator';
 import { PublicEmailEvidenceDiscoveryService } from './email-discovery/public-email-evidence-discovery.service';
+import { UnlockerDiagnosticsService } from './unlocker-diagnostics.service';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { PublicEmailEvidenceDiscoveryService } from './email-discovery/public-em
     ContactChannelService,
     BrandBusinessContactService,
     BrandBusinessContactDiscoveryService,
+    UnlockerDiagnosticsService,
     BrightDataClient,
     BrightDataSearchClient,
     LeadDiscoverySearchOrchestrator,
