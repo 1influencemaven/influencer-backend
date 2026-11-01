@@ -6,10 +6,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { BrightDataSearchClient } from './clients/brightdata-search.client';
+import {
+  BrightDataSearchClient,
+  sanitizeUnlockerErrorMessage,
+} from '../integrations/brightdata';
 import type { UnlockerDiagnosticResponseDto } from './dto/unlocker-diagnostic.dto';
 import { UNLOCKER_DIAGNOSTIC_ALLOWED_URL } from './utils/unlocker-diagnostics.constants';
-import { sanitizeUnlockerErrorMessage } from './utils/unlocker-fetch.util';
 
 @Injectable()
 export class UnlockerDiagnosticsService {

@@ -61,6 +61,46 @@ describe('BrightDataSearchClient', () => {
     expect(body.zone).not.toBe('serp_demo');
   });
 
+  it('falls back to deprecated BRIGHTDATA_ZONE when UNLOCKER_ZONE unset (BD-01.f)', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      text: async () => '<html>ok</html>',
+    });
+    const client = new BrightDataSearchClient(
+      mockConfig({
+        BRIGHTDATA_UNLOCKER_ZONE: '',
+        BRIGHTDATA_ZONE: 'legacy_unlocker',
+      }),
+    );
+    expect(client.getUnlockerZone()).toBe('legacy_unlocker');
+    const result = await client.fetchRawHtml('https://brand.com/contact');
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+      zone: string;
+    };
+    expect(body.zone).toBe('legacy_unlocker');
+    expect(result.zone).toBe('legacy_unlocker');
+  });
+
+  it('prefers BRIGHTDATA_UNLOCKER_ZONE over BRIGHTDATA_ZONE when both set', async () => {
+    const client = new BrightDataSearchClient(
+      mockConfig({
+        BRIGHTDATA_UNLOCKER_ZONE: 'canonical_unlocker',
+        BRIGHTDATA_ZONE: 'legacy_unlocker',
+      }),
+    );
+    expect(client.getUnlockerZone()).toBe('canonical_unlocker');
+  });
+
+  it('defaults Unlocker zone to mcp_unlocker when neither zone is set', () => {
+    const client = new BrightDataSearchClient(
+      mockConfig({
+        BRIGHTDATA_UNLOCKER_ZONE: '',
+        BRIGHTDATA_ZONE: '',
+      }),
+    );
+    expect(client.getUnlockerZone()).toBe('mcp_unlocker');
+  });
+
   it('does not call Bright Data when SERP zone is missing', async () => {
     const client = new BrightDataSearchClient(
       mockConfig({ BRIGHTDATA_SERP_ZONE: '' }),

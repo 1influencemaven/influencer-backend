@@ -2,7 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { CommercialRelevance } from '../generated/prisma/enums';
-import { BrightDataSearchClient } from './clients/brightdata-search.client';
+import {
+  BrightDataSearchClient,
+  classifyUnlockerHttpResult,
+  sanitizeUnlockerErrorMessage,
+  tallyPageOutcomes,
+  type BusinessContactPageResult,
+  type UnlockerFetchResult,
+} from '../integrations/brightdata';
 import {
   extractLiteralEmailsFromText,
   emailLiteralInEvidence,
@@ -20,13 +27,6 @@ import { buildBrandBusinessContactSearchQueries } from './utils/brand-business-c
 import { normalizeWebsiteBase } from './utils/public-email-page-urls.util';
 import { isAllowedBrandBusinessContactEmailDomain } from './utils/brand-business-contact-domain.util';
 import type { BusinessContactDiscoverySummary } from './interfaces/lead-source-provider.interface';
-import {
-  classifyUnlockerHttpResult,
-  sanitizeUnlockerErrorMessage,
-  tallyPageOutcomes,
-  type BusinessContactPageResult,
-  type UnlockerFetchResult,
-} from './utils/unlocker-fetch.util';
 
 export type BrandBusinessContactDiscoveryInput = {
   brandCandidateId: string;

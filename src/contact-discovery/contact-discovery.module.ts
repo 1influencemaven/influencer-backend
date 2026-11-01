@@ -4,7 +4,7 @@ import { BullModule } from '@nestjs/bullmq';
 
 import { AiModule } from '../ai/ai.module';
 import { QUEUES } from '../bullmq/queue.constants';
-import { BrightDataSearchClient } from '../integrations/brightdata';
+import { BrightDataModule } from '../integrations/brightdata';
 import { BrandBusinessContactService } from '../lead-discovery/brand-business-contact.service';
 import { ContactDiscoveryService } from './contact-discovery.service';
 import { AiContactResearchOrchestrator } from './orchestrator/ai-contact-research.orchestrator';
@@ -15,13 +15,14 @@ import { ContactDiscoveryProcessor } from './processors/contact-discovery.proces
 
 /**
  * Contact Discovery BBC v1 (ADR-0020) + AI research orchestrator (demo).
- * Isolated from Brand Discovery domain — shares only `integrations/brightdata`.
+ * Isolated from Brand Discovery domain — shares Bright Data via `BrightDataModule`.
  * Queue: `contact-discovery` (never `prospecting`).
  */
 @Module({
   imports: [
     ConfigModule,
     AiModule,
+    BrightDataModule,
     BullModule.registerQueue({
       name: QUEUES.CONTACT_DISCOVERY,
       defaultJobOptions: {
@@ -33,7 +34,6 @@ import { ContactDiscoveryProcessor } from './processors/contact-discovery.proces
     }),
   ],
   providers: [
-    BrightDataSearchClient,
     BrightDataUnlockerAdapter,
     {
       provide: BRIGHT_DATA_UNLOCKER_PORT,

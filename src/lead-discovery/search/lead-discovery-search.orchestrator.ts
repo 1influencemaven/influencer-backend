@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 
-import { BrightDataSearchClient } from '../clients/brightdata-search.client';
+import { BrightDataSearchClient } from '../../integrations/brightdata';
 import type {
   BrightDataSearchDiagnostics,
   BrightDataSearchResultCategory,

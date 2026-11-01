@@ -61,10 +61,8 @@ export const envValidationSchema = Joi.object({
   OLLAMA_MODEL: Joi.string().default('llama3.2:3b'),
   OLLAMA_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
 
-  // Runtime always uses Bright Data Search. `tavily` accepted only so leftover .env still boots (ignored).
-  BRAND_SOURCE: Joi.string().valid('brightdata', 'tavily').default('brightdata'),
-
   // Brand Discovery search-query planning: llm (default) or deterministic templates.
+  // Source is always Bright Data SERP (registry id `brightdata`); no BRAND_SOURCE env (BD-01.e).
   BRAND_SEARCH_STRATEGY: Joi.string()
     .valid('llm', 'templates')
     .default('llm'),
@@ -73,12 +71,18 @@ export const envValidationSchema = Joi.object({
 
   BRIGHTDATA_DATASET_ID: Joi.string().optional().allow(''),
 
+  /**
+   * @deprecated BD-01.f — legacy alias for Unlocker only.
+   * Prefer `BRIGHTDATA_UNLOCKER_ZONE`. Still accepted for bootstrap of old `.env`.
+   * Runtime precedence (BrightDataSearchClient): UNLOCKER_ZONE → ZONE → default `mcp_unlocker`.
+   * Not a SERP zone. Removal requires a later approved phase.
+   */
   BRIGHTDATA_ZONE: Joi.string().optional().allow(''),
 
   /** SERP API zone — must NOT be the Unlocker zone. Required for search(). */
   BRIGHTDATA_SERP_ZONE: Joi.string().optional().allow(''),
 
-  /** Web Unlocker zone for fetchRawHtml() — default mcp_unlocker. */
+  /** Canonical Web Unlocker zone for fetchRawHtml() — default `mcp_unlocker` if unset (and ZONE unset). */
   BRIGHTDATA_UNLOCKER_ZONE: Joi.string().optional().allow(''),
 
   /** Demo caps for AI-orchestrated contact research (P0). */

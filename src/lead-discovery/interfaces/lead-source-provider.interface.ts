@@ -1,4 +1,4 @@
-import type { BusinessContactPageResult } from '../utils/unlocker-fetch.util';
+import type { BusinessContactPageResult } from '../../integrations/brightdata';
 
 /**
  * Audit payload stored on LeadDiscoveryRun.searchMetadata (ADR-0017).

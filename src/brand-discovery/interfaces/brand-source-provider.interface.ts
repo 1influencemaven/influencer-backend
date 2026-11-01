@@ -53,5 +53,3 @@ export interface BrandSourceProvider {
   readonly name: string;
   discover(context: BrandSourceContext): Promise<BrandDiscoverResult>;
 }
-
-export const BRAND_SOURCE_PROVIDER_TOKEN = Symbol('BRAND_SOURCE_PROVIDER');

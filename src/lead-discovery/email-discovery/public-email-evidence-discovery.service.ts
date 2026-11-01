@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { BrightDataClient } from '../clients/brightdata.client';
-import { BrightDataSearchClient } from '../clients/brightdata-search.client';
+import { BrightDataSearchClient } from '../../integrations/brightdata';
 import type {
   ProfilePublicEmailInput,
   PublicEmailCandidate,

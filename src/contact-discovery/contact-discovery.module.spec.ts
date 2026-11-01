@@ -8,6 +8,7 @@ jest.mock('../lead-discovery/brand-business-contact.service', () => ({
 
 jest.mock('../integrations/brightdata', () => ({
   BrightDataSearchClient: class BrightDataSearchClient {},
+  BrightDataModule: class BrightDataModule {},
 }));
 
 import { CONTACT_DISCOVERY_JOBS } from '../bullmq/job-types';

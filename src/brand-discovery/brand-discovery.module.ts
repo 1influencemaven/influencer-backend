@@ -7,7 +7,10 @@ import { AiService } from '../ai/ai.service';
 import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUES } from '../bullmq/queue.constants';
-import { BrightDataSearchClient } from '../integrations/brightdata';
+import {
+  BrightDataModule,
+  BrightDataSearchClient,
+} from '../integrations/brightdata';
 import { LeadDiscoveryModule } from '../lead-discovery/lead-discovery.module';
 import { BrandDiscoveryController } from './brand-discovery.controller';
 import { BrandDiscoveryService } from './brand-discovery.service';
@@ -28,6 +31,7 @@ import { MockBrandSource } from './providers/mock.brand-source';
     AiModule,
     AiPromptsModule,
     LeadDiscoveryModule,
+    BrightDataModule,
     ConfigModule,
     BullModule.registerQueue({ name: QUEUES.PROSPECTING }),
   ],
@@ -37,8 +41,12 @@ import { MockBrandSource } from './providers/mock.brand-source';
     FindBrandsProcessor,
     {
       provide: BrandSourceRegistry,
-      inject: [ConfigService, AiService],
-      useFactory: (configService: ConfigService, aiService: AiService) => {
+      inject: [ConfigService, AiService, BrightDataSearchClient],
+      useFactory: (
+        configService: ConfigService,
+        aiService: AiService,
+        brightDataSearch: BrightDataSearchClient,
+      ) => {
         const providers = new Map<BrandSourceId, BrandSourceProvider>();
 
         if (configService.get<string>('NODE_ENV') === 'test') {
@@ -50,9 +58,7 @@ import { MockBrandSource } from './providers/mock.brand-source';
           return new BrandSourceRegistry(providers, configService);
         }
 
-        const webSearch = new BrightDataWebSearchProvider(
-          new BrightDataSearchClient(configService),
-        );
+        const webSearch = new BrightDataWebSearchProvider(brightDataSearch);
         providers.set(
           'brightdata',
           new AiPlusTavilyBrandSource(webSearch, aiService, configService),

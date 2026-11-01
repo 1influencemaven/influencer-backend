@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 
 import type { BrandSourceProvider } from './interfaces/brand-source-provider.interface';
 
-/** Brand Discovery Fase A: única fuente operativa (Unlocker Search). */
+/** Brand Discovery Fase A: única fuente operativa (Bright Data SERP). */
 export const BRAND_SOURCE_IDS = ['brightdata'] as const;
 export type BrandSourceId = (typeof BRAND_SOURCE_IDS)[number];
 

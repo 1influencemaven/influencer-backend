@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 
 import { BrightDataClient } from '../clients/brightdata.client';
-import { BrightDataSearchClient } from '../clients/brightdata-search.client';
+import { BrightDataSearchClient } from '../../integrations/brightdata';
 import { PublicEmailEvidenceDiscoveryService } from './public-email-evidence-discovery.service';
 
 function mockConfig(
