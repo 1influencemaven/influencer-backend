@@ -1,9 +1,10 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import type { Prisma } from '../../generated/prisma/client';
 
-import { AiService } from '../../ai/ai.service';
 import { DEFAULT_IBP_INSTRUCTIONS } from '../../ai/prompts/generate-ibp.prompt';
+import { AiExecutionPublisherService } from '../../ai-execution/ai-execution-publisher.service';
 import { AI_JOBS } from '../../bullmq/job-types';
 import { QUEUES } from '../../bullmq/queue.constants';
 import { IbpStatus } from '../../generated/prisma/enums';
@@ -16,7 +17,7 @@ export class GenerateIdealBrandProfileProcessor extends WorkerHost {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly aiService: AiService,
+    private readonly aiExecutionPublisher: AiExecutionPublisherService,
   ) {
     super();
   }
@@ -26,7 +27,7 @@ export class GenerateIdealBrandProfileProcessor extends WorkerHost {
       return;
     }
 
-    const { influencerId, promptInstructions } =
+    const { influencerId, promptInstructions, requestedByUserId } =
       job.data as GenerateIdealBrandProfileJobData;
 
     const influencer = await this.prisma.influencer.findUnique({
@@ -40,36 +41,43 @@ export class GenerateIdealBrandProfileProcessor extends WorkerHost {
       return;
     }
 
+    const instructions =
+      promptInstructions?.trim() || DEFAULT_IBP_INSTRUCTIONS;
+
     try {
-      const result = await this.aiService.generateIdealBrandProfile(
-        influencer,
-        promptInstructions?.trim() || DEFAULT_IBP_INSTRUCTIONS,
-      );
-      const { metadata, ...fields } = result;
+      const { executionId, correlationId } =
+        await this.aiExecutionPublisher.publishIbpGeneration({
+          influencer,
+          userId: requestedByUserId ?? 'system:nest-ibp',
+          promptInstructions: instructions,
+        });
 
       await this.prisma.idealBrandProfile.update({
         where: { influencerId },
         data: {
-          ...fields,
-          status: IbpStatus.DRAFT,
-          metadata,
+          metadata: {
+            aiExecution: {
+              executionId,
+              correlationId,
+              transport: 'bullmq',
+              requestedAt: new Date().toISOString(),
+            },
+          } as Prisma.InputJsonValue,
         },
       });
 
       this.logger.log(
-        `Ideal brand profile generated for influencer ${influencerId}`,
+        `IBP execution published to ai.execution.requests executionId=${executionId} influencer=${influencerId}`,
       );
     } catch (error) {
       await this.prisma.idealBrandProfile.updateMany({
         where: { influencerId },
         data: { status: IbpStatus.FAILED },
       });
-
       this.logger.error(
-        `Failed to generate ideal brand profile for influencer ${influencerId}`,
+        `Failed to publish IBP execution for influencer ${influencerId}`,
         error instanceof Error ? error.stack : undefined,
       );
-
       throw error;
     }
   }

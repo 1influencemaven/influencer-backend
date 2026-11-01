@@ -12,24 +12,6 @@ describe('AiService', () => {
     complete: jest.fn(),
   };
 
-  const mockInfluencer = {
-    id: 'influencer-id',
-    name: 'Laura Martínez',
-    instagram: '@laurafit_es',
-    tiktok: null,
-    youtube: null,
-    country: 'ES',
-    language: 'es',
-    niche: 'Fitness',
-    subNiche: 'Nutrición deportiva',
-    followers: 180000,
-    engagement: null,
-    email: 'laura@example.com',
-    mediaKitUrl: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -42,31 +24,25 @@ describe('AiService', () => {
     jest.clearAllMocks();
   });
 
-  it('should generate and parse ideal brand profile', async () => {
+  it('plans lead discovery without IBP generateIdealBrandProfile', async () => {
     mockProvider.complete.mockResolvedValue(
       JSON.stringify({
-        targetSectors: ['sportswear'],
-        excludedSectors: ['alcohol'],
-        brandSize: ['smb'],
-        markets: ['Spain'],
-        collaborationTypes: ['product launch'],
-        summary: 'Healthy lifestyle brands.',
-        alertSignals: [],
-        desirableCriteria: ['sustainability'],
+        scraperIds: ['gd_mock'],
+        priorityRoles: ['CMO'],
+        notes: 'ok',
       }),
     );
 
-    const result = await aiService.generateIdealBrandProfile(
-      mockInfluencer,
-      'Custom instructions for testing',
-    );
+    const result = await aiService.planLeadDiscovery({
+      brandName: 'Acme',
+      website: 'https://acme.example',
+      domain: 'acme.example',
+      limit: 5,
+      scraperAllowlist: [{ id: 'gd_mock', name: 'Mock' }],
+    });
 
-    expect(result.targetSectors).toEqual(['sportswear']);
-    expect(result.metadata.provider).toBe('mock');
-    expect(result.metadata.lastGeneratedAt).toBeDefined();
-    expect(result.metadata.promptInstructionsHash).toBeDefined();
-    expect(mockProvider.complete).toHaveBeenCalledWith(
-      expect.stringContaining('Custom instructions for testing'),
-    );
+    expect(result.scraperIds).toEqual(['gd_mock']);
+    expect(mockProvider.complete).toHaveBeenCalled();
+    expect(aiService).not.toHaveProperty('generateIdealBrandProfile');
   });
 });

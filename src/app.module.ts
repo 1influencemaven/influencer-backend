@@ -8,6 +8,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
 import { AuthModule } from './auth/auth.module';
+import { AiExecutionModule } from './ai-execution/ai-execution.module';
 import { BullMqModule } from './bullmq/bullmq.module';
 import { databaseConfig } from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
@@ -35,8 +36,13 @@ import { LeadDiscoveryModule } from './lead-discovery/lead-discovery.module';
       validationOptions: {
         abortEarly: true,
         allowUnknown: true,
+        convert: true,
       },
     }),
+
+    // Bull root before queue consumers (IBP domain + ai.execution.*)
+    BullMqModule,
+    AiExecutionModule,
 
     PrismaModule,
     AuthModule,
@@ -50,7 +56,6 @@ import { LeadDiscoveryModule } from './lead-discovery/lead-discovery.module';
     LoggerModule,
     HealthModule,
     RedisModule,
-    BullMqModule,
 
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],

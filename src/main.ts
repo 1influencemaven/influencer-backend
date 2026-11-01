@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import { ConfigService } from '@nestjs/config';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { configureSwagger } from './config/swagger.config';
 
@@ -12,6 +12,11 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
   app.enableShutdownHooks();
+
+  Logger.log(
+    'IBP uses AiExecutionPublisher → influencer-ai (Mastra); no in-process AiService fallback',
+    'Bootstrap',
+  );
 
   if (configService.get('SWAGGER_ENABLED')) {
     configureSwagger(app);

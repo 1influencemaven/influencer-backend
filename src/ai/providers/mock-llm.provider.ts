@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 
-import type { IbpOutput } from '../schemas/ibp-output.schema';
 import type { LlmProvider } from '../interfaces/llm-provider.interface';
 
 @Injectable()
@@ -34,18 +33,12 @@ export class MockLlmProvider implements LlmProvider {
       });
     }
 
-    const mockOutput: IbpOutput = {
-      targetSectors: ['sportswear', 'wellness', 'healthy food'],
-      excludedSectors: ['alcohol', 'gambling'],
-      brandSize: ['smb', 'mid_market'],
-      markets: ['Spain'],
-      collaborationTypes: ['product launch', 'brand ambassador'],
-      summary:
-        'Healthy lifestyle brands in Spain with tangible products and influencer marketing budget.',
-      alertSignals: ['body-shaming controversies', 'miracle diet claims'],
-      desirableCriteria: ['sustainability', 'authentic messaging'],
-    };
-
-    return JSON.stringify(mockOutput);
+    // Default: brand-search / contact-research style empty-safe JSON for unit tests
+    return JSON.stringify({
+      queries: ['mock brand query'],
+      scraperIds: ['gd_mock_scraper'],
+      priorityRoles: ['CMO'],
+      notes: 'Mock LLM default',
+    });
   }
 }

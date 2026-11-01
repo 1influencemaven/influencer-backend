@@ -1,7 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 
-import { AiModule } from '../ai/ai.module';
+import { AiExecutionModule } from '../ai-execution/ai-execution.module';
 import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUES } from '../bullmq/queue.constants';
@@ -12,7 +12,7 @@ import { GenerateIdealBrandProfileProcessor } from './processors/generate-ideal-
 @Module({
   imports: [
     AuthModule,
-    AiModule,
+    AiExecutionModule,
     AiPromptsModule,
     BullModule.registerQueue({ name: QUEUES.AI }),
   ],
