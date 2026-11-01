@@ -6,9 +6,9 @@ import type { BusinessContactPageResult } from '../utils/unlocker-fetch.util';
  * Distinguishes AI planning (roles/scrapers) from deterministic query generation
  * (PersonQueryLadderBuilder). Does NOT duplicate Leads / ContactChannels.
  *
- * searchHitsCount = total search-result items returned by search providers
- * during the run (e.g. Bright Data 20 + Tavily 8 = 28). NOT leads, unique
- * profiles, selected URLs, emails, or ContactChannels.
+ * searchHitsCount = total search-result items returned by Bright Data Search
+ * during the run. NOT leads, unique profiles, selected URLs, emails, or
+ * ContactChannels. (Historical runs may have summed a removed Tavily fallback.)
  *
  * strategy = "manual" means the caller selected Bright Data scraper optionIds
  * and bypassed AI planning — NOT that a human manually entered a contact.
@@ -54,6 +54,19 @@ export type BusinessContactDiscoverySummary = {
   failureCountsByCategory?: Record<string, number>;
   /** Per-page Unlocker diagnostics — no HTML bodies or emails. */
   pageResults?: BusinessContactPageResult[];
+  /** SERP queries planned for brand commercial inboxes (2A). */
+  plannedSearchQueries?: string[];
+  /** Organic hits inspected from Search (0 = none / not run). */
+  searchHitsProcessed?: number;
+  /** Search requests attempted for 2A commercial SERP (Bright Data only). */
+  searchRequestsAttempted?: number;
+  /** Search attempts classified as provider failure (empty_body, http_error, …). */
+  searchFailureCountsByCategory?: Record<string, number>;
+  /**
+   * Justified discards (no emails/secrets):
+   * low_relevance | external_domain | missing_literal_evidence
+   */
+  discardCountsByReason?: Record<string, number>;
 };
 
 /**
@@ -95,6 +108,7 @@ export type PeopleSearchTrace = {
   selectedProfileUrls: string[];
   brightDataSearchRequests: number;
   brightDataSearchFailures: number;
+  /** Always 0 on new runs. Present on historical runs that used Tavily fallback. */
   tavilyFallbackRequests: number;
   scraperInvocations: number;
   scraperSuccesses: number;
@@ -105,7 +119,7 @@ export type PeopleSearchTrace = {
   scraperErrorCodes: string[];
   /** Additive BD Search tallies (absent on older runs). */
   brightDataDiagnostics?: PeopleSearchBrightDataDiagnostics;
-  /** Additive Tavily tallies (absent on older runs / when fallback off). */
+  /** Historical only — Tavily fallback removed from production. */
   tavilyDiagnostics?: PeopleSearchTavilyDiagnostics;
 };
 
@@ -119,12 +133,13 @@ export type LeadSearchMetadata = {
   plannedQueriesCount: number;
   /** Queries actually sent to search providers (= queries.length). */
   validatedQueriesCount: number;
-  /** Query strings sent (BD then Tavily ops; duplicates allowed if both ran). */
+  /** Query strings sent to Bright Data Search. */
   queries: string[];
   fallbackUsed: boolean;
   /**
-   * When fallbackUsed: ai_plan_failed | search_tavily |
-   * ai_plan_failed_and_search_tavily. Otherwise null.
+   * When fallbackUsed: `ai_plan_failed` (deterministic query ladder).
+   * Historical values may include removed `search_tavily` reasons.
+   * Otherwise null.
    */
   fallbackReason: string | null;
   searchHitsCount: number;
@@ -191,18 +206,16 @@ export interface LeadSourceProvider {
 
 export const LEAD_SOURCE_PROVIDER_TOKEN = Symbol('LEAD_SOURCE_PROVIDER');
 
+/**
+ * Planning fallback only — never an external search/LLM provider.
+ * Second arg kept optional for call-site compatibility; ignored (Tavily removed).
+ */
 export function resolveLeadFallbackReason(
   aiPlanFailed: boolean,
-  searchTavily: boolean,
+  _legacySearchFallback = false,
 ): string | null {
-  if (aiPlanFailed && searchTavily) {
-    return 'ai_plan_failed_and_search_tavily';
-  }
   if (aiPlanFailed) {
     return 'ai_plan_failed';
-  }
-  if (searchTavily) {
-    return 'search_tavily';
   }
   return null;
 }

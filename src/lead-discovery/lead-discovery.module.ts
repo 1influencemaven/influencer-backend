@@ -8,7 +8,7 @@ import { AuthModule } from '../auth/auth.module';
 import { QUEUES } from '../bullmq/queue.constants';
 import { AiService } from '../ai/ai.service';
 import { BrightDataClient } from './clients/brightdata.client';
-import { BrightDataSearchClient } from './clients/brightdata-search.client';
+import { BrightDataSearchClient } from '../integrations/brightdata';
 import { LeadDiscoveryController } from './lead-discovery.controller';
 import { LeadDiscoveryService } from './lead-discovery.service';
 import { ContactChannelService } from './contact-channel.service';
@@ -29,6 +29,7 @@ import { MockLeadSource } from './providers/mock.lead-source';
 import { LeadDiscoverySearchOrchestrator } from './search/lead-discovery-search.orchestrator';
 import { PublicEmailEvidenceDiscoveryService } from './email-discovery/public-email-evidence-discovery.service';
 import { UnlockerDiagnosticsService } from './unlocker-diagnostics.service';
+import { ContactDiscoveryModule } from '../contact-discovery/contact-discovery.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { UnlockerDiagnosticsService } from './unlocker-diagnostics.service';
     ConfigModule,
     AiModule,
     AiPromptsModule,
+    ContactDiscoveryModule,
     BullModule.registerQueue({ name: QUEUES.PROSPECTING }),
   ],
   controllers: [LeadDiscoveryController],

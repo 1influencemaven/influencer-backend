@@ -9,8 +9,6 @@ describe('LeadDiscoverySearchOrchestrator observability', () => {
 
   const configValues: Record<string, string | number | undefined> = {
     LEAD_DISCOVERY_MAX_SEARCH_REQUESTS: 30,
-    LEAD_DISCOVERY_MAX_TAVILY_FALLBACK_REQUESTS: 10,
-    LEAD_DISCOVERY_SEARCH_FALLBACK: 'none',
   };
 
   const configService = {
@@ -21,8 +19,7 @@ describe('LeadDiscoverySearchOrchestrator observability', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    configValues.LEAD_DISCOVERY_SEARCH_FALLBACK = 'none';
-    configValues.TAVILY_API_KEY = undefined;
+    configValues.LEAD_DISCOVERY_MAX_SEARCH_REQUESTS = 30;
     orchestrator = new LeadDiscoverySearchOrchestrator(
       brightDataSearch as never,
       configService,
@@ -255,159 +252,38 @@ describe('LeadDiscoverySearchOrchestrator observability', () => {
     ).toBe(true);
   });
 
-  describe('Tavily fallback diagnostics', () => {
-    let fetchMock: jest.Mock;
-
-    beforeEach(() => {
-      configValues.LEAD_DISCOVERY_SEARCH_FALLBACK = 'tavily';
-      configValues.TAVILY_API_KEY = 'test-tavily-key';
-      configValues.LEAD_DISCOVERY_MAX_TAVILY_FALLBACK_REQUESTS = 3;
-      configValues.LEAD_DISCOVERY_MAX_SEARCH_REQUESTS = 1;
-      orchestrator = new LeadDiscoverySearchOrchestrator(
-        brightDataSearch as never,
-        configService,
-      );
-      fetchMock = jest.fn();
-      global.fetch = fetchMock;
-
-      brightDataSearch.search.mockResolvedValue({
-        items: [],
-        meta: bdMeta({
-          emptyBody: true,
-          responseBytes: 0,
-          resultCategory: 'empty_body',
-        }),
-      });
+  it('never activates an external search fallback when Bright Data is empty', async () => {
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock;
+    configValues.LEAD_DISCOVERY_MAX_SEARCH_REQUESTS = 2;
+    orchestrator = new LeadDiscoverySearchOrchestrator(
+      brightDataSearch as never,
+      configService,
+    );
+    brightDataSearch.search.mockResolvedValue({
+      items: [],
+      meta: bdMeta({
+        emptyBody: true,
+        responseBytes: 0,
+        resultCategory: 'empty_body',
+      }),
     });
 
-    afterEach(() => {
-      jest.restoreAllMocks();
+    const result = await orchestrator.discoverProfileUrls({
+      brandName: 'Acme Brand',
+      website: 'https://acme.com',
+      domain: 'acme.com',
+      limit: 2,
+      priorityRoles: ['Partnerships'],
     });
 
-    it('records httpOkEmptyResults when Tavily returns results: []', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ results: [] }),
-      });
-
-      const result = await orchestrator.discoverProfileUrls({
-        brandName: 'Acme Brand',
-        website: 'https://acme.com',
-        domain: 'acme.com',
-        limit: 2,
-        priorityRoles: ['Partnerships'],
-      });
-
-      expect(result.trace.fallbackActivated).toBe(true);
-      expect(result.trace.tavilyDiagnostics.httpOkEmptyResults).toBeGreaterThan(
-        0,
-      );
-      expect(result.trace.tavilyDiagnostics.httpOkWithResults).toBe(0);
-      expect(result.trace.tavilyDiagnostics.httpError).toBe(0);
-      expect(result.trace.tavilyDiagnostics.hits).toBe(0);
-    });
-
-    it('records httpOkWithResults when Tavily returns hits', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          results: [
-            {
-              url: 'https://www.linkedin.com/in/ada-partnerships',
-              title: 'Ada — Partnerships at Acme Brand',
-              content: 'Partnerships Acme Brand',
-            },
-          ],
-        }),
-      });
-
-      const result = await orchestrator.discoverProfileUrls({
-        brandName: 'Acme Brand',
-        website: 'https://acme.com',
-        domain: 'acme.com',
-        limit: 2,
-        priorityRoles: ['Partnerships'],
-      });
-
-      expect(result.trace.tavilyDiagnostics.httpOkWithResults).toBeGreaterThan(
-        0,
-      );
-      expect(result.trace.tavilyDiagnostics.hits).toBeGreaterThan(0);
-      expect(result.searchHitsCount).toBeGreaterThan(0);
-    });
-
-    it('records HTTP 403 and 500 as httpError', async () => {
-      fetchMock
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 403,
-          json: async () => ({}),
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 500,
-          json: async () => ({}),
-        })
-        .mockResolvedValue({
-          ok: false,
-          status: 500,
-          json: async () => ({}),
-        });
-
-      const result = await orchestrator.discoverProfileUrls({
-        brandName: 'Acme Brand',
-        website: 'https://acme.com',
-        domain: 'acme.com',
-        limit: 2,
-        priorityRoles: ['Partnerships'],
-      });
-
-      expect(result.trace.tavilyDiagnostics.httpError).toBe(
-        result.trace.tavilyDiagnostics.requests,
-      );
-      expect(
-        result.trace.failures.filter((f) => f.code === 'HTTP_ERROR').length,
-      ).toBeGreaterThan(0);
-    });
-
-    it('records network exceptions separately from HTTP errors', async () => {
-      fetchMock.mockRejectedValue(new TypeError('fetch failed'));
-
-      const result = await orchestrator.discoverProfileUrls({
-        brandName: 'Acme Brand',
-        website: 'https://acme.com',
-        domain: 'acme.com',
-        limit: 2,
-        priorityRoles: ['Partnerships'],
-      });
-
-      expect(result.trace.tavilyDiagnostics.networkError).toBe(
-        result.trace.tavilyDiagnostics.requests,
-      );
-      expect(
-        result.trace.failures.every((f) => f.code === 'NETWORK_ERROR' || f.code === 'EMPTY_BODY'),
-      ).toBe(true);
-    });
-
-    it('records timeouts as TIMEOUT', async () => {
-      const err = new Error('The operation was aborted due to timeout');
-      err.name = 'TimeoutError';
-      fetchMock.mockRejectedValue(err);
-
-      const result = await orchestrator.discoverProfileUrls({
-        brandName: 'Acme Brand',
-        website: 'https://acme.com',
-        domain: 'acme.com',
-        limit: 2,
-        priorityRoles: ['Partnerships'],
-      });
-
-      expect(result.trace.tavilyDiagnostics.timeout).toBe(
-        result.trace.tavilyDiagnostics.requests,
-      );
-      expect(result.trace.failures.some((f) => f.code === 'TIMEOUT')).toBe(true);
-    });
+    expect(result.trace.fallbackActivated).toBe(false);
+    expect(result.trace.tavilyRequests).toBe(0);
+    expect(result.trace.tavilyDiagnostics).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.trace.brightDataSearchFailures).toBe(
+      result.trace.brightDataRequests,
+    );
+    jest.restoreAllMocks();
   });
 });

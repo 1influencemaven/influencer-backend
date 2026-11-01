@@ -6,10 +6,9 @@ import {
 } from './brand-business-contact-page-urls.util';
 
 describe('brand-business-contact-page-urls', () => {
-  it('builds URLs in commercial priority order', () => {
+  it('builds URLs in commercial priority order (primary then secondary)', () => {
     const urls = buildBrandBusinessContactPageUrls('https://Brand.com', 12);
     expect(urls[0]).toBe('https://brand.com/partnerships');
-    expect(urls[urls.length - 1]).toBe('https://brand.com/contact');
     expect(urls).toHaveLength(12);
     expect(urls.map((u) => new URL(u).pathname)).toEqual([
       ...BRAND_BUSINESS_CONTACT_PATHS,
@@ -25,15 +24,16 @@ describe('brand-business-contact-page-urls', () => {
     ]);
   });
 
-  it('does not include secondary expansion paths in v1', () => {
+  it('includes secondary commercial paths when maxPages allows', () => {
     const urls = buildBrandBusinessContactPageUrls('https://brand.com', 20);
-    for (const path of BRAND_BUSINESS_CONTACT_SECONDARY_PATHS) {
-      if (path === '/') {
-        expect(urls.every((u) => new URL(u).pathname !== '/')).toBe(true);
-      } else {
-        expect(urls.some((u) => u.endsWith(path))).toBe(false);
-      }
-    }
+    expect(urls).toContain('https://brand.com/press');
+    expect(urls).toContain('https://brand.com/about');
+    expect(urls).toContain('https://brand.com/contact-us');
+    expect(urls.some((u) => new URL(u).pathname === '/')).toBe(true);
+    expect(urls.length).toBe(
+      BRAND_BUSINESS_CONTACT_PATHS.length +
+        BRAND_BUSINESS_CONTACT_SECONDARY_PATHS.length,
+    );
   });
 
   it('strips query and hash and rejects other hosts', () => {

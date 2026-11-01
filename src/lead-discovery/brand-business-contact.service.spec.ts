@@ -164,4 +164,43 @@ describe('BrandBusinessContactService', () => {
     expect(updateData.commercialRelevance).toBe(CommercialRelevance.HIGH);
     expect(updateData.metadata.evidences).toHaveLength(2);
   });
+
+  /**
+   * DEF-3 (BBC audit): legacy writer merges evidences by sourceUrl only.
+   * A second snippet for the same URL is dropped — documented limitation;
+   * do not change shared writer without a dedicated Visibility/BBC impact review.
+   */
+  it('DEF-3: does not append a second evidence snippet for the same sourceUrl', async () => {
+    prisma.brandBusinessContact.findUnique.mockResolvedValue({
+      id: 'bbc1',
+      commercialRelevance: CommercialRelevance.HIGH,
+      isGeneric: true,
+      label: 'Partnerships',
+      sourceUrl: 'https://brand.com/partnerships',
+      metadata: {
+        evidences: [
+          {
+            sourceUrl: 'https://brand.com/partnerships',
+            evidenceSnippet: 'first partnerships@brand.com',
+            discoveredAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+    });
+    prisma.brandBusinessContact.update.mockResolvedValue({ id: 'bbc1' });
+
+    await service.upsertFromDiscovery({
+      brandCandidateId: 'b1',
+      email: 'partnerships@brand.com',
+      sourceUrl: 'https://brand.com/partnerships',
+      evidenceSnippet: 'second different snippet partnerships@brand.com',
+    });
+
+    const updateData = prisma.brandBusinessContact.update.mock.calls[0][0].data;
+    expect(updateData.metadata.evidences).toHaveLength(1);
+    expect(updateData.metadata.evidences[0].evidenceSnippet).toBe(
+      'first partnerships@brand.com',
+    );
+  });
 });
+

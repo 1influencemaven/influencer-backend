@@ -1,8 +1,8 @@
 import { normalizeWebsiteBase } from './public-email-page-urls.util';
 
 /**
- * Phase 2A v1 — commercial-intent paths only (ordered).
- * Secondary paths (/contact-us, /about, /team, /, /press, …) reserved for future expansion.
+ * Commercial-intent paths (ordered). Primary first, then secondary coverage
+ * (press / about / contact variants). Homepage `/` is last and optional under maxPages.
  */
 export const BRAND_BUSINESS_CONTACT_PATHS = [
   '/partnerships',
@@ -19,7 +19,7 @@ export const BRAND_BUSINESS_CONTACT_PATHS = [
   '/contact',
 ] as const;
 
-/** Documented for future expansion — not fetched in Phase 2A v1. */
+/** Fetched after primary paths when MAX_BRAND_BUSINESS_CONTACT_PAGES allows. */
 export const BRAND_BUSINESS_CONTACT_SECONDARY_PATHS = [
   '/contact-us',
   '/pages/contact',
@@ -28,6 +28,12 @@ export const BRAND_BUSINESS_CONTACT_SECONDARY_PATHS = [
   '/about',
   '/team',
   '/',
+] as const;
+
+/** Full ordered path list used by `buildBrandBusinessContactPageUrls`. */
+export const BRAND_BUSINESS_CONTACT_FETCH_PATHS = [
+  ...BRAND_BUSINESS_CONTACT_PATHS,
+  ...BRAND_BUSINESS_CONTACT_SECONDARY_PATHS,
 ] as const;
 
 /**
@@ -67,11 +73,11 @@ export function buildBrandBusinessContactPageUrls(
   const seen = new Set<string>();
   const urls: string[] = [];
 
-  for (const path of BRAND_BUSINESS_CONTACT_PATHS) {
+  for (const path of BRAND_BUSINESS_CONTACT_FETCH_PATHS) {
     if (urls.length >= maxPages) {
       break;
     }
-    const raw = `${base}${path}`;
+    const raw = path === '/' ? base : `${base}${path}`;
     const normalized = normalizeBrandBusinessContactPageUrl(raw, base);
     if (!normalized) {
       continue;

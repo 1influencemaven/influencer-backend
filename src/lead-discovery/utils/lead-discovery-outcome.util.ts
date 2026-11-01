@@ -43,8 +43,9 @@ function isPeopleScraperTotalFailure(
 }
 
 /**
- * Bright Data search exhausted with zero usable hits and no Tavily fallback.
+ * Bright Data search exhausted with zero usable hits.
  * Known zeros only — absent trace is not treated as failure.
+ * Historical `tavilyFallbackRequests` is ignored (Tavily removed from production).
  */
 function isPeopleSearchProviderFailure(
   trace: PeopleSearchTrace | null | undefined,
@@ -55,7 +56,6 @@ function isPeopleSearchProviderFailure(
   return (
     trace.brightDataSearchRequests > 0 &&
     trace.brightDataSearchFailures === trace.brightDataSearchRequests &&
-    trace.tavilyFallbackRequests === 0 &&
     trace.searchHitsReceived === 0
   );
 }
@@ -88,12 +88,12 @@ export function classifyLeadDiscoveryOutcome(
         : failureFlags[0];
     const warningMessage =
       warningCode === 'mixed_provider_failure'
-        ? 'One or more lead-discovery providers failed; results may be incomplete.'
+        ? 'Bright Data search and/or Unlocker failed; results may be incomplete.'
         : warningCode === 'unlocker_all_pages_failed'
           ? 'Business-contact Unlocker failed for every attempted page.'
           : warningCode === 'people_scraper_all_failed'
             ? 'People scraper failed for every selected profile URL.'
-            : 'People search provider failed with no usable search hits.';
+            : 'Bright Data search failed with no usable search hits.';
 
     return {
       outcome: 'PROVIDER_FAILURE',

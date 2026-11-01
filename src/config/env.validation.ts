@@ -33,7 +33,9 @@ export const envValidationSchema = Joi.object({
 
   THROTTLE_LIMIT: Joi.number().required(),
 
-  AI_PROVIDER: Joi.string().valid('cursor', 'anthropic').optional(),
+  AI_PROVIDER: Joi.string()
+    .valid('ollama', 'anthropic', 'cursor')
+    .optional(),
 
   // La key solo es obligatoria (y no vacía) cuando su proveedor es el activo.
   // Docker Compose pasa las variables no definidas como cadena vacía, por lo
@@ -54,7 +56,12 @@ export const envValidationSchema = Joi.object({
 
   ANTHROPIC_MODEL: Joi.string().default('claude-sonnet-4-20250514'),
 
-  // Runtime always uses Bright Data Search. `tavily` is accepted so leftover .env files still boot.
+  // Local Ollama — no API key. Defaults suit host-run Nest (not containerized app).
+  OLLAMA_BASE_URL: Joi.string().uri().default('http://127.0.0.1:11434'),
+  OLLAMA_MODEL: Joi.string().default('llama3.2:3b'),
+  OLLAMA_TIMEOUT_MS: Joi.number().integer().min(1000).default(120000),
+
+  // Runtime always uses Bright Data Search. `tavily` accepted only so leftover .env still boots (ignored).
   BRAND_SOURCE: Joi.string().valid('brightdata', 'tavily').default('brightdata'),
 
   // Brand Discovery search-query planning: llm (default) or deterministic templates.
@@ -62,16 +69,24 @@ export const envValidationSchema = Joi.object({
     .valid('llm', 'templates')
     .default('llm'),
 
-  // Optional: Lead Discovery search fallback only. Brand Discovery uses Bright Data.
-  TAVILY_API_KEY: Joi.string().optional().allow(''),
-
   BRIGHTDATA_API_KEY: Joi.string().optional().allow(''),
 
   BRIGHTDATA_DATASET_ID: Joi.string().optional().allow(''),
 
   BRIGHTDATA_ZONE: Joi.string().optional().allow(''),
 
+  /** SERP API zone — must NOT be the Unlocker zone. Required for search(). */
+  BRIGHTDATA_SERP_ZONE: Joi.string().optional().allow(''),
+
+  /** Web Unlocker zone for fetchRawHtml() — default mcp_unlocker. */
   BRIGHTDATA_UNLOCKER_ZONE: Joi.string().optional().allow(''),
+
+  /** Demo caps for AI-orchestrated contact research (P0). */
+  AI_RESEARCH_MAX_SERP_QUERIES: Joi.number().integer().min(1).max(20).default(5),
+  AI_RESEARCH_MAX_PAGES: Joi.number().integer().min(1).max(20).default(5),
+  AI_RESEARCH_MAX_ITERATIONS: Joi.number().integer().min(1).max(40).default(12),
+  /** When true (default under rebuild), prefer AI research over allowlist-only BBC. */
+  CONTACT_DISCOVERY_AI_ORCHESTRATOR: Joi.boolean().default(true),
 
   BRIGHTDATA_SEARCH_TIMEOUT_MS: Joi.number().integer().min(1000).default(30000),
 
@@ -108,21 +123,11 @@ export const envValidationSchema = Joi.object({
     .max(50)
     .default(15),
 
-  LEAD_DISCOVERY_SEARCH_FALLBACK: Joi.string()
-    .valid('none', 'tavily')
-    .default('tavily'),
-
   LEAD_DISCOVERY_MAX_SEARCH_REQUESTS: Joi.number()
     .integer()
     .min(1)
     .max(100)
     .default(30),
-
-  LEAD_DISCOVERY_MAX_TAVILY_FALLBACK_REQUESTS: Joi.number()
-    .integer()
-    .min(0)
-    .max(30)
-    .default(10),
 
   LEAD_DISCOVERY_LIMIT: Joi.number().integer().min(1).max(20).default(10),
 
@@ -132,4 +137,9 @@ export const envValidationSchema = Joi.object({
 
   // ADMIN Unlocker diagnostic probe (local only; ignored / forbidden in production).
   UNLOCKER_DIAGNOSTICS_ENABLED: Joi.boolean().default(false),
+
+  // Phase 1 Lead Discovery controlled removal. Default false.
+  // Enable ONLY in local .env — never production without explicit approval.
+  CONTACT_DISCOVERY_REBUILD_MODE: Joi.boolean().default(false),
 });
+

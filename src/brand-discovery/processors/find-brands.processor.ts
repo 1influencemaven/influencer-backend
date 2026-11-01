@@ -45,6 +45,8 @@ export class FindBrandsProcessor extends WorkerHost {
       const { runId, brandCandidateId, promptInstructions } =
         job.data as FindLeadsJobData;
 
+      // When CONTACT_DISCOVERY_REBUILD_MODE is on, executeDiscovery fails the
+      // run without Bright Data calls. Prospecting queue / find-brands untouched.
       this.logger.log(
         `Processing find-leads for brand ${brandCandidateId} (run ${runId})`,
       );

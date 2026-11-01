@@ -19,6 +19,8 @@ jest.mock('./utils/brand-business-contact-page-urls.util', () => {
 describe('BrandBusinessContactDiscoveryService', () => {
   const unlocker = {
     fetchRawHtml: jest.fn(),
+    search: jest.fn(),
+    isConfigured: jest.fn(() => false),
   };
   const configService = {
     get: jest.fn((key: string) => {
@@ -40,6 +42,25 @@ describe('BrandBusinessContactDiscoveryService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    unlocker.isConfigured.mockReturnValue(false);
+    unlocker.search.mockResolvedValue({
+      items: [],
+      meta: {
+        provider: 'brightdata',
+        query: 'q',
+        attempt: 1,
+        httpStatus: 200,
+        responseBytes: 2,
+        elapsedMs: 1,
+        emptyBody: false,
+        resultCategory: 'organic_empty',
+      },
+    });
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'MAX_BRAND_BUSINESS_CONTACT_PAGES') return 12;
+      if (key === 'MAX_BRAND_BUSINESS_CONTACTS') return 15;
+      return undefined;
+    });
     normalizeMock.mockImplementation((raw: string, base: string) =>
       actualNormalize(raw, base),
     );
@@ -130,6 +151,84 @@ describe('BrandBusinessContactDiscoveryService', () => {
     expect(result.candidates.map((c) => c.emailNormalized)).toEqual([
       'influencer@brand.com',
     ]);
+    expect(result.summary.discardCountsByReason).toMatchObject({
+      low_relevance: 2,
+      external_domain: 1,
+    });
+  });
+
+  it('keeps generic brand inboxes without a personal name', async () => {
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'MAX_BRAND_BUSINESS_CONTACT_PAGES') return 12;
+      if (key === 'MAX_BRAND_BUSINESS_CONTACTS') return 15;
+      return undefined;
+    });
+    // `/press` is secondary and beyond default maxPages=12 (12 primary paths).
+    // Use a primary path so the fixture is actually fetched.
+    unlocker.fetchRawHtml.mockImplementation(async (url: string) => {
+      if (url.endsWith('/contact')) {
+        return htmlWith('info@brand.com', 'press@brand.com');
+      }
+      return failedFetch();
+    });
+
+    const result = await service.discover({
+      brandCandidateId: 'b1',
+      brandName: 'Brand Co',
+      website: 'https://brand.com',
+      domain: 'brand.com',
+    });
+
+    expect(result.candidates.map((c) => c.emailNormalized).sort()).toEqual([
+      'info@brand.com',
+      'press@brand.com',
+    ]);
+    expect(
+      result.candidates.every(
+        (c) => c.isGeneric && c.commercialRelevance === CommercialRelevance.HIGH,
+      ),
+    ).toBe(true);
+    expect(result.summary.plannedSearchQueries?.length).toBeGreaterThan(0);
+  });
+
+  it('extracts literal emails from Search snippets without inventing addresses', async () => {
+    unlocker.isConfigured.mockReturnValue(true);
+    unlocker.search.mockResolvedValue({
+      items: [
+        {
+          title: 'Brand partnerships',
+          url: 'https://brand.com/partnerships',
+          snippet: 'Email partnerships@brand.com for collabs',
+          position: 1,
+          domain: 'brand.com',
+        },
+      ],
+      meta: {
+        provider: 'brightdata',
+        query: 'q',
+        attempt: 1,
+        httpStatus: 200,
+        responseBytes: 120,
+        elapsedMs: 1,
+        emptyBody: false,
+        resultCategory: 'ok',
+      },
+    });
+    unlocker.fetchRawHtml.mockResolvedValue(failedFetch());
+
+    const result = await service.discover({
+      brandCandidateId: 'b1',
+      brandName: 'Brand',
+      website: 'https://brand.com',
+      domain: 'brand.com',
+    });
+
+    expect(result.candidates.map((c) => c.emailNormalized)).toContain(
+      'partnerships@brand.com',
+    );
+    expect(result.summary.searchHitsProcessed).toBeGreaterThan(0);
+    expect(unlocker.search).toHaveBeenCalled();
+    expect(JSON.stringify(result.candidates)).not.toMatch(/invented|fake@/i);
   });
 
   it('skips invalid website without throwing', async () => {

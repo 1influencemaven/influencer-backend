@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { BrightDataSearchClient } from '../../lead-discovery/clients/brightdata-search.client';
+import { BrightDataSearchClient } from '../../integrations/brightdata';
 import type {
   WebSearchHit,
   WebSearchProvider,

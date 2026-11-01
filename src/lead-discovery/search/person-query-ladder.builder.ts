@@ -33,6 +33,16 @@ export class PersonQueryLadderBuilder {
 
     this.pushUnique(queries, seen, `"${brand}" influencer marketing`);
     this.pushUnique(queries, seen, `"${brand}" partnerships LinkedIn`);
+    this.pushUnique(
+      queries,
+      seen,
+      `"${brand}" "Influencer Marketing Manager" LinkedIn`,
+    );
+    this.pushUnique(
+      queries,
+      seen,
+      `"${brand}" "Brand Partnerships" OR "Creator Partnerships" LinkedIn`,
+    );
 
     return queries;
   }

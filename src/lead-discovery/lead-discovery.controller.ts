@@ -123,7 +123,7 @@ export class LeadDiscoveryController {
   @ApiOperation({
     summary: 'Buscar contactos/emails en marcas APPROVED',
     description:
-      'Encola find-leads por marca. Default provider ai+brightdata (autónomo; sin options). Manual brightdata requiere options.optionIds.',
+      'Sin rebuild: encola find-leads (prospecting). Con CONTACT_DISCOVERY_REBUILD_MODE: encola BBC v1 en cola contact-discovery (provider bbc-brightdata; allowlist HTML; Search no conectado).',
   })
   @ApiAcceptedResponse({ description: 'Jobs encolados' })
   @ApiBadRequestResponse({

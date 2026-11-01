@@ -117,7 +117,7 @@ describe('AiPlusBrightDataLeadSource searchMetadata', () => {
     expect(result.searchMetadata?.tracks).toEqual(['2B']);
   });
 
-  it('marks search_tavily when orchestrator activates Tavily fallback', async () => {
+  it('does not mark search fallback when orchestrator reports legacy tavily flags', async () => {
     aiService.planLeadDiscovery.mockResolvedValue({
       scraperIds: ['gd_people'],
       priorityRoles: ['CEO'],
@@ -125,27 +125,40 @@ describe('AiPlusBrightDataLeadSource searchMetadata', () => {
     searchOrchestrator.discoverProfileUrls.mockResolvedValue({
       profileUrls: ['https://linkedin.com/in/ada'],
       plannedQueries: ['q1'],
-      executedQueries: ['q1', 'q1'],
+      executedQueries: ['q1'],
       searchHitsCount: 20,
       trace: {
         searchRunId: 'sr-2',
         brightDataRequests: 1,
-        brightDataSearchFailures: 1,
-        tavilyRequests: 1,
-        fallbackActivated: true,
+        brightDataSearchFailures: 0,
+        tavilyRequests: 0,
+        fallbackActivated: false,
         queriesExecuted: 1,
         linkedinUrlValidated: 1,
         linkedinCandidatesFound: 1,
         qualifiedCandidates: 1,
         selectedUrls: ['https://linkedin.com/in/ada'],
         failures: [],
+        brightDataDiagnostics: {
+          requests: 1,
+          hits: 1,
+          emptyBody: 0,
+          parseError: 0,
+          organicEmpty: 0,
+          networkError: 0,
+          httpError: 0,
+          httpStatusCounts: { '200': 1 },
+        },
       },
     });
 
     const result = await provider.findContacts(ctx);
 
-    expect(result.searchMetadata?.fallbackUsed).toBe(true);
-    expect(result.searchMetadata?.fallbackReason).toBe('search_tavily');
+    expect(result.searchMetadata?.fallbackUsed).toBe(false);
+    expect(result.searchMetadata?.fallbackReason).toBeNull();
+    expect(result.searchMetadata?.peopleSearchTrace?.tavilyFallbackRequests).toBe(
+      0,
+    );
   });
 
   it('returns metadata with empty contacts when no profile URLs', async () => {

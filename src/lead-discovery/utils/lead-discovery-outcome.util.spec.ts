@@ -203,7 +203,7 @@ describe('classifyLeadDiscoveryOutcome', () => {
     expect(result.warningCode).toBe('people_scraper_all_failed');
   });
 
-  it('PROVIDER_FAILURE when people search provider fails with no fallback hits', () => {
+  it('PROVIDER_FAILURE when people search provider fails with zero hits', () => {
     const result = classifyLeadDiscoveryOutcome({
       leadsPersisted: 0,
       businessContactsCreated: 0,
@@ -218,6 +218,50 @@ describe('classifyLeadDiscoveryOutcome', () => {
 
     expect(result.outcome).toBe('PROVIDER_FAILURE');
     expect(result.warningCode).toBe('people_search_provider_failed');
+  });
+
+  it('PROVIDER_FAILURE for BD search total failure even if historical tavilyFallbackRequests > 0', () => {
+    const result = classifyLeadDiscoveryOutcome({
+      leadsPersisted: 0,
+      businessContactsCreated: 0,
+      peopleSearchTrace: trace({
+        searchHitsReceived: 0,
+        brightDataSearchRequests: 5,
+        brightDataSearchFailures: 5,
+        tavilyFallbackRequests: 10,
+        searchFailureCodes: ['EMPTY_BODY'],
+      }),
+    });
+
+    expect(result.outcome).toBe('PROVIDER_FAILURE');
+    expect(result.warningCode).toBe('people_search_provider_failed');
+  });
+
+  it('mixed_provider_failure when Unlocker pages and BD search both fail', () => {
+    const result = classifyLeadDiscoveryOutcome({
+      leadsPersisted: 0,
+      businessContactsCreated: 0,
+      businessContactDiscovery: {
+        pagesAttempted: 12,
+        pagesSucceeded: 0,
+        pagesFailed: 12,
+        emailsFound: 0,
+        contactsCreated: 0,
+        contactsUpdated: 0,
+        failureCountsByCategory: { empty_body: 12 },
+      },
+      peopleSearchTrace: trace({
+        searchHitsReceived: 0,
+        brightDataSearchRequests: 21,
+        brightDataSearchFailures: 21,
+        tavilyFallbackRequests: 0,
+        searchFailureCodes: ['EMPTY_BODY'],
+      }),
+    });
+
+    expect(result.outcome).toBe('PROVIDER_FAILURE');
+    expect(result.warningCode).toBe('mixed_provider_failure');
+    expect(result.warningMessage).toMatch(/Bright Data/i);
   });
 
   it('mixed_provider_failure when Unlocker and scraper both fail', () => {

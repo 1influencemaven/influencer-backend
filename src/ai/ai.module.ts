@@ -6,6 +6,7 @@ import { LLM_PROVIDER_TOKEN } from './interfaces/llm-provider.interface';
 import { AnthropicProvider } from './providers/anthropic.provider';
 import { CursorProvider } from './providers/cursor.provider';
 import { MockLlmProvider } from './providers/mock-llm.provider';
+import { OllamaProvider } from './providers/ollama.provider';
 
 @Module({
   imports: [ConfigModule],
@@ -15,28 +16,34 @@ import { MockLlmProvider } from './providers/mock-llm.provider';
       provide: LLM_PROVIDER_TOKEN,
       inject: [ConfigService],
       // Instanciación perezosa: solo se construye el provider seleccionado.
-      // Los constructores hacen getOrThrow de su API key, así que registrar
-      // todos como providers de Nest exigiría tener todas las keys definidas.
+      // Cursor/Anthropic hacen getOrThrow de su API key; Ollama no requiere key.
       useFactory: (configService: ConfigService) => {
         if (configService.get<string>('NODE_ENV') === 'test') {
           return new MockLlmProvider();
         }
 
-        // TEMPORAL: producción usa Cursor (AI_PROVIDER=cursor) mientras se
-        // adquiere Claude (Anthropic). Al tener la key, basta con definir
-        // AI_PROVIDER=anthropic y ANTHROPIC_API_KEY en el entorno; el default
-        // por ambiente ya apunta a anthropic en producción.
+        // Local: prefer AI_PROVIDER=ollama (no Cursor dependency).
+        // Production: AI_PROVIDER=anthropic (+ ANTHROPIC_API_KEY).
+        // Cursor remains an optional dev tool when AI_PROVIDER=cursor.
         const provider =
           configService.get<string>('AI_PROVIDER') ??
           (configService.get<string>('NODE_ENV') === 'production'
             ? 'anthropic'
-            : 'cursor');
+            : 'ollama');
 
         if (provider === 'anthropic') {
           return new AnthropicProvider(configService);
         }
+        if (provider === 'ollama') {
+          return new OllamaProvider(configService);
+        }
+        if (provider === 'cursor') {
+          return new CursorProvider(configService);
+        }
 
-        return new CursorProvider(configService);
+        throw new Error(
+          `Unsupported AI_PROVIDER="${provider}". Use ollama | anthropic | cursor.`,
+        );
       },
     },
   ],

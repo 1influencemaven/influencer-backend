@@ -193,8 +193,7 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
     scraperFailures: number;
     scraperErrorCodes: string[];
   }): LeadSearchMetadata {
-    const searchTavily = args.searchResult.trace.fallbackActivated;
-    const fallbackUsed = args.aiPlanFailed || searchTavily;
+    const fallbackUsed = args.aiPlanFailed;
     const trace = args.searchResult.trace;
     return {
       strategy: 'llm',
@@ -205,7 +204,7 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
       validatedQueriesCount: args.searchResult.executedQueries.length,
       queries: args.searchResult.executedQueries,
       fallbackUsed,
-      fallbackReason: resolveLeadFallbackReason(args.aiPlanFailed, searchTavily),
+      fallbackReason: resolveLeadFallbackReason(args.aiPlanFailed),
       searchHitsCount: args.searchResult.searchHitsCount,
       peopleSearchTrace: buildPeopleSearchTrace({
         searchHitsReceived: args.searchResult.searchHitsCount,
@@ -215,17 +214,13 @@ export class AiPlusBrightDataLeadSource implements LeadSourceProvider {
         selectedProfileUrls: trace.selectedUrls,
         brightDataSearchRequests: trace.brightDataRequests,
         brightDataSearchFailures: trace.brightDataSearchFailures,
-        tavilyFallbackRequests: trace.tavilyRequests,
+        tavilyFallbackRequests: 0,
         scraperInvocations: args.scraperInvocations,
         scraperSuccesses: args.scraperSuccesses,
         scraperFailures: args.scraperFailures,
         searchFailureCodes: trace.failures.map((f) => f.code),
         scraperErrorCodes: args.scraperErrorCodes,
         brightDataDiagnostics: trace.brightDataDiagnostics,
-        tavilyDiagnostics:
-          trace.fallbackActivated && trace.tavilyRequests > 0
-            ? trace.tavilyDiagnostics
-            : undefined,
       }),
     };
   }

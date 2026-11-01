@@ -1,49 +1,14 @@
-export type SearchQuery = {
-  text: string;
-  geo?: { hl?: string; gl?: string };
-  num?: number;
-};
+/** Shared Search types live in integrations/brightdata (Brand + Lead Discovery). */
+export type {
+  BrightDataSearchResultCategory,
+  SearchExecutionMetadata,
+  SearchProviderId,
+  SearchQuery,
+  SearchResult,
+  SearchResultItem,
+} from '../../integrations/brightdata/search.types';
 
-export type SearchResultItem = {
-  title: string;
-  url: string;
-  snippet: string;
-  position: number;
-  domain: string;
-};
-
-export type SearchProviderId = 'brightdata' | 'tavily';
-
-/**
- * Final-attempt classification for one Bright Data Search call.
- * No response bodies — only status / size / category.
- */
-export type BrightDataSearchResultCategory =
-  | 'ok'
-  | 'empty_body'
-  | 'parse_error'
-  | 'organic_empty'
-  | 'network_error'
-  | 'http_error';
-
-export type SearchExecutionMetadata = {
-  provider: SearchProviderId;
-  zone?: string;
-  attempt: number;
-  httpStatus: number;
-  responseBytes: number;
-  elapsedMs: number;
-  emptyBody: boolean;
-  parseError?: string;
-  query: string;
-  /** Aggregatable outcome of this attempt (diagnostics). */
-  resultCategory?: BrightDataSearchResultCategory;
-};
-
-export type SearchResult = {
-  items: SearchResultItem[];
-  meta: SearchExecutionMetadata;
-};
+import type { SearchProviderId } from '../../integrations/brightdata/search.types';
 
 export type LinkedInCandidate = {
   url: string;
@@ -85,7 +50,9 @@ export type BrightDataSearchDiagnostics = {
   httpStatusCounts: Record<string, number>;
 };
 
-/** Aggregated Tavily fallback diagnostics (no keys / snippets / bodies). */
+/**
+ * @deprecated Tavily fallback removed. Optional on traces for older fixtures only.
+ */
 export type TavilySearchDiagnostics = {
   requests: number;
   hits: number;
@@ -101,7 +68,9 @@ export type LeadSearchRunTrace = {
   brightDataRequests: number;
   /** BD search attempts that returned empty body / network failure / HTTP 0. */
   brightDataSearchFailures: number;
+  /** Always 0 on new runs (Tavily removed). Historical runs may have been > 0. */
   tavilyRequests: number;
+  /** Always false on new runs — no external search fallback. */
   fallbackActivated: boolean;
   queriesExecuted: number;
   /** Pre-dedupe count of LinkedIn `/in/` URL-validated (and scored) candidates. */
@@ -113,7 +82,8 @@ export type LeadSearchRunTrace = {
   selectedUrls: string[];
   failures: SearchFailure[];
   brightDataDiagnostics: BrightDataSearchDiagnostics;
-  tavilyDiagnostics: TavilySearchDiagnostics;
+  /** Absent on new runs. */
+  tavilyDiagnostics?: TavilySearchDiagnostics;
 };
 
 export type LeadSearchDiscoveryResult = {

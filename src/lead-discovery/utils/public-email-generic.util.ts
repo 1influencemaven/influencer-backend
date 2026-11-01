@@ -1,6 +1,7 @@
 const GENERIC_LOCAL_PARTS = new Set([
   'info',
   'hello',
+  'hola',
   'contact',
   'contacto',
   'support',
@@ -10,6 +11,7 @@ const GENERIC_LOCAL_PARTS = new Set([
   'press',
   'media',
   'partnerships',
+  'partnership',
   'business',
   'careers',
   'hr',
@@ -19,6 +21,16 @@ const GENERIC_LOCAL_PARTS = new Set([
   'no-reply',
   'prensa',
   'ventas',
+  'affiliate',
+  'affiliates',
+  'creator',
+  'creators',
+  'collab',
+  'collaborations',
+  'influencer',
+  'influencers',
+  'ambassador',
+  'ambassadors',
 ]);
 
 export function classifyPublicEmailGeneric(email: string): boolean {

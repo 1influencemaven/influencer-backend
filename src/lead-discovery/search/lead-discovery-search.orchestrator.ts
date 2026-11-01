@@ -10,7 +10,6 @@ import type {
   LinkedInCandidate,
   SearchExecutionMetadata,
   SearchFailure,
-  TavilySearchDiagnostics,
 } from '../interfaces/lead-search.interface';
 import { CandidateProfileRanker } from './candidate-profile.ranker';
 import { PersonQueryLadderBuilder } from './person-query-ladder.builder';
@@ -23,14 +22,6 @@ export type LeadDiscoverySearchInput = {
   priorityRoles?: string[];
 };
 
-type TavilyFallbackResult = {
-  candidates: LinkedInCandidate[];
-  executedQueries: string[];
-  searchHitsCount: number;
-  requestsAttempted: number;
-  diagnostics: TavilySearchDiagnostics;
-};
-
 function emptyBrightDataDiagnostics(): BrightDataSearchDiagnostics {
   return {
     requests: 0,
@@ -41,18 +32,6 @@ function emptyBrightDataDiagnostics(): BrightDataSearchDiagnostics {
     networkError: 0,
     httpError: 0,
     httpStatusCounts: {},
-  };
-}
-
-function emptyTavilyDiagnostics(): TavilySearchDiagnostics {
-  return {
-    requests: 0,
-    hits: 0,
-    httpOkWithResults: 0,
-    httpOkEmptyResults: 0,
-    httpError: 0,
-    networkError: 0,
-    timeout: 0,
   };
 }
 
@@ -150,25 +129,12 @@ function isBrightDataSearchFailure(
   return null;
 }
 
-function isTimeoutError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-  return (
-    error.name === 'TimeoutError' ||
-    error.name === 'AbortError' ||
-    /timeout/i.test(error.message)
-  );
-}
-
 @Injectable()
 export class LeadDiscoverySearchOrchestrator {
   private readonly logger = new Logger(LeadDiscoverySearchOrchestrator.name);
   private readonly ladderBuilder = new PersonQueryLadderBuilder();
   private readonly ranker = new CandidateProfileRanker();
   private readonly maxBrightDataRequests: number;
-  private readonly maxTavilyRequests: number;
-  private readonly fallbackMode: string;
 
   constructor(
     private readonly brightDataSearch: BrightDataSearchClient,
@@ -176,16 +142,12 @@ export class LeadDiscoverySearchOrchestrator {
   ) {
     this.maxBrightDataRequests =
       this.configService.get<number>('LEAD_DISCOVERY_MAX_SEARCH_REQUESTS') ?? 30;
-    this.maxTavilyRequests =
-      this.configService.get<number>('LEAD_DISCOVERY_MAX_TAVILY_FALLBACK_REQUESTS') ??
-      10;
-    this.fallbackMode =
-      this.configService
-        .get<string>('LEAD_DISCOVERY_SEARCH_FALLBACK')
-        ?.trim()
-        .toLowerCase() ?? 'tavily';
   }
 
+  /**
+   * Discovers LinkedIn profile URLs via Bright Data Search only.
+   * No external search fallback (Tavily removed).
+   */
   async discoverProfileUrls(
     input: LeadDiscoverySearchInput,
   ): Promise<LeadSearchDiscoveryResult> {
@@ -200,11 +162,9 @@ export class LeadDiscoverySearchOrchestrator {
     let searchHitsCount = 0;
     let brightDataRequests = 0;
     let brightDataSearchFailures = 0;
-    let tavilyRequests = 0;
     let queriesExecuted = 0;
     const allCandidates: LinkedInCandidate[] = [];
     const brightDataDiagnostics = emptyBrightDataDiagnostics();
-    let tavilyDiagnostics = emptyTavilyDiagnostics();
 
     const minRequired = Math.max(1, Math.min(input.limit, 3));
     const maxCandidates = input.limit * 3;
@@ -249,27 +209,8 @@ export class LeadDiscoverySearchOrchestrator {
       allCandidates.push(...ranked);
     }
 
-    let deduped = this.ranker.dedupeCandidates(allCandidates);
-    let qualified = this.ranker.filterByThreshold(deduped);
-    let fallbackActivated = false;
-
-    if (qualified.length < minRequired && this.shouldUseTavilyFallback()) {
-      fallbackActivated = true;
-      const tavilyResult = await this.runTavilyFallback(
-        plannedQueries,
-        input.brandName,
-        failures,
-        input.priorityRoles,
-      );
-      tavilyRequests = tavilyResult.requestsAttempted;
-      tavilyDiagnostics = tavilyResult.diagnostics;
-      executedQueries.push(...tavilyResult.executedQueries);
-      searchHitsCount += tavilyResult.searchHitsCount;
-      allCandidates.push(...tavilyResult.candidates);
-      deduped = this.ranker.dedupeCandidates(allCandidates);
-      qualified = this.ranker.filterByThreshold(deduped);
-    }
-
+    const deduped = this.ranker.dedupeCandidates(allCandidates);
+    const qualified = this.ranker.filterByThreshold(deduped);
     const selected = qualified.slice(0, maxCandidates);
     const profileUrls = selected.map((c) => c.url);
 
@@ -282,8 +223,9 @@ export class LeadDiscoverySearchOrchestrator {
         searchRunId,
         brightDataRequests,
         brightDataSearchFailures,
-        tavilyRequests: fallbackActivated ? tavilyRequests : 0,
-        fallbackActivated,
+        /** Always 0 — Tavily fallback removed. Kept for trace shape / historical readers. */
+        tavilyRequests: 0,
+        fallbackActivated: false,
         queriesExecuted,
         linkedinUrlValidated: allCandidates.length,
         linkedinCandidatesFound: deduped.length,
@@ -291,142 +233,7 @@ export class LeadDiscoverySearchOrchestrator {
         selectedUrls: profileUrls,
         failures,
         brightDataDiagnostics,
-        tavilyDiagnostics: fallbackActivated
-          ? tavilyDiagnostics
-          : emptyTavilyDiagnostics(),
       },
-    };
-  }
-
-  private shouldUseTavilyFallback(): boolean {
-    return this.fallbackMode === 'tavily';
-  }
-
-  private async runTavilyFallback(
-    queries: string[],
-    brandName: string,
-    failures: SearchFailure[],
-    priorityRoles?: string[],
-  ): Promise<TavilyFallbackResult> {
-    const diagnostics = emptyTavilyDiagnostics();
-    const tavilyKey = this.configService.get<string>('TAVILY_API_KEY')?.trim();
-    if (!tavilyKey) {
-      this.logger.warn('Tavily fallback skipped: TAVILY_API_KEY missing');
-      return {
-        candidates: [],
-        executedQueries: [],
-        searchHitsCount: 0,
-        requestsAttempted: Math.min(queries.length, this.maxTavilyRequests),
-        diagnostics,
-      };
-    }
-
-    const candidates: LinkedInCandidate[] = [];
-    const executedQueries: string[] = [];
-    let searchHitsCount = 0;
-    const limit = Math.min(queries.length, this.maxTavilyRequests);
-
-    for (let i = 0; i < limit; i += 1) {
-      const queryText = queries[i];
-      executedQueries.push(queryText);
-      diagnostics.requests += 1;
-      try {
-        const response = await fetch('https://api.tavily.com/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            api_key: tavilyKey,
-            query: queryText,
-            max_results: 5,
-          }),
-        });
-
-        if (!response.ok) {
-          diagnostics.httpError += 1;
-          failures.push({
-            code: 'HTTP_ERROR',
-            message: `Tavily HTTP ${response.status}`,
-            retryable: false,
-            query: queryText,
-            httpStatus: response.status,
-          });
-          continue;
-        }
-
-        const payload = (await response.json()) as {
-          results?: Array<{
-            url?: string;
-            title?: string;
-            content?: string;
-          }>;
-        };
-
-        const items = (payload.results ?? []).map((row, index) => ({
-          title: String(row.title ?? ''),
-          url: String(row.url ?? ''),
-          snippet: String(row.content ?? ''),
-          position: index + 1,
-          domain: '',
-        }));
-        searchHitsCount += items.length;
-        diagnostics.hits += items.length;
-
-        if (items.length > 0) {
-          diagnostics.httpOkWithResults += 1;
-        } else {
-          diagnostics.httpOkEmptyResults += 1;
-        }
-
-        candidates.push(
-          ...this.ranker.rank({
-            items,
-            query: queryText,
-            provider: 'tavily',
-            brandName,
-            roleKeywords: priorityRoles,
-          }),
-        );
-      } catch (error) {
-        if (isTimeoutError(error)) {
-          diagnostics.timeout += 1;
-          failures.push({
-            code: 'TIMEOUT',
-            message: 'Tavily request timed out',
-            retryable: true,
-            query: queryText,
-          });
-        } else {
-          diagnostics.networkError += 1;
-          failures.push({
-            code: 'NETWORK_ERROR',
-            message:
-              error instanceof Error ? error.message : 'Tavily request failed',
-            retryable: false,
-            query: queryText,
-          });
-        }
-      }
-    }
-
-    this.logger.log(
-      JSON.stringify({
-        event: 'tavily_fallback_summary',
-        candidates: candidates.length,
-        requests: diagnostics.requests,
-        httpOkWithResults: diagnostics.httpOkWithResults,
-        httpOkEmptyResults: diagnostics.httpOkEmptyResults,
-        httpError: diagnostics.httpError,
-        networkError: diagnostics.networkError,
-        timeout: diagnostics.timeout,
-        hits: diagnostics.hits,
-      }),
-    );
-    return {
-      candidates,
-      executedQueries,
-      searchHitsCount,
-      requestsAttempted: limit,
-      diagnostics,
     };
   }
 

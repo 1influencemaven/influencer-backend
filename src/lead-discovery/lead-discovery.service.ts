@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -47,6 +48,13 @@ import { sortContactsByTitlePriority } from './utils/title-priority.util';
 import { PublicEmailEvidenceDiscoveryService } from './email-discovery/public-email-evidence-discovery.service';
 import { BrandBusinessContactDiscoveryService } from './brand-business-contact-discovery.service';
 import { BrandBusinessContactService } from './brand-business-contact.service';
+import { ContactDiscoveryService } from '../contact-discovery/contact-discovery.service';
+import { BBC_BRIGHTDATA_PROVIDER_ID } from '../contact-discovery/constants';
+import {
+  CONTACT_DISCOVERY_REBUILD_MESSAGE,
+  isContactDiscoveryRebuildMode,
+} from './utils/contact-discovery-rebuild.util';
+
 import type {
   BusinessContactDiscoverySummary,
   LeadSearchMetadata,
@@ -133,17 +141,50 @@ export class LeadDiscoveryService {
     private readonly brandBusinessContactService: BrandBusinessContactService,
     @InjectQueue(QUEUES.PROSPECTING)
     private readonly prospectingQueue: Queue,
+    private readonly contactDiscoveryService: ContactDiscoveryService,
   ) {}
 
   listProviders() {
-    return this.leadSourceRegistry.listSources();
+    const rebuildMode = isContactDiscoveryRebuildMode(this.configService);
+    const sources = this.leadSourceRegistry.listSources();
+    if (!rebuildMode) {
+      return { ...sources, rebuildMode: false };
+    }
+    // Rebuild mode: legacy write is off; BBC v1 is the write path (allowlist HTML).
+    const available = [
+      BBC_BRIGHTDATA_PROVIDER_ID,
+      ...sources.available.filter((id) => id !== BBC_BRIGHTDATA_PROVIDER_ID),
+    ];
+    return {
+      available,
+      default: BBC_BRIGHTDATA_PROVIDER_ID,
+      rebuildMode: true,
+    };
   }
 
   listProviderOptions(providerId: string) {
+    if (providerId === BBC_BRIGHTDATA_PROVIDER_ID) {
+      return {
+        providerId: BBC_BRIGHTDATA_PROVIDER_ID,
+        options: [],
+        autonomous: true,
+        searchConnected: false,
+        mode: 'bbc-v1-allowlist-html',
+      };
+    }
     return this.leadSourceRegistry.listOptions(providerId);
   }
 
   async search(dto: SearchLeadsDto) {
+    // CONTACT_DISCOVERY_REBUILD_MODE: legacy find-leads blocked; BBC v1 enqueues
+    // on queue `contact-discovery` (Search Unlocker not wired — allowlist HTML only).
+    if (isContactDiscoveryRebuildMode(this.configService)) {
+      return this.contactDiscoveryService.startBbcDiscovery({
+        brandCandidateIds: dto.brandCandidateIds,
+        limit: dto.limit,
+      });
+    }
+
     const requestedProviderId =
       dto.providerId?.trim() ||
       this.leadSourceRegistry.getDefault() ||
@@ -525,6 +566,20 @@ export class LeadDiscoveryService {
       return;
     }
 
+    if (isContactDiscoveryRebuildMode(this.configService)) {
+      this.logger.warn(
+        `Run ${runId}: CONTACT_DISCOVERY_REBUILD_MODE — failing job without provider calls`,
+      );
+      await this.prisma.leadDiscoveryRun.update({
+        where: { id: runId },
+        data: {
+          status: LeadDiscoveryStatus.FAILED,
+          errorMessage: CONTACT_DISCOVERY_REBUILD_MESSAGE,
+        },
+      });
+      return;
+    }
+
     try {
       if (run.brandCandidate.status !== BrandCandidateStatus.APPROVED) {
         throw new BadRequestException(
@@ -555,6 +610,7 @@ export class LeadDiscoveryService {
       try {
         const discovery = await this.brandBusinessContactDiscovery.discover({
           brandCandidateId: run.brandCandidateId,
+          brandName: run.brandCandidate.name,
           website: run.brandCandidate.website,
           domain,
         });

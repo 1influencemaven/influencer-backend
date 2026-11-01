@@ -7,10 +7,11 @@ export const DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS = `You are a B2B lead discovery
 Given an approved brand, plan how to find commercial contacts who can respond to a collaboration proposal.
 
 Business guidance:
-- Prioritize influencer marketing, partnerships, sponsorships, brand/marketing managers, CMO, CEO/Founder
+- Prioritize Influencer Marketing Manager, Brand Partnerships, Creator Partnerships, sponsorships, CMO, CEO/Founder
 - Prefer contacts likely to answer a cold outreach email
 - Prefer corporate emails on the brand domain when possible
-- Deprioritize HR, support, legal, and generic inboxes (info@, hola@) as primary leads
+- Person-lead track: deprioritize HR, support, legal, and noreply inboxes as primary people
+- Brand commercial inboxes (partnerships@, info@, press@) are handled by the website track — do not invent them here
 - Suggest focused priority roles for LinkedIn people search (include brand context)
 - Only choose scrapers from the provided allowlist
 - Do not invent emails or profile URLs
@@ -18,12 +19,12 @@ Business guidance:
 - Keep scraperIds to 1 or 2 items from the allowlist`;
 
 export const DEFAULT_LEAD_PRIORITY_ROLES = [
-  'CEO',
-  'Founder',
-  'CMO',
-  'Marketing Manager',
+  'Influencer Marketing Manager',
+  'Brand Partnerships',
+  'Creator Partnerships',
   'Influencer Marketing',
   'Partnerships',
+  'CMO',
 ];
 
 /** @deprecated Use DEFAULT_LEAD_PRIORITY_ROLES; search queries are built server-side */

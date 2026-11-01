@@ -16,6 +16,7 @@ import {
   buildBrandBusinessContactPageUrls,
   normalizeBrandBusinessContactPageUrl,
 } from './utils/brand-business-contact-page-urls.util';
+import { buildBrandBusinessContactSearchQueries } from './utils/brand-business-contact-search-queries.util';
 import { normalizeWebsiteBase } from './utils/public-email-page-urls.util';
 import { isAllowedBrandBusinessContactEmailDomain } from './utils/brand-business-contact-domain.util';
 import type { BusinessContactDiscoverySummary } from './interfaces/lead-source-provider.interface';
@@ -29,6 +30,7 @@ import {
 
 export type BrandBusinessContactDiscoveryInput = {
   brandCandidateId: string;
+  brandName?: string;
   website: string;
   domain: string;
 };
@@ -46,6 +48,11 @@ export type BrandBusinessContactDiscoveryResult = {
   candidates: DiscoveredBrandBusinessContact[];
   summary: BusinessContactDiscoverySummary;
 };
+
+type DiscardReason =
+  | 'low_relevance'
+  | 'external_domain'
+  | 'missing_literal_evidence';
 
 function resolveFetchOutcome(
   fetched: UnlockerFetchResult,
@@ -132,11 +139,169 @@ export class BrandBusinessContactDiscoveryService {
     const maxContacts =
       this.configService.get<number>('MAX_BRAND_BUSINESS_CONTACTS') ?? 15;
 
-    const pageUrls = buildBrandBusinessContactPageUrls(
+    const byEmail = new Map<string, DiscoveredBrandBusinessContact>();
+    const discardCountsByReason: Record<string, number> = {};
+    const bumpDiscard = (reason: DiscardReason) => {
+      discardCountsByReason[reason] = (discardCountsByReason[reason] ?? 0) + 1;
+    };
+
+    const acceptEmail = (args: {
+      email: string;
+      sourceUrl: string;
+      evidenceSnippet: string;
+    }): void => {
+      const emailNormalized = normalizeBusinessEmail(args.email);
+      if (!emailLiteralInEvidence(emailNormalized, args.evidenceSnippet)) {
+        bumpDiscard('missing_literal_evidence');
+        return;
+      }
+      if (
+        !isAllowedBrandBusinessContactEmailDomain(
+          emailNormalized,
+          input.domain,
+        )
+      ) {
+        bumpDiscard('external_domain');
+        return;
+      }
+
+      const commercialRelevance = classifyCommercialRelevance(emailNormalized);
+      if (commercialRelevance === CommercialRelevance.LOW) {
+        bumpDiscard('low_relevance');
+        return;
+      }
+
+      const isGeneric = classifyPublicEmailGeneric(emailNormalized);
+      const existing = byEmail.get(emailNormalized);
+      if (!existing) {
+        byEmail.set(emailNormalized, {
+          email: emailNormalized,
+          emailNormalized,
+          isGeneric,
+          commercialRelevance,
+          sourceUrl: args.sourceUrl,
+          evidenceSnippet: args.evidenceSnippet,
+        });
+        return;
+      }
+      if (
+        commercialRelevance === CommercialRelevance.HIGH &&
+        existing.commercialRelevance !== CommercialRelevance.HIGH
+      ) {
+        existing.commercialRelevance = CommercialRelevance.HIGH;
+      }
+      // Prefer a longer literal snippet when the same inbox is rediscovered.
+      if (
+        args.evidenceSnippet.length > existing.evidenceSnippet.length &&
+        emailLiteralInEvidence(emailNormalized, args.evidenceSnippet)
+      ) {
+        existing.evidenceSnippet = args.evidenceSnippet;
+        existing.sourceUrl = args.sourceUrl;
+      }
+    };
+
+    const plannedSearchQueries = buildBrandBusinessContactSearchQueries({
+      brandName: input.brandName?.trim() || input.domain,
+      domain: input.domain,
+    });
+    let searchHitsProcessed = 0;
+    let searchRequestsAttempted = 0;
+    const searchFailureCountsByCategory: Record<string, number> = {};
+    const bumpSearchFailure = (category: string) => {
+      searchFailureCountsByCategory[category] =
+        (searchFailureCountsByCategory[category] ?? 0) + 1;
+    };
+    const extraPageUrls: string[] = [];
+
+    if (this.unlocker.isConfigured() && plannedSearchQueries.length > 0) {
+      for (const query of plannedSearchQueries) {
+        searchRequestsAttempted += 1;
+        try {
+          const searched = await this.unlocker.search({
+            text: query,
+            num: 10,
+          });
+          const category = searched.meta?.resultCategory;
+          if (
+            category === 'empty_body' ||
+            category === 'parse_error' ||
+            category === 'network_error' ||
+            category === 'http_error'
+          ) {
+            bumpSearchFailure(category);
+          } else if (
+            searched.meta?.emptyBody === true ||
+            (searched.meta?.httpStatus !== undefined &&
+              searched.meta.httpStatus !== 0 &&
+              searched.meta.httpStatus < 200) ||
+            (searched.meta?.httpStatus !== undefined &&
+              searched.meta.httpStatus >= 300)
+          ) {
+            bumpSearchFailure(
+              searched.meta.emptyBody
+                ? 'empty_body'
+                : searched.meta.httpStatus === 0
+                  ? 'network_error'
+                  : 'http_error',
+            );
+          }
+          for (const item of searched.items) {
+            searchHitsProcessed += 1;
+            const blob = `${item.title ?? ''} ${item.snippet ?? ''}`.trim();
+            if (blob) {
+              for (const match of extractLiteralEmailsFromText(blob)) {
+                acceptEmail({
+                  email: match.email,
+                  sourceUrl: item.url || base,
+                  evidenceSnippet: match.evidenceSnippet,
+                });
+              }
+            }
+            if (item.url) {
+              const normalized = normalizeBrandBusinessContactPageUrl(
+                item.url,
+                base,
+              );
+              if (normalized) {
+                extraPageUrls.push(normalized);
+              }
+            }
+          }
+        } catch (error) {
+          bumpSearchFailure('network_error');
+          this.logger.warn(
+            JSON.stringify({
+              event: 'brand_business_contact_search_failed',
+              brandCandidateId: input.brandCandidateId,
+              query,
+              errorName: error instanceof Error ? error.name : 'Error',
+              errorMessage: sanitizeUnlockerErrorMessage(
+                error instanceof Error ? error.message : String(error),
+              ),
+            }),
+          );
+        }
+      }
+    }
+
+    const seededPages = buildBrandBusinessContactPageUrls(
       input.website,
       maxPages,
     );
-    const byEmail = new Map<string, DiscoveredBrandBusinessContact>();
+    const pageUrls: string[] = [];
+    const seenPages = new Set<string>();
+    for (const url of [...seededPages, ...extraPageUrls]) {
+      if (pageUrls.length >= maxPages) {
+        break;
+      }
+      const key = url.toLowerCase();
+      if (seenPages.has(key)) {
+        continue;
+      }
+      seenPages.add(key);
+      pageUrls.push(url);
+    }
+
     const pageResults: BusinessContactPageResult[] = [];
     let pagesSucceeded = 0;
     let pagesFailed = 0;
@@ -173,42 +338,11 @@ export class BrandBusinessContactDiscoveryService {
 
         const matches = extractLiteralEmailsFromText(fetched.html);
         for (const match of matches) {
-          const emailNormalized = normalizeBusinessEmail(match.email);
-          if (!emailLiteralInEvidence(emailNormalized, match.evidenceSnippet)) {
-            continue;
-          }
-          if (
-            !isAllowedBrandBusinessContactEmailDomain(
-              emailNormalized,
-              input.domain,
-            )
-          ) {
-            continue;
-          }
-
-          const commercialRelevance =
-            classifyCommercialRelevance(emailNormalized);
-          if (commercialRelevance === CommercialRelevance.LOW) {
-            continue;
-          }
-
-          const isGeneric = classifyPublicEmailGeneric(emailNormalized);
-          const existing = byEmail.get(emailNormalized);
-          if (!existing) {
-            byEmail.set(emailNormalized, {
-              email: emailNormalized,
-              emailNormalized,
-              isGeneric,
-              commercialRelevance,
-              sourceUrl: normalizedFinal,
-              evidenceSnippet: match.evidenceSnippet,
-            });
-          } else if (
-            commercialRelevance === CommercialRelevance.HIGH &&
-            existing.commercialRelevance !== CommercialRelevance.HIGH
-          ) {
-            existing.commercialRelevance = CommercialRelevance.HIGH;
-          }
+          acceptEmail({
+            email: match.email,
+            sourceUrl: normalizedFinal,
+            evidenceSnippet: match.evidenceSnippet,
+          });
         }
       } catch (error) {
         pagesFailed += 1;
@@ -259,6 +393,13 @@ export class BrandBusinessContactDiscoveryService {
         unlockerZone,
         failureCountsByCategory,
         pageResults,
+        plannedSearchQueries,
+        searchHitsProcessed,
+        searchRequestsAttempted,
+        ...(Object.keys(searchFailureCountsByCategory).length > 0
+          ? { searchFailureCountsByCategory }
+          : {}),
+        discardCountsByReason,
       },
     };
   }

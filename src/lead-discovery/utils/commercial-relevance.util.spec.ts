@@ -48,14 +48,20 @@ describe('classifyCommercialRelevance', () => {
     );
   });
 
-  it('returns UNKNOWN when not confidently classifiable', () => {
+  it('classifies commercial brand inboxes as HIGH', () => {
     expect(classifyCommercialRelevance('info@brand.com')).toBe(
-      CommercialRelevance.UNKNOWN,
-    );
-    expect(classifyCommercialRelevance('john.smith@brand.com')).toBe(
-      CommercialRelevance.UNKNOWN,
+      CommercialRelevance.HIGH,
     );
     expect(classifyCommercialRelevance('hello@brand.com')).toBe(
+      CommercialRelevance.HIGH,
+    );
+    expect(classifyCommercialRelevance('contact@brand.com')).toBe(
+      CommercialRelevance.HIGH,
+    );
+  });
+
+  it('returns UNKNOWN when not confidently classifiable', () => {
+    expect(classifyCommercialRelevance('john.smith@brand.com')).toBe(
       CommercialRelevance.UNKNOWN,
     );
     expect(classifyCommercialRelevance('not-an-email')).toBe(

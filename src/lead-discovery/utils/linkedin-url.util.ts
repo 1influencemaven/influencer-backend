@@ -37,10 +37,4 @@ export function extractLinkedInSlug(url: string): string | null {
   return match?.[1]?.toLowerCase() ?? null;
 }
 
-export function domainFromUrl(url: string): string {
-  try {
-    return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
-  } catch {
-    return '';
-  }
-}
+export { domainFromUrl } from '../../integrations/brightdata/url-domain.util';

@@ -7,7 +7,7 @@ import { AiService } from '../ai/ai.service';
 import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUES } from '../bullmq/queue.constants';
-import { BrightDataSearchClient } from '../lead-discovery/clients/brightdata-search.client';
+import { BrightDataSearchClient } from '../integrations/brightdata';
 import { LeadDiscoveryModule } from '../lead-discovery/lead-discovery.module';
 import { BrandDiscoveryController } from './brand-discovery.controller';
 import { BrandDiscoveryService } from './brand-discovery.service';

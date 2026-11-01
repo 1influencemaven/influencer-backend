@@ -13,12 +13,30 @@ import { CommercialRelevance } from '../../generated/prisma/enums';
 
 const HIGH_LOCAL_PARTS = new Set([
   'partnerships',
+  'partnership',
   'influencer',
+  'influencers',
   'creator',
+  'creators',
   'collab',
+  'collabs',
+  'collaborate',
+  'collaborations',
   'affiliate',
+  'affiliates',
   'press',
+  'prensa',
   'marketing',
+  // Brand commercial inboxes (generic but outreach-relevant)
+  'info',
+  'hello',
+  'hola',
+  'contact',
+  'contacto',
+  'business',
+  'media',
+  'ambassador',
+  'ambassadors',
 ]);
 
 const LOW_LOCAL_PARTS = new Set([

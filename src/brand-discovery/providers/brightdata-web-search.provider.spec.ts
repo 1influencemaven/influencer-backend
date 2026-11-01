@@ -1,6 +1,8 @@
 import { BrightDataWebSearchProvider } from './brightdata-web-search.provider';
-import type { BrightDataSearchClient } from '../../lead-discovery/clients/brightdata-search.client';
-import type { SearchResult } from '../../lead-discovery/interfaces/lead-search.interface';
+import type {
+  BrightDataSearchClient,
+  SearchResult,
+} from '../../integrations/brightdata';
 
 describe('BrightDataWebSearchProvider', () => {
   const search = jest.fn();

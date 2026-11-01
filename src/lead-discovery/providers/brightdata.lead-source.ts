@@ -82,7 +82,8 @@ export class BrightDataLeadSource implements LeadSourceProvider {
       priorityRoles,
     });
     const profileUrls = searchResult.profileUrls;
-    const companyUrl = await this.resolveCompanyUrl(context);
+    // Company LinkedIn URL: website only (Tavily company lookup removed).
+    const companyUrl = this.ensureHttps(context.website);
     const contacts: RawLeadContact[] = [];
     let scraperInvocations = 0;
     let scraperSuccesses = 0;
@@ -153,7 +154,6 @@ export class BrightDataLeadSource implements LeadSourceProvider {
     scraperFailures: number;
     scraperErrorCodes: string[];
   }): LeadSearchMetadata {
-    const searchTavily = args.searchResult.trace.fallbackActivated;
     const trace = args.searchResult.trace;
     return {
       strategy: 'manual',
@@ -163,8 +163,8 @@ export class BrightDataLeadSource implements LeadSourceProvider {
       plannedQueriesCount: args.searchResult.plannedQueries.length,
       validatedQueriesCount: args.searchResult.executedQueries.length,
       queries: args.searchResult.executedQueries,
-      fallbackUsed: searchTavily,
-      fallbackReason: resolveLeadFallbackReason(false, searchTavily),
+      fallbackUsed: false,
+      fallbackReason: resolveLeadFallbackReason(false),
       searchHitsCount: args.searchResult.searchHitsCount,
       peopleSearchTrace: buildPeopleSearchTrace({
         searchHitsReceived: args.searchResult.searchHitsCount,
@@ -174,17 +174,13 @@ export class BrightDataLeadSource implements LeadSourceProvider {
         selectedProfileUrls: trace.selectedUrls,
         brightDataSearchRequests: trace.brightDataRequests,
         brightDataSearchFailures: trace.brightDataSearchFailures,
-        tavilyFallbackRequests: trace.tavilyRequests,
+        tavilyFallbackRequests: 0,
         scraperInvocations: args.scraperInvocations,
         scraperSuccesses: args.scraperSuccesses,
         scraperFailures: args.scraperFailures,
         searchFailureCodes: trace.failures.map((f) => f.code),
         scraperErrorCodes: args.scraperErrorCodes,
         brightDataDiagnostics: trace.brightDataDiagnostics,
-        tavilyDiagnostics:
-          trace.fallbackActivated && trace.tavilyRequests > 0
-            ? trace.tavilyDiagnostics
-            : undefined,
       }),
     };
   }
@@ -207,42 +203,6 @@ export class BrightDataLeadSource implements LeadSourceProvider {
     return args.profileUrls.slice(0, Math.max(args.limit, 1)).map((url) => ({
       url,
     }));
-  }
-
-  private async resolveCompanyUrl(context: LeadFindContext): Promise<string> {
-    const tavilyKey = this.configService.get<string>('TAVILY_API_KEY')?.trim();
-    if (!tavilyKey) {
-      return this.ensureHttps(context.website);
-    }
-
-    try {
-      const response = await fetch('https://api.tavily.com/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          api_key: tavilyKey,
-          query: `${context.brandName} LinkedIn company`,
-          max_results: 5,
-        }),
-      });
-
-      if (!response.ok) {
-        return this.ensureHttps(context.website);
-      }
-
-      const payload = (await response.json()) as {
-        results?: Array<{ url?: string }>;
-      };
-      const linkedIn = payload.results?.find((result) =>
-        String(result.url ?? '').includes('linkedin.com/company'),
-      )?.url;
-
-      return linkedIn
-        ? linkedIn.split('?')[0]
-        : this.ensureHttps(context.website);
-    } catch {
-      return this.ensureHttps(context.website);
-    }
   }
 
   private ensureHttps(website: string): string {

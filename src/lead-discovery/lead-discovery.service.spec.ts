@@ -14,6 +14,7 @@ import {
   LeadDiscoveryStatus,
   LeadStatus,
 } from '../generated/prisma/enums';
+import { BBC_BRIGHTDATA_PROVIDER_ID } from '../contact-discovery/constants';
 import { LeadDiscoveryService } from './lead-discovery.service';
 import { LeadSourceRegistry } from './lead-source.registry';
 import { MockLeadSource } from './providers/mock.lead-source';
@@ -146,6 +147,13 @@ describe('LeadDiscoveryService', () => {
     }),
   };
 
+  const contactDiscoveryService = {
+    startBbcDiscovery: jest.fn().mockResolvedValue({
+      message: 'Contact discovery BBC jobs enqueued',
+      runs: [{ id: 'bbc-run-1', status: LeadDiscoveryStatus.PROCESSING }],
+    }),
+  };
+
   let service: LeadDiscoveryService;
 
   const leadRow = {
@@ -186,6 +194,7 @@ describe('LeadDiscoveryService', () => {
       brandBusinessContactDiscovery as never,
       brandBusinessContactService as never,
       queue as never,
+      contactDiscoveryService as never,
     );
   });
 
@@ -193,6 +202,94 @@ describe('LeadDiscoveryService', () => {
     expect(service.listProviders()).toEqual({
       available: ['brightdata'],
       default: 'brightdata',
+      rebuildMode: false,
+    });
+  });
+
+  it('lists bbc-brightdata as default when CONTACT_DISCOVERY_REBUILD_MODE is true', () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'CONTACT_DISCOVERY_REBUILD_MODE') return true;
+      if (key === 'LEAD_DISCOVERY_LIMIT') return 10;
+      return undefined;
+    });
+
+    expect(service.listProviders()).toEqual({
+      available: [BBC_BRIGHTDATA_PROVIDER_ID, 'brightdata'],
+      default: BBC_BRIGHTDATA_PROVIDER_ID,
+      rebuildMode: true,
+    });
+
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'LEAD_DISCOVERY_LIMIT') return 10;
+      return undefined;
+    });
+  });
+
+  it('delegates search to ContactDiscoveryService when rebuild mode is on (not prospecting)', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'CONTACT_DISCOVERY_REBUILD_MODE') return true;
+      if (key === 'LEAD_DISCOVERY_LIMIT') return 10;
+      return undefined;
+    });
+
+    const result = await service.search({
+      brandCandidateIds: ['b1'],
+      providerId: 'brightdata',
+      options: { optionIds: ['gd_me5ppxjr2ge6icjuh0'] },
+      limit: 5,
+    });
+
+    expect(contactDiscoveryService.startBbcDiscovery).toHaveBeenCalledWith({
+      brandCandidateIds: ['b1'],
+      limit: 5,
+    });
+    expect(queue.add).not.toHaveBeenCalled();
+    expect(prisma.leadDiscoveryRun.create).not.toHaveBeenCalled();
+    expect(result.message).toContain('Contact discovery BBC');
+
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'LEAD_DISCOVERY_LIMIT') return 10;
+      return undefined;
+    });
+  });
+
+  it('fails PROCESSING run without provider work when rebuild mode is on', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'CONTACT_DISCOVERY_REBUILD_MODE') return true;
+      return undefined;
+    });
+    prisma.leadDiscoveryRun.findUnique.mockResolvedValue({
+      id: 'run-1',
+      brandCandidateId: 'b1',
+      influencerId: 'i1',
+      providerId: 'brightdata',
+      providerOptions: { optionIds: [] },
+      limit: 5,
+      status: LeadDiscoveryStatus.PROCESSING,
+      brandCandidate: {
+        id: 'b1',
+        name: 'Acme',
+        website: 'https://acme.com',
+        domain: 'acme.com',
+        status: BrandCandidateStatus.APPROVED,
+      },
+    });
+    prisma.leadDiscoveryRun.update.mockResolvedValue({});
+
+    await service.executeDiscovery('run-1');
+
+    expect(prisma.leadDiscoveryRun.update).toHaveBeenCalledWith({
+      where: { id: 'run-1' },
+      data: {
+        status: LeadDiscoveryStatus.FAILED,
+        errorMessage: expect.stringContaining('CONTACT_DISCOVERY_REBUILD_MODE'),
+      },
+    });
+    expect(brandBusinessContactDiscovery.discover).not.toHaveBeenCalled();
+
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'LEAD_DISCOVERY_LIMIT') return 10;
+      return undefined;
     });
   });
 
@@ -759,7 +856,7 @@ describe('LeadDiscoveryService', () => {
           validatedQueriesCount: 30,
           queries: ['q1'],
           fallbackUsed: true,
-          fallbackReason: 'search_tavily',
+          fallbackReason: null,
           searchHitsCount: 50,
           peopleSearchTrace: {
             searchHitsReceived: 50,
