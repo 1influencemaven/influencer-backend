@@ -71,6 +71,7 @@ export {
   contactResearchInputSchema,
   contactResearchOutputSchema,
   contactResearchActionSchema,
+  contactResearchFoundEmailSchema,
   type ContactResearchStateSnapshot,
   type ContactResearchInput,
   type ContactResearchOutput,

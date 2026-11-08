@@ -1,5 +1,6 @@
 import { Worker, Queue, type ConnectionOptions } from 'bullmq';
 
+import { createBrandDiscoveryAgent } from '../agents/brand-discovery.agent';
 import { createIbpAgent } from '../agents/ibp.agent';
 import {
   assertProviderReady,
@@ -37,6 +38,7 @@ export async function startInfluencerAiWorker(): Promise<StartedWorker> {
   const resultsQueue = new Queue(AI_EXECUTION_QUEUES.RESULTS, { connection });
   const eventsQueue = new Queue(AI_EXECUTION_QUEUES.EVENTS, { connection });
   const ibpAgent = createIbpAgent(env);
+  const brandDiscoveryAgent = createBrandDiscoveryAgent(env);
 
   const requestWorker = new Worker(
     AI_EXECUTION_QUEUES.REQUESTS,
@@ -44,6 +46,7 @@ export async function startInfluencerAiWorker(): Promise<StartedWorker> {
       await handleAiExecutionRequest({
         raw: job.data,
         ibpAgent,
+        brandDiscoveryAgent,
         env,
         resultsQueue,
         eventsQueue,

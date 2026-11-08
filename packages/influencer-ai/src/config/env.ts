@@ -8,6 +8,11 @@ export type InfluencerAiEnv = {
   ollamaModel: string;
   anthropicApiKey?: string;
   anthropicModel: string;
+  /** Bright Data — used by Contact Research tools (FIND_BRAND_EMAILS). */
+  brightDataApiKey?: string;
+  brightDataSerpZone?: string;
+  brightDataUnlockerZone?: string;
+  brightDataTimeoutMs: number;
 };
 
 function required(name: string): string {
@@ -39,6 +44,15 @@ export function loadInfluencerAiEnv(): InfluencerAiEnv {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || undefined,
     anthropicModel:
       process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-20250514',
+    brightDataApiKey: process.env.BRIGHTDATA_API_KEY?.trim() || undefined,
+    brightDataSerpZone: process.env.BRIGHTDATA_SERP_ZONE?.trim() || undefined,
+    brightDataUnlockerZone:
+      process.env.BRIGHTDATA_UNLOCKER_ZONE?.trim() ||
+      process.env.BRIGHTDATA_ZONE?.trim() ||
+      undefined,
+    brightDataTimeoutMs: Number(
+      process.env.BRIGHTDATA_SEARCH_TIMEOUT_MS ?? '45000',
+    ),
   };
 }
 

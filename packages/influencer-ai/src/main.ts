@@ -1,6 +1,19 @@
+import { loadInfluencerAiDotEnv } from './config/load-dotenv';
 import { startInfluencerAiWorker } from './worker/start-worker';
 
 async function main(): Promise<void> {
+  const loadedEnvFiles = loadInfluencerAiDotEnv();
+  console.log(
+    JSON.stringify({
+      event: 'influencer_ai_env_loaded',
+      files: loadedEnvFiles,
+      brightDataConfigured: Boolean(
+        process.env.BRIGHTDATA_API_KEY?.trim() &&
+          process.env.BRIGHTDATA_SERP_ZONE?.trim(),
+      ),
+    }),
+  );
+
   const started = await startInfluencerAiWorker();
 
   const shutdown = async (signal: string) => {

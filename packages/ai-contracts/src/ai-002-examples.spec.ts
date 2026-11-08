@@ -263,9 +263,73 @@ describe('AI-002 contract examples', () => {
 
     expect(parsed.type).toBe('CONTACT_RESEARCH');
     if (parsed.type === 'CONTACT_RESEARCH' && parsed.output) {
-      expect(parsed.output.action).toBe('search_web');
+      expect(parsed.output.operation).toBe('DECIDE_STEP');
+      if (parsed.output.operation === 'DECIDE_STEP') {
+        expect(parsed.output.action).toBe('search_web');
+      }
     }
   });
+
+  it('parses Contact Research FIND_BRAND_EMAILS request/result', () => {
+    const request = parseAiExecutionRequest({
+      contractVersion: '1.0',
+      executionId: '44444444-4444-4444-8444-444444444444',
+      correlationId: '22222222-2222-4222-8222-222222222222',
+      idempotencyKey: 'contact-find:1',
+      requestedAt: '2026-11-08T12:00:00.000Z',
+      type: 'CONTACT_RESEARCH',
+      context: {
+        userId: 'u1',
+        influencerId: '33333333-3333-4333-8333-333333333333',
+        resourceId: '55555555-5555-4555-8555-555555555555',
+        resourceType: 'CONTACT_RESEARCH_RUN',
+      },
+      instructions: { business: '', businessHash: 'abcdefghijklmnop' },
+      input: {
+        operation: 'FIND_BRAND_EMAILS',
+        brandName: 'Demo Co',
+        website: 'https://demo.co',
+        domain: 'demo.co',
+        niche: 'home',
+        maxSerpQueries: 3,
+        maxPages: 4,
+      },
+    });
+    expect(request.type).toBe('CONTACT_RESEARCH');
+    if (request.type === 'CONTACT_RESEARCH') {
+      expect(request.input.operation).toBe('FIND_BRAND_EMAILS');
+    }
+
+    const result = parseAiExecutionResult({
+      contractVersion: '1.0',
+      executionId: '44444444-4444-4444-8444-444444444444',
+      correlationId: '22222222-2222-4222-8222-222222222222',
+      type: 'CONTACT_RESEARCH',
+      status: 'COMPLETED',
+      startedAt: '2026-11-08T12:00:00.000Z',
+      finishedAt: '2026-11-08T12:00:05.000Z',
+      durationMs: 5000,
+      metadata: { provider: 'ollama', model: 'llama3.2:3b', llmCallCount: 1 },
+      output: {
+        operation: 'FIND_BRAND_EMAILS',
+        outcome: 'RESULTS_FOUND',
+        emails: [
+          {
+            email: 'partnerships@demo.co',
+            sourceUrl: 'https://demo.co/contact',
+            evidenceSnippet: 'Email partnerships@demo.co',
+          },
+        ],
+        summary: '1 email',
+        trace: { queries: ['q1'], pages: ['https://demo.co/contact'], serpCalls: 1, pageCalls: 1 },
+      },
+    });
+    expect(result.type).toBe('CONTACT_RESEARCH');
+    if (result.type === 'CONTACT_RESEARCH' && result.output) {
+      expect(result.output.operation).toBe('FIND_BRAND_EMAILS');
+    }
+  });
+
 
   it('rejects cursor as LLM provider in configuration', () => {
     expect(() =>
