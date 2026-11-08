@@ -139,7 +139,9 @@ describe('unlocker-fetch.util', () => {
       expect(classified.causeSyscall).toBeUndefined();
       expect(classified.causeHostname).toBeUndefined();
       expect(classified.causePort).toBeUndefined();
-      expect(extractUnlockerErrorCause(new TypeError('fetch failed'))).toBeUndefined();
+      expect(
+        extractUnlockerErrorCause(new TypeError('fetch failed')),
+      ).toBeUndefined();
     });
 
     it('selects errors[0] deterministically from an AggregateError cause', () => {

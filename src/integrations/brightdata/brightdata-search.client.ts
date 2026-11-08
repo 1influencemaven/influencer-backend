@@ -6,9 +6,17 @@ import type {
   BrightDataSearchResultCategory,
   SearchQuery,
   SearchResult,
-  SearchResultItem,
 } from './search.types';
-import { domainFromUrl } from './url-domain.util';
+import { classifySerpHtmlWithoutOrganics } from './classify-serp-html';
+import {
+  looksLikeHtmlDocument,
+  parseGoogleSerpHtml,
+} from './parse-google-serp-html';
+import {
+  SERP_QUERY_COOLDOWN_MS,
+  detectSerpProviderRejection,
+  isSerpQueryCooldownError,
+} from './serp-provider-rejection';
 import {
   classifyUnlockerException,
   classifyUnlockerHttpResult,
@@ -17,6 +25,17 @@ import {
 } from './unlocker-fetch.util';
 
 const BASE_URL = 'https://api.brightdata.com';
+
+/** Truncated body for diagnostics — never log credentials. */
+function safeBodyPreview(text: string, maxLen = 200): string {
+  return text
+    .slice(0, maxLen)
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(
+      /Authorization["']?\s*[:=]\s*["']?[^"'\s,}+]+/gi,
+      'Authorization=[redacted]',
+    );
+}
 
 /** Protocol + hostname only — never path, query, or credentials. */
 function apiEndpointSummary(baseUrl: string): {
@@ -45,6 +64,8 @@ export class BrightDataSearchClient {
   private readonly timeoutMs: number;
   private readonly maxRetries: number;
   private readonly retryBackoffMs: number;
+  /** Min wait after empty_body / failed_query_rejected (Bright Data: 15s). */
+  private readonly queryCooldownMs: number;
   private readonly apiEndpoint = apiEndpointSummary(BASE_URL);
 
   constructor(private readonly configService: ConfigService) {
@@ -53,9 +74,7 @@ export class BrightDataSearchClient {
     this.serpZone =
       this.configService.get<string>('BRIGHTDATA_SERP_ZONE')?.trim() ?? '';
     this.unlockerZone =
-      this.configService
-        .get<string>('BRIGHTDATA_UNLOCKER_ZONE')
-        ?.trim() ||
+      this.configService.get<string>('BRIGHTDATA_UNLOCKER_ZONE')?.trim() ||
       this.configService.get<string>('BRIGHTDATA_ZONE')?.trim() ||
       'mcp_unlocker';
     this.timeoutMs =
@@ -65,6 +84,9 @@ export class BrightDataSearchClient {
     this.retryBackoffMs =
       this.configService.get<number>('BRIGHTDATA_SEARCH_RETRY_BACKOFF_MS') ??
       1500;
+    this.queryCooldownMs =
+      this.configService.get<number>('BRIGHTDATA_SEARCH_QUERY_COOLDOWN_MS') ??
+      SERP_QUERY_COOLDOWN_MS;
   }
 
   isConfigured(): boolean {
@@ -140,7 +162,9 @@ export class BrightDataSearchClient {
             apiHttpStatus: response.status,
             bodyLength,
             elapsedMs: result.elapsedMs,
-            ...(outcome === 'empty_body' && response.status >= 200 && response.status < 300
+            ...(outcome === 'empty_body' &&
+            response.status >= 200 &&
+            response.status < 300
               ? {
                   emptyBodyHint:
                     'HTTP 2xx with empty body — check Unlocker zone / credits / URL',
@@ -169,12 +193,8 @@ export class BrightDataSearchClient {
           elapsedMs,
           errorName: classified.errorName,
           errorMessage: classified.errorMessage,
-          ...(classified.causeName
-            ? { causeName: classified.causeName }
-            : {}),
-          ...(classified.causeCode
-            ? { causeCode: classified.causeCode }
-            : {}),
+          ...(classified.causeName ? { causeName: classified.causeName } : {}),
+          ...(classified.causeCode ? { causeCode: classified.causeCode } : {}),
           ...(classified.causeSyscall
             ? { causeSyscall: classified.causeSyscall }
             : {}),
@@ -196,12 +216,8 @@ export class BrightDataSearchClient {
         outcome: classified.outcome,
         errorName: classified.errorName,
         errorMessage: sanitizeUnlockerErrorMessage(classified.errorMessage),
-        ...(classified.causeName
-          ? { causeName: classified.causeName }
-          : {}),
-        ...(classified.causeCode
-          ? { causeCode: classified.causeCode }
-          : {}),
+        ...(classified.causeName ? { causeName: classified.causeName } : {}),
+        ...(classified.causeCode ? { causeCode: classified.causeCode } : {}),
         ...(classified.causeSyscall
           ? { causeSyscall: classified.causeSyscall }
           : {}),
@@ -240,6 +256,7 @@ export class BrightDataSearchClient {
           parseError: 'BRIGHTDATA_SERP_ZONE_NOT_CONFIGURED',
           query: query.text,
           resultCategory: 'empty_body',
+          organicResultsCount: 0,
         },
       };
     }
@@ -251,10 +268,13 @@ export class BrightDataSearchClient {
       const result = await this.executeOnce(query, attempt + 1);
       lastResult = result;
 
+      // Do not retry client HTTP errors (400/401/403). Retry empty body,
+      // parse/network failures, rate limits, and 5xx only.
       const shouldRetry =
         attempt < this.maxRetries &&
-        (result.meta.emptyBody ||
-          result.meta.parseError ||
+        (result.meta.resultCategory === 'empty_body' ||
+          result.meta.resultCategory === 'parse_error' ||
+          result.meta.resultCategory === 'network_error' ||
           result.meta.httpStatus === 429 ||
           result.meta.httpStatus >= 500);
 
@@ -263,7 +283,16 @@ export class BrightDataSearchClient {
       }
 
       attempt += 1;
-      await this.sleep(this.retryBackoffMs * attempt);
+      // Bright Data bans the same query for ≥15s after a failure / empty body.
+      // Short backoffs only deepen failed_query_rejected.
+      let delayMs = this.retryBackoffMs * attempt;
+      if (
+        result.meta.resultCategory === 'empty_body' ||
+        isSerpQueryCooldownError(result.meta.parseError)
+      ) {
+        delayMs = Math.max(delayMs, this.queryCooldownMs);
+      }
+      await this.sleep(delayMs);
     }
 
     return lastResult ?? this.emptyResult(query, 1, 0, 0, true);
@@ -278,9 +307,10 @@ export class BrightDataSearchClient {
     const hl = query.geo?.hl ?? 'en';
     const gl = query.geo?.gl ?? 'us';
     const num = query.num ?? 10;
+    // Official serp_api sample uses a plain Google search URL + format/raw + data_format/html.
     const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(
       query.text,
-    )}&hl=${hl}&gl=${gl}&num=${num}&brd_json=1`;
+    )}&hl=${hl}&gl=${gl}&num=${num}`;
 
     const start = Date.now();
     try {
@@ -289,13 +319,13 @@ export class BrightDataSearchClient {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
-          Accept: 'application/json',
+          Accept: 'text/html, application/json;q=0.9, */*;q=0.8',
         },
         body: JSON.stringify({
           zone,
           url: googleUrl,
           format: 'raw',
-          data_format: 'parsed_light',
+          data_format: 'html',
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -322,6 +352,8 @@ export class BrightDataSearchClient {
             attempt,
             apiHttpStatus: httpStatus,
             bodyLength: text.length,
+            bodyPreview: safeBodyPreview(text),
+            dataFormat: 'html',
             elapsedMs,
             resultCategory: 'http_error',
           }),
@@ -334,6 +366,7 @@ export class BrightDataSearchClient {
           emptyBody,
           text.length,
           'http_error',
+          `HTTP_${httpStatus}`,
         );
       }
 
@@ -357,7 +390,8 @@ export class BrightDataSearchClient {
             elapsedMs,
             resultCategory: 'empty_body',
             emptyBodyHint:
-              'HTTP 200 with empty SERP body — verify BRIGHTDATA_SERP_ZONE (not Unlocker)',
+              'HTTP 200 with empty SERP body — Bright Data may ban this query for ~15s; retries wait for query cooldown',
+            queryCooldownMs: this.queryCooldownMs,
           }),
         );
         return this.emptyResult(
@@ -371,16 +405,100 @@ export class BrightDataSearchClient {
         );
       }
 
-      let organic: Array<Record<string, unknown>> = [];
+      const providerRejection = detectSerpProviderRejection(
+        text,
+        response.headers,
+      );
+      if (providerRejection) {
+        this.logger.warn(
+          JSON.stringify({
+            event: 'brightdata_search',
+            operation: 'search',
+            failureKind: 'provider_rejection',
+            requestId,
+            provider: 'brightdata',
+            zone,
+            zoneKind: 'serp',
+            attempt,
+            apiHttpStatus: httpStatus,
+            bodyLength: text.length,
+            bodyPreview: safeBodyPreview(text),
+            parseError: providerRejection.code,
+            ...(providerRejection.brdErrorCode
+              ? { brdErrorCode: providerRejection.brdErrorCode }
+              : {}),
+            retryAfterMs: Math.max(
+              providerRejection.retryAfterMs,
+              this.queryCooldownMs,
+            ),
+            resultCategory: 'parse_error',
+            elapsedMs,
+          }),
+        );
+        return {
+          items: [],
+          meta: {
+            provider: 'brightdata',
+            zone,
+            attempt,
+            httpStatus,
+            responseBytes: text.length,
+            elapsedMs,
+            emptyBody: false,
+            parseError: providerRejection.code,
+            query: query.text,
+            resultCategory: 'parse_error',
+            organicResultsCount: 0,
+          },
+        };
+      }
+
+      if (!looksLikeHtmlDocument(text)) {
+        const parseError = 'SERP_RESPONSE_NOT_HTML';
+        this.logger.warn(
+          JSON.stringify({
+            event: 'brightdata_search',
+            operation: 'search',
+            failureKind: 'parse',
+            requestId,
+            provider: 'brightdata',
+            zone,
+            zoneKind: 'serp',
+            attempt,
+            apiHttpStatus: httpStatus,
+            bodyLength: text.length,
+            bodyPreview: safeBodyPreview(text),
+            parseError,
+            resultCategory: 'parse_error',
+            elapsedMs,
+          }),
+        );
+        return {
+          items: [],
+          meta: {
+            provider: 'brightdata',
+            zone,
+            attempt,
+            httpStatus,
+            responseBytes: text.length,
+            elapsedMs,
+            emptyBody: false,
+            parseError,
+            query: query.text,
+            resultCategory: 'parse_error',
+            organicResultsCount: 0,
+          },
+        };
+      }
+
+      let items;
       let parseError: string | undefined;
       try {
-        const data = JSON.parse(text) as { organic?: unknown };
-        organic = Array.isArray(data.organic)
-          ? (data.organic as Array<Record<string, unknown>>)
-          : [];
+        items = parseGoogleSerpHtml(text, { maxResults: num });
       } catch (error) {
         parseError =
-          error instanceof Error ? error.message : 'Invalid JSON response';
+          error instanceof Error ? error.message : 'SERP_HTML_PARSE_FAILED';
+        items = [];
       }
 
       if (parseError) {
@@ -397,16 +515,18 @@ export class BrightDataSearchClient {
             parseError,
             query: query.text,
             resultCategory: 'parse_error',
+            organicResultsCount: 0,
           },
         };
       }
 
-      const items = organic
-        .map((entry, index) => this.mapOrganic(entry, index + 1))
-        .filter((item): item is SearchResultItem => item !== null);
-
-      const resultCategory: BrightDataSearchResultCategory =
-        items.length > 0 ? 'ok' : 'organic_empty';
+      let resultCategory: BrightDataSearchResultCategory;
+      if (items.length > 0) {
+        resultCategory = 'ok';
+      } else {
+        // Do not label every empty parse as organic_empty (AI-004.5.1.1).
+        resultCategory = classifySerpHtmlWithoutOrganics(text);
+      }
 
       return {
         items,
@@ -420,6 +540,7 @@ export class BrightDataSearchClient {
           emptyBody: false,
           query: query.text,
           resultCategory,
+          organicResultsCount: items.length,
         },
       };
     } catch (error) {
@@ -448,12 +569,8 @@ export class BrightDataSearchClient {
           unlockerOutcome: classified.outcome,
           errorName: classified.errorName,
           errorMessage: classified.errorMessage,
-          ...(classified.causeName
-            ? { causeName: classified.causeName }
-            : {}),
-          ...(classified.causeCode
-            ? { causeCode: classified.causeCode }
-            : {}),
+          ...(classified.causeName ? { causeName: classified.causeName } : {}),
+          ...(classified.causeCode ? { causeCode: classified.causeCode } : {}),
           ...(classified.causeSyscall
             ? { causeSyscall: classified.causeSyscall }
             : {}),
@@ -480,28 +597,10 @@ export class BrightDataSearchClient {
             : classified.errorMessage,
           query: query.text,
           resultCategory,
+          organicResultsCount: 0,
         },
       };
     }
-  }
-
-  private mapOrganic(
-    entry: Record<string, unknown>,
-    position: number,
-  ): SearchResultItem | null {
-    const url = String(entry.link ?? entry.url ?? '').trim();
-    const title = String(entry.title ?? '').trim();
-    if (!url) {
-      return null;
-    }
-    const snippet = String(entry.description ?? entry.snippet ?? '').trim();
-    return {
-      title,
-      url,
-      snippet,
-      position,
-      domain: domainFromUrl(url),
-    };
   }
 
   private emptyResult(
@@ -512,6 +611,7 @@ export class BrightDataSearchClient {
     emptyBody: boolean,
     responseBytes = 0,
     resultCategory: BrightDataSearchResultCategory = 'empty_body',
+    parseError?: string,
   ): SearchResult {
     return {
       items: [],
@@ -525,6 +625,8 @@ export class BrightDataSearchClient {
         emptyBody,
         query: query.text,
         resultCategory,
+        organicResultsCount: 0,
+        ...(parseError ? { parseError } : {}),
       },
     };
   }

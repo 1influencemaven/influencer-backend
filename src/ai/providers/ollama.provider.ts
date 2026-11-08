@@ -60,7 +60,10 @@ export class OllamaProvider implements LlmProvider {
     try {
       response = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
         body: JSON.stringify({
           model: this.model,
           stream: false,
@@ -177,8 +180,6 @@ function mapOllamaHttpError(
   }
 
   return new Error(
-    snippet
-      ? `Ollama HTTP ${status}: ${snippet}`
-      : `Ollama HTTP ${status}`,
+    snippet ? `Ollama HTTP ${status}: ${snippet}` : `Ollama HTTP ${status}`,
   );
 }

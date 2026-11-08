@@ -13,6 +13,7 @@ function mockConfig(
     BRIGHTDATA_SEARCH_TIMEOUT_MS: 5000,
     BRIGHTDATA_SEARCH_MAX_RETRIES: 0,
     BRIGHTDATA_SEARCH_RETRY_BACKOFF_MS: 1,
+    BRIGHTDATA_SEARCH_QUERY_COOLDOWN_MS: 1,
     ...overrides,
   };
   return {
@@ -32,18 +33,67 @@ describe('BrightDataSearchClient', () => {
     jest.restoreAllMocks();
   });
 
-  it('uses BRIGHTDATA_SERP_ZONE for search and never Unlocker zone', async () => {
-    fetchMock.mockResolvedValue({
+  const emptySerpHtml = `
+    <html><body><div id="search">No results found for this query.</div></body></html>
+  `;
+
+  const organicSerpHtml = `
+    <html><body>
+      <a href="/url?q=https%3A%2F%2Fwww.linkedin.com%2Fin%2Fmarianosaid&sa=U">
+        <h3>Mariano Said - Liquid IV</h3>
+      </a>
+    </body></html>
+  `;
+
+  function okHtmlResponse(html: string) {
+    return {
       status: 200,
-      text: async () => JSON.stringify({ organic: [] }),
-    });
+      headers: { get: () => null },
+      text: async () => html,
+    };
+  }
+
+  it('uses BRIGHTDATA_SERP_ZONE for search and never Unlocker zone', async () => {
+    fetchMock.mockResolvedValue(okHtmlResponse(emptySerpHtml));
     const client = new BrightDataSearchClient(mockConfig());
     await client.search({ text: 'brand partnerships' });
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
       zone: string;
+      format: string;
+      data_format: string;
+      url: string;
     };
     expect(body.zone).toBe('serp_demo');
     expect(body.zone).not.toBe('mcp_unlocker');
+    expect(body.format).toBe('raw');
+    expect(body.data_format).toBe('html');
+    expect(body.url).toContain('google.com/search');
+    expect(body.url).not.toContain('brd_json');
+  });
+
+  it('sends official serp_api payload shape (format raw, data_format html)', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      text: async () => emptySerpHtml,
+    });
+    const client = new BrightDataSearchClient(
+      mockConfig({ BRIGHTDATA_SERP_ZONE: 'serp_api' }),
+    );
+    await client.search({ text: 'pizza' });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.brightdata.com/request');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({
+      Authorization: 'Bearer test-key',
+      'Content-Type': 'application/json',
+    });
+    const body = JSON.parse(String(init.body)) as Record<string, string>;
+    expect(body).toEqual({
+      zone: 'serp_api',
+      url: expect.stringContaining('https://www.google.com/search?q=pizza'),
+      format: 'raw',
+      data_format: 'html',
+    });
   });
 
   it('uses BRIGHTDATA_UNLOCKER_ZONE for fetchRawHtml, not SERP zone', async () => {
@@ -111,19 +161,10 @@ describe('BrightDataSearchClient', () => {
     expect(result.meta.emptyBody).toBe(true);
   });
 
-  it('parses organic JSON into search items', async () => {
+  it('parses organic HTML into search items', async () => {
     fetchMock.mockResolvedValue({
       status: 200,
-      text: async () =>
-        JSON.stringify({
-          organic: [
-            {
-              title: 'Mariano Said - Liquid IV',
-              link: 'https://www.linkedin.com/in/marianosaid',
-              description: 'Influencer marketing at Liquid IV',
-            },
-          ],
-        }),
+      text: async () => organicSerpHtml,
     });
 
     const client = new BrightDataSearchClient(mockConfig());
@@ -133,7 +174,9 @@ describe('BrightDataSearchClient', () => {
     expect(result.items[0].url).toBe(
       'https://www.linkedin.com/in/marianosaid',
     );
+    expect(result.items[0].title).toBe('Mariano Said - Liquid IV');
     expect(result.items[0].position).toBe(1);
+    expect(result.items[0].domain).toBe('linkedin.com');
     expect(result.meta.emptyBody).toBe(false);
     expect(result.meta.provider).toBe('brightdata');
     expect(result.meta.resultCategory).toBe('ok');
@@ -158,7 +201,121 @@ describe('BrightDataSearchClient', () => {
     expect(result.meta.resultCategory).toBe('empty_body');
   });
 
-  it('classifies valid JSON with organic: [] as organic_empty', async () => {
+  it('classifies valid HTML with no organics as organic_empty', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      text: async () => emptySerpHtml,
+    });
+
+    const client = new BrightDataSearchClient(mockConfig());
+    const result = await client.search({ text: 'test query' });
+
+    expect(result.items).toHaveLength(0);
+    expect(result.meta.emptyBody).toBe(false);
+    expect(result.meta.httpStatus).toBe(200);
+    expect(result.meta.responseBytes).toBe(emptySerpHtml.length);
+    expect(result.meta.resultCategory).toBe('organic_empty');
+    expect(result.meta.organicResultsCount).toBe(0);
+    expect(result.meta.parseError).toBeUndefined();
+  });
+
+  it('classifies consent HTML without organics as consent_page (not organic_empty)', async () => {
+    const consentHtml = `
+      <html><body>
+        <form action="https://consent.google.com/save">
+          <h1>Before you continue to Google</h1>
+          <p>We use cookies</p>
+          <button id="L2AGLb">Accept all</button>
+        </form>
+      </body></html>
+    `;
+    fetchMock.mockResolvedValue({
+      status: 200,
+      headers: { get: () => null },
+      text: async () => consentHtml,
+    });
+
+    const client = new BrightDataSearchClient(mockConfig());
+    const result = await client.search({ text: 'test query' });
+
+    expect(result.items).toHaveLength(0);
+    expect(result.meta.resultCategory).toBe('consent_page');
+    expect(result.meta.organicResultsCount).toBe(0);
+  });
+
+  it('classifies soft-block HTML without organics as soft_block', async () => {
+    const softHtml = `
+      <html><body>
+        <div>Our systems have detected unusual traffic from your computer network.</div>
+        <a href="https://www.google.com/sorry/index">continue</a>
+      </body></html>
+    `;
+    fetchMock.mockResolvedValue({
+      status: 200,
+      headers: { get: () => null },
+      text: async () => softHtml,
+    });
+
+    const client = new BrightDataSearchClient(mockConfig());
+    const result = await client.search({ text: 'test query' });
+
+    expect(result.meta.resultCategory).toBe('soft_block');
+  });
+
+  it('classifies unstructured HTML without organics as unknown_html', async () => {
+    const unknown = '<html><body><div class="x">Hello landing</div></body></html>';
+    fetchMock.mockResolvedValue({
+      status: 200,
+      headers: { get: () => null },
+      text: async () => unknown,
+    });
+
+    const client = new BrightDataSearchClient(mockConfig());
+    const result = await client.search({ text: 'test query' });
+
+    expect(result.meta.resultCategory).toBe('unknown_html');
+  });
+
+  it('records parse error when body is not HTML', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      headers: { get: () => null },
+      text: async () => 'not-html-plain-error',
+    });
+
+    const client = new BrightDataSearchClient(mockConfig());
+    const result = await client.search({ text: 'test query' });
+
+    expect(result.items).toHaveLength(0);
+    expect(result.meta.parseError).toBe('SERP_RESPONSE_NOT_HTML');
+    expect(result.meta.emptyBody).toBe(false);
+    expect(result.meta.resultCategory).toBe('parse_error');
+    expect(result.meta.responseBytes).toBe('not-html-plain-error'.length);
+  });
+
+  it('classifies failed_query_rejected plain text as SERP_FAILED_QUERY_REJECTED', async () => {
+    const body =
+      'This query recently failed and cannot be attempted at this time. Please try again later, after a minimum of 15 seconds.';
+    fetchMock.mockResolvedValue({
+      status: 200,
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === 'x-brd-error-code'
+            ? 'failed_query_rejected'
+            : null,
+      },
+      text: async () => body,
+    });
+
+    const client = new BrightDataSearchClient(mockConfig());
+    const result = await client.search({ text: 'cooldown query' });
+
+    expect(result.items).toHaveLength(0);
+    expect(result.meta.resultCategory).toBe('parse_error');
+    expect(result.meta.parseError).toBe('SERP_FAILED_QUERY_REJECTED');
+  });
+
+  it('records parse error when body is legacy parsed_light JSON', async () => {
     const body = JSON.stringify({ organic: [] });
     fetchMock.mockResolvedValue({
       status: 200,
@@ -169,51 +326,42 @@ describe('BrightDataSearchClient', () => {
     const result = await client.search({ text: 'test query' });
 
     expect(result.items).toHaveLength(0);
-    expect(result.meta.emptyBody).toBe(false);
-    expect(result.meta.httpStatus).toBe(200);
-    expect(result.meta.responseBytes).toBe(body.length);
-    expect(result.meta.resultCategory).toBe('organic_empty');
-    expect(result.meta.parseError).toBeUndefined();
-  });
-
-  it('classifies organic rows without a valid URL as organic_empty', async () => {
-    const body = JSON.stringify({
-      organic: [
-        { title: 'No link here', description: 'missing url' },
-        { title: 'Blank link', link: '   ', description: 'blank' },
-      ],
-    });
-    fetchMock.mockResolvedValue({
-      status: 200,
-      text: async () => body,
-    });
-
-    const client = new BrightDataSearchClient(mockConfig());
-    const result = await client.search({ text: 'test query' });
-
-    expect(result.items).toHaveLength(0);
-    expect(result.meta.resultCategory).toBe('organic_empty');
-    expect(result.meta.responseBytes).toBe(body.length);
-    expect(result.meta.httpStatus).toBe(200);
-  });
-
-  it('records parse error when body is not JSON', async () => {
-    fetchMock.mockResolvedValue({
-      status: 200,
-      text: async () => 'not-json',
-    });
-
-    const client = new BrightDataSearchClient(mockConfig());
-    const result = await client.search({ text: 'test query' });
-
-    expect(result.items).toHaveLength(0);
-    expect(result.meta.parseError).toBeDefined();
-    expect(result.meta.emptyBody).toBe(false);
     expect(result.meta.resultCategory).toBe('parse_error');
-    expect(result.meta.responseBytes).toBe('not-json'.length);
+    expect(result.meta.parseError).toBe('SERP_RESPONSE_NOT_HTML');
   });
 
-  it('classifies HTTP 403/500 as http_error without treating empty organic', async () => {
+  it('classifies HTTP 400 as http_error with diagnostic parseError', async () => {
+    fetchMock.mockResolvedValue({
+      status: 400,
+      text: async () => 'Invalid data_format',
+    });
+
+    const client = new BrightDataSearchClient(mockConfig());
+    const result = await client.search({ text: 'test query' });
+
+    expect(result.items).toHaveLength(0);
+    expect(result.meta.httpStatus).toBe(400);
+    expect(result.meta.responseBytes).toBe('Invalid data_format'.length);
+    expect(result.meta.resultCategory).toBe('http_error');
+    expect(result.meta.parseError).toBe('HTTP_400');
+  });
+
+  it('classifies HTTP 401 as http_error', async () => {
+    fetchMock.mockResolvedValue({
+      status: 401,
+      text: async () => 'unauthorized',
+    });
+
+    const client = new BrightDataSearchClient(mockConfig());
+    const result = await client.search({ text: 'test query' });
+
+    expect(result.items).toHaveLength(0);
+    expect(result.meta.httpStatus).toBe(401);
+    expect(result.meta.resultCategory).toBe('http_error');
+    expect(result.meta.parseError).toBe('HTTP_401');
+  });
+
+  it('classifies HTTP 403 as http_error without treating empty organic', async () => {
     fetchMock.mockResolvedValue({
       status: 403,
       text: async () => 'forbidden',
@@ -290,7 +438,9 @@ describe('BrightDataSearchClient', () => {
       expect(payload.causeCode).toBe('ENOTFOUND');
       expect(payload.causeSyscall).toBe('getaddrinfo');
       expect(payload.causeHostname).toBe('api.brightdata.com');
-      expect(JSON.stringify(payload)).not.toMatch(/test-key|Bearer|Authorization/i);
+      expect(JSON.stringify(payload)).not.toMatch(
+        /test-key|Bearer|Authorization/i,
+      );
     });
 
     it('logs ECONNRESET as transport cause', async () => {
@@ -362,6 +512,13 @@ describe('BrightDataSearchClient', () => {
   });
 
   it('retries on empty body when max retries allows', async () => {
+    const retryHtml = `
+      <html><body>
+        <a href="/url?q=https%3A%2F%2Fwww.linkedin.com%2Fin%2Fretry-ok&sa=U">
+          <h3>Profile</h3>
+        </a>
+      </body></html>
+    `;
     fetchMock
       .mockResolvedValueOnce({
         status: 200,
@@ -369,15 +526,7 @@ describe('BrightDataSearchClient', () => {
       })
       .mockResolvedValueOnce({
         status: 200,
-        text: async () =>
-          JSON.stringify({
-            organic: [
-              {
-                title: 'Profile',
-                link: 'https://www.linkedin.com/in/retry-ok',
-              },
-            ],
-          }),
+        text: async () => retryHtml,
       });
 
     const client = new BrightDataSearchClient(
@@ -388,6 +537,22 @@ describe('BrightDataSearchClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.items).toHaveLength(1);
     expect(result.items[0].url).toBe('https://www.linkedin.com/in/retry-ok');
+  });
+
+  it('does not retry HTTP 400', async () => {
+    fetchMock.mockResolvedValue({
+      status: 400,
+      text: async () => 'bad request',
+    });
+
+    const client = new BrightDataSearchClient(
+      mockConfig({ BRIGHTDATA_SEARCH_MAX_RETRIES: 2 }),
+    );
+    const result = await client.search({ text: 'bad' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.meta.resultCategory).toBe('http_error');
+    expect(result.meta.httpStatus).toBe(400);
   });
 
   it('reports not configured without API key', () => {

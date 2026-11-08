@@ -36,6 +36,15 @@ enum BrandCandidateStatus {
   POSTPONED
 }
 
+/// Nest evidence classifier outcome for Brand Discovery (AI-004.5.5).
+/// Orthogonal to BrandCandidateStatus (review workflow).
+/// Historical rows and Legacy creates use NOT_ASSESSED — never inferred from evidenceUrls.
+enum EvidenceStatus {
+  VERIFIED
+  UNVERIFIED
+  NOT_ASSESSED
+}
+
 enum LeadDiscoveryStatus {
   PROCESSING
   COMPLETED
@@ -226,6 +235,8 @@ model BrandCandidate {
   fitReason      String?
   source         String
   evidenceUrls   String[]
+  /// Nest-classified evidence state (AI-004.5.5). Default NOT_ASSESSED for Legacy / historical.
+  evidenceStatus EvidenceStatus        @default(NOT_ASSESSED)
   status         BrandCandidateStatus  @default(UNDER_REVIEW)
   metadata       Json?
   /// Lead selected for future outreach (ADR-0011). Orthogonal to Lead.status.

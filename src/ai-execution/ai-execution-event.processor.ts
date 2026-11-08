@@ -3,10 +3,7 @@ import { Logger } from '@nestjs/common';
 import { parseAiExecutionEvent } from '@influence-maven/ai-contracts';
 import { Job } from 'bullmq';
 
-import {
-  AI_EXECUTION_JOBS,
-  AI_EXECUTION_QUEUES,
-} from './ai-execution.queues';
+import { AI_EXECUTION_JOBS, AI_EXECUTION_QUEUES } from './ai-execution.queues';
 
 /** Observability only in AI-003.2 — business state comes from results. */
 @Processor(AI_EXECUTION_QUEUES.EVENTS)

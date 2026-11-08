@@ -15,15 +15,31 @@ import { QUEUES } from '../bullmq/queue.constants';
 import {
   BrandCandidateStatus,
   BrandDiscoveryStatus,
+  EvidenceStatus,
   IbpStatus,
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { BrandDiscoveryAiOrchestrator } from './brand-discovery-ai.orchestrator';
 import { BrandSourceRegistry } from './brand-source.registry';
 import { SearchBrandsDto } from './dto/search-brands.dto';
 import { UpdateBrandCandidateStatusDto } from './dto/update-brand-candidate-status.dto';
 import type { FindBrandsJobData } from './interfaces/find-brands-job.interface';
-import type { IbpCriteriaSnapshot } from './interfaces/brand-source-provider.interface';
-import { dedupeByDomain, excludeExistingDomains, normalizeDomain } from './utils/brand-domain.util';
+import type {
+  BrandSearchMetadata,
+  IbpCriteriaSnapshot,
+  RawBrandCandidate,
+} from './interfaces/brand-source-provider.interface';
+import {
+  dedupeByDomain,
+  ensureWebsiteUrl,
+  excludeExistingDomains,
+  normalizeDomain,
+} from './utils/brand-domain.util';
+import { filterScoredBrandsByEvidence } from './utils/brand-evidence-filter.util';
+import { enrichScoredBrandForPersistence } from './utils/brand-score-grounding.util';
+
+/** Context.userId for Mastra requests when HTTP actor is not on the job payload. */
+export const BRAND_DISCOVERY_MASTRA_ACTOR_USER_ID = 'system:brand-discovery';
 
 export const brandDiscoveryRunSelect = {
   id: true,
@@ -55,6 +71,7 @@ export const brandCandidateSelect = {
   fitReason: true,
   source: true,
   evidenceUrls: true,
+  evidenceStatus: true,
   status: true,
   metadata: true,
   createdAt: true,
@@ -71,6 +88,7 @@ export class BrandDiscoveryService {
     private readonly configService: ConfigService,
     private readonly aiPromptsService: AiPromptsService,
     private readonly brandSourceRegistry: BrandSourceRegistry,
+    private readonly brandDiscoveryAiOrchestrator: BrandDiscoveryAiOrchestrator,
     @InjectQueue(QUEUES.PROSPECTING)
     private readonly prospectingQueue: Queue,
   ) {}
@@ -275,7 +293,7 @@ export class BrandDiscoveryService {
     const instructions =
       promptInstructions?.trim() ||
       (await this.aiPromptsService.getBrandDiscoveryInstructions());
-    const { provider: brandSource } = this.brandSourceRegistry.resolve();
+    const engine = this.resolveEngine();
 
     try {
       const existingRows = await this.prisma.brandCandidate.findMany({
@@ -283,59 +301,143 @@ export class BrandDiscoveryService {
         select: { domain: true },
       });
       const existingDomains = new Set(
-        existingRows
-          .map((row) => normalizeDomain(row.domain))
-          .filter(Boolean),
+        existingRows.map((row) => normalizeDomain(row.domain)).filter(Boolean),
       );
 
       const fetchLimit = Math.min(Math.max(run.limit * 2, run.limit), 20);
-      const { candidates: rawCandidates, searchMetadata } =
-        await brandSource.discover({
-          influencerName: influencer.name,
-          influencerNiche: influencer.niche,
-          ibp,
-          limit: fetchLimit,
-          promptInstructions: instructions,
+
+      let rawCandidates: RawBrandCandidate[];
+      let searchMetadata: BrandSearchMetadata | Record<string, unknown>;
+
+      if (engine === 'mastra') {
+        const orchestrated =
+          await this.brandDiscoveryAiOrchestrator.orchestrate({
+            runId,
+            userId: BRAND_DISCOVERY_MASTRA_ACTOR_USER_ID,
+            influencerId,
+            influencerName: influencer.name,
+            niche: influencer.niche,
+            ibp,
+            limit: fetchLimit,
+            promptInstructions: instructions,
+          });
+
+        const evidence = filterScoredBrandsByEvidence(orchestrated.brands, {
+          searchHits: orchestrated.searchHits,
         });
+
+        const reasonCounts: Record<string, number> = {};
+        for (const discarded of evidence.discarded) {
+          reasonCounts[discarded.reason] =
+            (reasonCounts[discarded.reason] ?? 0) + 1;
+        }
+
+        const mapScored = (
+          brand: (typeof evidence.verified)[number],
+          evidenceStatus: 'VERIFIED' | 'UNVERIFIED',
+        ): RawBrandCandidate => {
+          const website = ensureWebsiteUrl(brand.website);
+          const domain = normalizeDomain(website);
+          const grounded = enrichScoredBrandForPersistence({
+            brand,
+            evidenceStatus,
+            searchHits: orchestrated.searchHits,
+            seedBrands: undefined,
+            ibp,
+            website,
+            domain,
+          });
+          return {
+            name: grounded.name,
+            website: grounded.website,
+            domain: grounded.domain,
+            sector: grounded.sector,
+            market: grounded.market,
+            brandSize: grounded.brandSize,
+            score: grounded.score,
+            fitReason: grounded.fitReason,
+            source: 'mastra',
+            evidenceUrls: grounded.evidenceUrls,
+            evidenceStatus: grounded.evidenceStatus,
+            groundingSource: grounded.groundingSource,
+            metadata: grounded.metadata,
+          };
+        };
+
+        // VERIFIED and UNVERIFIED both continue to business filters (AI-004.5.3).
+        // evidenceStatus + groundingSource set in Nest; Mastra never emits them.
+        rawCandidates = [
+          ...evidence.verified.map((b) => mapScored(b, 'VERIFIED')),
+          ...evidence.unverified.map((b) => mapScored(b, 'UNVERIFIED')),
+        ];
+
+        const filtered = this.applyHardFilters(rawCandidates, ibp);
+        const unique = dedupeByDomain(filtered) as typeof filtered;
+        const novel = excludeExistingDomains(unique, existingDomains);
+        const toPersist = novel.slice(0, run.limit);
+
+        searchMetadata = {
+          engine: 'mastra',
+          strategy: orchestrated.strategy,
+          queries: orchestrated.queries,
+          plannedQueriesCount: orchestrated.plannedQueriesCount,
+          validatedQueriesCount: orchestrated.validatedQueriesCount,
+          fallbackUsed: orchestrated.fallbackUsed,
+          searchHitsCount: orchestrated.searchHitsCount,
+          planExecutionId: orchestrated.planExecutionId,
+          scoreExecutionId: orchestrated.scoreExecutionId,
+          scoredBrandsCount: orchestrated.brands.length,
+          verifiedCount: evidence.verified.length,
+          unverifiedCount: evidence.unverified.length,
+          discardedByEvidenceCount: evidence.discarded.length,
+          evidenceAcceptedCount: evidence.verified.length,
+          evidenceRejectedCount: evidence.discarded.length,
+          evidenceRejectReasonCounts: reasonCounts,
+          afterHardFiltersCount: filtered.length,
+          afterDedupeCount: unique.length,
+          afterExcludeExistingCount: novel.length,
+          persistedCount: toPersist.length,
+          serpDiagnostics: orchestrated.serpDiagnostics ?? [],
+        };
+
+        await this.persistDiscoveryResult({
+          runId,
+          influencerId,
+          toPersist,
+          searchMetadata,
+        });
+        return;
+      }
+
+      const { provider: brandSource } = this.brandSourceRegistry.resolve();
+      const discovered = await brandSource.discover({
+        influencerName: influencer.name,
+        influencerNiche: influencer.niche,
+        ibp,
+        limit: fetchLimit,
+        promptInstructions: instructions,
+      });
+      // Legacy has no Nest evidence classifier equivalent — always NOT_ASSESSED
+      // (do not infer VERIFIED from evidenceUrls).
+      rawCandidates = discovered.candidates.map((c) => ({
+        ...c,
+        evidenceStatus: 'NOT_ASSESSED' as const,
+      }));
 
       const filtered = this.applyHardFilters(rawCandidates, ibp);
       const unique = dedupeByDomain(filtered) as typeof filtered;
       const novel = excludeExistingDomains(unique, existingDomains);
       const toPersist = novel.slice(0, run.limit);
 
-      await this.prisma.$transaction(async (tx) => {
-        if (toPersist.length > 0) {
-          await tx.brandCandidate.createMany({
-            data: toPersist.map((candidate) => ({
-              influencerId,
-              discoveryRunId: runId,
-              name: candidate.name,
-              website: candidate.website,
-              domain: candidate.domain || normalizeDomain(candidate.website),
-              sector: candidate.sector,
-              market: candidate.market,
-              brandSize: candidate.brandSize,
-              score: candidate.score,
-              fitReason: candidate.fitReason,
-              source: candidate.source,
-              evidenceUrls: candidate.evidenceUrls,
-              status: BrandCandidateStatus.UNDER_REVIEW,
-            })),
-          });
-        }
+      searchMetadata = discovered.searchMetadata
+        ? { ...discovered.searchMetadata, engine: 'legacy' as const }
+        : { engine: 'legacy' as const };
 
-        await tx.brandDiscoveryRun.update({
-          where: { id: runId },
-          data: {
-            status: BrandDiscoveryStatus.COMPLETED,
-            ...(searchMetadata
-              ? {
-                  searchMetadata:
-                    searchMetadata as unknown as Prisma.InputJsonValue,
-                }
-              : {}),
-          },
-        });
+      await this.persistDiscoveryResult({
+        runId,
+        influencerId,
+        toPersist,
+        searchMetadata,
       });
     } catch (error) {
       await this.prisma.brandDiscoveryRun.update({
@@ -350,19 +452,62 @@ export class BrandDiscoveryService {
     }
   }
 
+  private resolveEngine(): 'legacy' | 'mastra' {
+    const value = this.configService.get<string>('BRAND_DISCOVERY_ENGINE');
+    return value === 'mastra' ? 'mastra' : 'legacy';
+  }
+
+  private async persistDiscoveryResult(args: {
+    runId: string;
+    influencerId: string;
+    toPersist: RawBrandCandidate[];
+    searchMetadata: BrandSearchMetadata | Record<string, unknown>;
+  }): Promise<void> {
+    const { runId, influencerId, toPersist, searchMetadata } = args;
+
+    await this.prisma.$transaction(async (tx) => {
+      if (toPersist.length > 0) {
+        await tx.brandCandidate.createMany({
+          data: toPersist.map((candidate) => ({
+            influencerId,
+            discoveryRunId: runId,
+            name: candidate.name,
+            website: candidate.website,
+            domain: candidate.domain || normalizeDomain(candidate.website),
+            sector: candidate.sector,
+            market: candidate.market,
+            brandSize: candidate.brandSize,
+            score: candidate.score,
+            fitReason: candidate.fitReason,
+            source: candidate.source,
+            evidenceUrls: candidate.evidenceUrls,
+            evidenceStatus:
+              candidate.evidenceStatus === 'VERIFIED'
+                ? EvidenceStatus.VERIFIED
+                : candidate.evidenceStatus === 'UNVERIFIED'
+                  ? EvidenceStatus.UNVERIFIED
+                  : EvidenceStatus.NOT_ASSESSED,
+            metadata:
+              candidate.metadata != null
+                ? (candidate.metadata as Prisma.InputJsonValue)
+                : undefined,
+            status: BrandCandidateStatus.UNDER_REVIEW,
+          })),
+        });
+      }
+
+      await tx.brandDiscoveryRun.update({
+        where: { id: runId },
+        data: {
+          status: BrandDiscoveryStatus.COMPLETED,
+          searchMetadata: searchMetadata as Prisma.InputJsonValue,
+        },
+      });
+    });
+  }
+
   private applyHardFilters(
-    candidates: Array<{
-      name: string;
-      website: string;
-      domain: string;
-      sector?: string;
-      market?: string;
-      brandSize?: string;
-      score?: number;
-      fitReason?: string;
-      source: string;
-      evidenceUrls: string[];
-    }>,
+    candidates: RawBrandCandidate[],
     ibp: IbpCriteriaSnapshot,
   ) {
     const excluded = new Set(

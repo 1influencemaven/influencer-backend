@@ -9,10 +9,7 @@ import type { Prisma } from '../generated/prisma/client';
 
 import { IbpStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  AI_EXECUTION_JOBS,
-  AI_EXECUTION_QUEUES,
-} from './ai-execution.queues';
+import { AI_EXECUTION_JOBS, AI_EXECUTION_QUEUES } from './ai-execution.queues';
 
 @Processor(AI_EXECUTION_QUEUES.RESULTS)
 export class AiExecutionResultProcessor extends WorkerHost {
@@ -94,7 +91,7 @@ export class AiExecutionResultProcessor extends WorkerHost {
               finishedAt: result.finishedAt,
               durationMs: result.durationMs,
             },
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 
@@ -120,7 +117,7 @@ export class AiExecutionResultProcessor extends WorkerHost {
             errorMessage: result.error?.message,
             finishedAt: result.finishedAt,
           },
-        } as Prisma.InputJsonValue,
+        },
       },
     });
 

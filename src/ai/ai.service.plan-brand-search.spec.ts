@@ -24,7 +24,7 @@ describe('AiService.planBrandSearch', () => {
       name: 'mock',
       model: 'mock',
       complete,
-    } as LlmProvider);
+    });
 
     const plan = await service.planBrandSearch({
       influencerName: 'Ada',
@@ -50,7 +50,7 @@ describe('AiService.planBrandSearch', () => {
       name: 'mock',
       model: 'mock',
       complete,
-    } as LlmProvider);
+    });
 
     const plan = await service.planBrandSearch({
       influencerName: 'Ada',

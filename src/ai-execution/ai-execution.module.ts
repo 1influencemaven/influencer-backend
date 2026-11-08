@@ -5,6 +5,7 @@ import { AiExecutionBootstrapService } from './ai-execution-bootstrap.service';
 import { AiExecutionEventProcessor } from './ai-execution-event.processor';
 import { AiExecutionPublisherService } from './ai-execution-publisher.service';
 import { AiExecutionResultProcessor } from './ai-execution-result.processor';
+import { AiExecutionResultWaitService } from './ai-execution-result-wait.service';
 import { AI_EXECUTION_QUEUES } from './ai-execution.queues';
 
 @Module({
@@ -17,10 +18,11 @@ import { AI_EXECUTION_QUEUES } from './ai-execution.queues';
   ],
   providers: [
     AiExecutionPublisherService,
+    AiExecutionResultWaitService,
     AiExecutionResultProcessor,
     AiExecutionEventProcessor,
     AiExecutionBootstrapService,
   ],
-  exports: [AiExecutionPublisherService],
+  exports: [AiExecutionPublisherService, AiExecutionResultWaitService],
 })
 export class AiExecutionModule {}

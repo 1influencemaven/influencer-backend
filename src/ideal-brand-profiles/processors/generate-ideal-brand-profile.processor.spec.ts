@@ -187,7 +187,9 @@ describe('GenerateIdealBrandProfileProcessor', () => {
       },
     };
     const publisher = {
-      publishIbpGeneration: jest.fn().mockRejectedValue(new Error('redis down')),
+      publishIbpGeneration: jest
+        .fn()
+        .mockRejectedValue(new Error('redis down')),
     };
 
     const processor = new GenerateIdealBrandProfileProcessor(

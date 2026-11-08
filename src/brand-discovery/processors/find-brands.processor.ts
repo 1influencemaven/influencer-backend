@@ -4,8 +4,6 @@ import { Job } from 'bullmq';
 
 import { PROSPECTING_JOBS } from '../../bullmq/job-types';
 import { QUEUES } from '../../bullmq/queue.constants';
-import type { FindLeadsJobData } from '../../lead-discovery/interfaces/find-leads-job.interface';
-import { LeadDiscoveryService } from '../../lead-discovery/lead-discovery.service';
 import { BrandDiscoveryService } from '../brand-discovery.service';
 import type { FindBrandsJobData } from '../interfaces/find-brands-job.interface';
 
@@ -15,50 +13,37 @@ export class FindBrandsProcessor extends WorkerHost {
 
   constructor(
     private readonly brandDiscoveryService: BrandDiscoveryService,
-    private readonly leadDiscoveryService: LeadDiscoveryService,
   ) {
     super();
   }
 
   async process(job: Job): Promise<void> {
-    if (job.name === PROSPECTING_JOBS.FIND_BRANDS) {
-      const { runId, influencerId, promptInstructions } =
-        job.data as FindBrandsJobData;
-
-      this.logger.log(
-        `Processing find-brands for influencer ${influencerId} (run ${runId})`,
-      );
-
-      await this.brandDiscoveryService.executeDiscovery(
-        runId,
-        influencerId,
-        promptInstructions,
-      );
-
-      this.logger.log(
-        `Completed find-brands for influencer ${influencerId} (run ${runId})`,
+    if (job.name !== PROSPECTING_JOBS.FIND_BRANDS) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'prospecting_unknown_job',
+          jobName: job.name,
+          jobId: job.id,
+        }),
       );
       return;
     }
 
-    if (job.name === PROSPECTING_JOBS.FIND_LEADS) {
-      const { runId, brandCandidateId, promptInstructions } =
-        job.data as FindLeadsJobData;
+    const { runId, influencerId, promptInstructions } =
+      job.data as FindBrandsJobData;
 
-      // When CONTACT_DISCOVERY_REBUILD_MODE is on, executeDiscovery fails the
-      // run without Bright Data calls. Prospecting queue / find-brands untouched.
-      this.logger.log(
-        `Processing find-leads for brand ${brandCandidateId} (run ${runId})`,
-      );
+    this.logger.log(
+      `Processing find-brands for influencer ${influencerId} (run ${runId})`,
+    );
 
-      await this.leadDiscoveryService.executeDiscovery(
-        runId,
-        promptInstructions,
-      );
+    await this.brandDiscoveryService.executeDiscovery(
+      runId,
+      influencerId,
+      promptInstructions,
+    );
 
-      this.logger.log(
-        `Completed find-leads for brand ${brandCandidateId} (run ${runId})`,
-      );
-    }
+    this.logger.log(
+      `Completed find-brands for influencer ${influencerId} (run ${runId})`,
+    );
   }
 }

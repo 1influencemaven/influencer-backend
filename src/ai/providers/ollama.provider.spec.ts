@@ -12,7 +12,7 @@ describe('OllamaProvider', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    global.fetch = fetchMock as unknown as typeof fetch;
+    global.fetch = fetchMock;
   });
 
   function config(

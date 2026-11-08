@@ -71,7 +71,7 @@ describe('AiPlusTavilyBrandSource', () => {
     } as unknown as ConfigService;
 
     const source = new AiPlusTavilyBrandSource(
-      { name: 'brightdata', search } as WebSearchProvider,
+      { name: 'brightdata', search },
       { scoreBrandCandidates, planBrandSearch } as unknown as AiService,
       configService,
     );

@@ -30,15 +30,13 @@ export class AiExecutionBootstrapService implements OnApplicationBootstrap {
   private logWorker(
     label: string,
     queueName: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     ProcessorClass: any,
   ): void {
     try {
       const processor = this.moduleRef.get(ProcessorClass, {
         strict: false,
-      }) as {
-        worker?: { isRunning?: () => boolean };
-      };
+      });
       let running = false;
       try {
         running =

@@ -15,6 +15,7 @@ import {
   BRAND_SEARCH_MAX_QUERIES,
   validateBrandSearchQueries,
 } from '../utils/brand-search-queries.util';
+import { BrightDataWebSearchProvider } from './brightdata-web-search.provider';
 
 @Injectable()
 export class AiPlusTavilyBrandSource implements BrandSourceProvider {
@@ -31,10 +32,24 @@ export class AiPlusTavilyBrandSource implements BrandSourceProvider {
     const { queries, strategy, fallbackUsed, plannedQueriesCount } =
       await this.resolveSearchQueries(context);
 
-    const hitLists = await Promise.all(
-      queries.map((query) => this.webSearch.search(query, { maxResults: 6 })),
+    const serpCapable =
+      this.webSearch instanceof BrightDataWebSearchProvider
+        ? this.webSearch
+        : null;
+
+    const serpOutcomes = await Promise.all(
+      queries.map(async (query) => {
+        if (serpCapable) {
+          return serpCapable.searchWithDiagnostics(query, { maxResults: 6 });
+        }
+        const hits = await this.webSearch.search(query, { maxResults: 6 });
+        return { hits, diagnostic: undefined };
+      }),
     );
-    const searchHits = hitLists.flat();
+    const searchHits = serpOutcomes.flatMap((o) => o.hits);
+    const serpDiagnostics = serpOutcomes
+      .map((o) => o.diagnostic)
+      .filter((d): d is NonNullable<typeof d> => d != null);
 
     const searchMetadata: BrandSearchMetadata = {
       strategy,
@@ -43,6 +58,7 @@ export class AiPlusTavilyBrandSource implements BrandSourceProvider {
       validatedQueriesCount: queries.length,
       fallbackUsed,
       searchHitsCount: searchHits.length,
+      ...(serpDiagnostics.length > 0 ? { serpDiagnostics } : {}),
     };
 
     this.logger.log(

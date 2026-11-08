@@ -4,14 +4,12 @@ import { BullModule } from '@nestjs/bullmq';
 
 import { AiModule } from '../ai/ai.module';
 import { AiService } from '../ai/ai.service';
+import { AiExecutionModule } from '../ai-execution/ai-execution.module';
 import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUES } from '../bullmq/queue.constants';
-import {
-  BrightDataModule,
-  BrightDataSearchClient,
-} from '../integrations/brightdata';
-import { LeadDiscoveryModule } from '../lead-discovery/lead-discovery.module';
+import { BrightDataModule } from '../integrations/brightdata';
+import { BrandDiscoveryAiOrchestrator } from './brand-discovery-ai.orchestrator';
 import { BrandDiscoveryController } from './brand-discovery.controller';
 import { BrandDiscoveryService } from './brand-discovery.service';
 import {
@@ -29,8 +27,8 @@ import { MockBrandSource } from './providers/mock.brand-source';
   imports: [
     AuthModule,
     AiModule,
+    AiExecutionModule,
     AiPromptsModule,
-    LeadDiscoveryModule,
     BrightDataModule,
     ConfigModule,
     BullModule.registerQueue({ name: QUEUES.PROSPECTING }),
@@ -39,13 +37,15 @@ import { MockBrandSource } from './providers/mock.brand-source';
   providers: [
     BrandDiscoveryService,
     FindBrandsProcessor,
+    BrightDataWebSearchProvider,
+    BrandDiscoveryAiOrchestrator,
     {
       provide: BrandSourceRegistry,
-      inject: [ConfigService, AiService, BrightDataSearchClient],
+      inject: [ConfigService, AiService, BrightDataWebSearchProvider],
       useFactory: (
         configService: ConfigService,
         aiService: AiService,
-        brightDataSearch: BrightDataSearchClient,
+        webSearch: BrightDataWebSearchProvider,
       ) => {
         const providers = new Map<BrandSourceId, BrandSourceProvider>();
 
@@ -58,7 +58,6 @@ import { MockBrandSource } from './providers/mock.brand-source';
           return new BrandSourceRegistry(providers, configService);
         }
 
-        const webSearch = new BrightDataWebSearchProvider(brightDataSearch);
         providers.set(
           'brightdata',
           new AiPlusTavilyBrandSource(webSearch, aiService, configService),
@@ -68,6 +67,6 @@ import { MockBrandSource } from './providers/mock.brand-source';
       },
     },
   ],
-  exports: [BrandDiscoveryService],
+  exports: [BrandDiscoveryService, BrandDiscoveryAiOrchestrator],
 })
 export class BrandDiscoveryModule {}

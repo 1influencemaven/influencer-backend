@@ -41,8 +41,7 @@ export class GenerateIdealBrandProfileProcessor extends WorkerHost {
       return;
     }
 
-    const instructions =
-      promptInstructions?.trim() || DEFAULT_IBP_INSTRUCTIONS;
+    const instructions = promptInstructions?.trim() || DEFAULT_IBP_INSTRUCTIONS;
 
     try {
       const { executionId, correlationId } =
@@ -62,7 +61,7 @@ export class GenerateIdealBrandProfileProcessor extends WorkerHost {
               transport: 'bullmq',
               requestedAt: new Date().toISOString(),
             },
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 

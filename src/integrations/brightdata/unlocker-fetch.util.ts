@@ -76,7 +76,10 @@ const CAUSE_HOSTNAME_MAX = 253;
 /** Only characters needed by error names/codes/syscalls/hostnames. */
 const CAUSE_SAFE_CHARS = /[^A-Za-z0-9._\-:[\]]/g;
 
-function sanitizeCauseField(value: unknown, maxLen: number): string | undefined {
+function sanitizeCauseField(
+  value: unknown,
+  maxLen: number,
+): string | undefined {
   if (typeof value !== 'string' && typeof value !== 'number') {
     return undefined;
   }
@@ -129,8 +132,7 @@ function pickRepresentativeCause(error: unknown): unknown {
     const next: unknown =
       'cause' in candidate && candidate.cause !== undefined
         ? candidate.cause
-        : candidate.name === 'AggregateError' &&
-            Array.isArray(candidate.errors)
+        : candidate.name === 'AggregateError' && Array.isArray(candidate.errors)
           ? candidate.errors[0]
           : undefined;
     if (next === undefined) {
@@ -153,7 +155,7 @@ export function extractUnlockerErrorCause(
   error: unknown,
 ): UnlockerErrorCauseDiagnostics | undefined {
   const cause = pickRepresentativeCause(error);
-  if (!isRecord(cause) || cause === (error as unknown)) {
+  if (!isRecord(cause) || cause === error) {
     return undefined;
   }
 
@@ -176,10 +178,7 @@ export function extractUnlockerErrorCause(
 }
 
 export function classifyUnlockerException(error: unknown): {
-  outcome: Exclude<
-    UnlockerFetchOutcome,
-    'ok' | 'http_error' | 'empty_body'
-  >;
+  outcome: Exclude<UnlockerFetchOutcome, 'ok' | 'http_error' | 'empty_body'>;
   errorName: string;
   errorMessage: string;
 } & UnlockerErrorCauseDiagnostics {
@@ -217,7 +216,12 @@ export function classifyUnlockerException(error: unknown): {
     lower.includes('tls') ||
     lower.includes('ssl')
   ) {
-    return { outcome: 'network_error', errorName: name, errorMessage, ...cause };
+    return {
+      outcome: 'network_error',
+      errorName: name,
+      errorMessage,
+      ...cause,
+    };
   }
 
   return { outcome: 'unknown_error', errorName: name, errorMessage, ...cause };
