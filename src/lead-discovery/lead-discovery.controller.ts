@@ -123,7 +123,7 @@ export class LeadDiscoveryController {
   @ApiOperation({
     summary: 'Buscar contactos/emails en marcas APPROVED',
     description:
-      'Sin rebuild: encola find-leads (prospecting). Con CONTACT_DISCOVERY_REBUILD_MODE: encola BBC v1 en cola contact-discovery (provider bbc-brightdata; allowlist HTML; Search no conectado).',
+      'Paso 5b: siempre encola Contact Discovery (cola contact-discovery / FIND_BRAND_EMAILS via Mastra). No hay find-leads ni Nest BBC legacy.',
   })
   @ApiAcceptedResponse({ description: 'Jobs encolados' })
   @ApiBadRequestResponse({

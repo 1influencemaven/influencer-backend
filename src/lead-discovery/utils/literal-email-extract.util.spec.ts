@@ -6,8 +6,7 @@ import {
 
 describe('literal-email-extract.util', () => {
   it('extracts literal emails from HTML', () => {
-    const html =
-      '<p>Reach us at partnerships@liquid-iv.com for inquiries.</p>';
+    const html = '<p>Reach us at partnerships@liquid-iv.com for inquiries.</p>';
     const matches = extractLiteralEmailsFromText(html);
     expect(matches).toHaveLength(1);
     expect(matches[0].email).toBe('partnerships@liquid-iv.com');

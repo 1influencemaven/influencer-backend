@@ -1,33 +1,26 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Job, UnrecoverableError } from 'bullmq';
 
 import { CONTACT_DISCOVERY_JOBS } from '../../bullmq/job-types';
 import { QUEUES } from '../../bullmq/queue.constants';
 import { LeadDiscoveryStatus } from '../../generated/prisma/enums';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AiContactResearchOrchestrator } from '../orchestrator/ai-contact-research.orchestrator';
-import { BbcDiscoveryOrchestrator } from '../orchestrator/bbc-discovery.orchestrator';
+import { ContactEmailMastraOrchestrator } from '../orchestrator/contact-email-mastra.orchestrator';
 import type { DiscoverBusinessContactsJobData } from '../interfaces/discover-business-contacts-job.interface';
 import { interpretBbcDiscoveryResult } from '../utils/bbc-job-result.util';
 
 /**
  * Consumes `contact-discovery` queue. Does not touch `prospecting` / find-brands.
- *
- * Prefers AI research orchestrator when CONTACT_DISCOVERY_AI_ORCHESTRATOR=true.
- * On AI_PROVIDER_UNAVAILABLE, falls back to allowlist BbcDiscoveryOrchestrator
- * and labels that path as degraded (deterministic), never as full AI research.
+ * Paso 5b: Mastra FIND_BRAND_EMAILS only.
  */
 @Processor(QUEUES.CONTACT_DISCOVERY)
 export class ContactDiscoveryProcessor extends WorkerHost {
   private readonly logger = new Logger(ContactDiscoveryProcessor.name);
 
   constructor(
-    private readonly orchestrator: BbcDiscoveryOrchestrator,
-    private readonly aiOrchestrator: AiContactResearchOrchestrator,
+    private readonly mastraOrchestrator: ContactEmailMastraOrchestrator,
     private readonly prisma: PrismaService,
-    private readonly configService: ConfigService,
   ) {
     super();
   }
@@ -50,7 +43,8 @@ export class ContactDiscoveryProcessor extends WorkerHost {
       return { skipped: true };
     }
 
-    const { runId, brandCandidateId, website, domain, maxPages } = job.data;
+    const { runId, brandCandidateId, influencerId, website, domain, maxPages } =
+      job.data;
 
     if (!runId || !brandCandidateId || !website) {
       throw new UnrecoverableError(
@@ -95,57 +89,26 @@ export class ContactDiscoveryProcessor extends WorkerHost {
       }),
     );
 
-    const brandName =
-      (
-        await this.prisma.brandCandidate.findUnique({
-          where: { id: brandCandidateId },
-          select: { name: true },
-        })
-      )?.name ?? undefined;
+    const brand = await this.prisma.brandCandidate.findUnique({
+      where: { id: brandCandidateId },
+      select: {
+        name: true,
+        influencer: { select: { niche: true } },
+      },
+    });
+    const brandName = brand?.name ?? undefined;
+    const niche = brand?.influencer?.niche ?? undefined;
 
-    const useAi =
-      this.configService.get<boolean>('CONTACT_DISCOVERY_AI_ORCHESTRATOR') !==
-      false;
-
-    let result;
-    if (useAi) {
-      result = await this.aiOrchestrator.execute({
-        runId,
-        brandCandidateId,
-        website,
-        domain: domain ?? '',
-        brandName,
-        ...(maxPages != null ? { maxPages } : {}),
-      });
-      // Explicit AI outage → deterministic allowlist BBC (degraded, not AI).
-      if (
-        result.runStatus === 'FAILED' &&
-        result.errorMessage?.includes('AI_PROVIDER_UNAVAILABLE')
-      ) {
-        this.logger.warn(
-          JSON.stringify({
-            event: 'ai_contact_research_fallback_allowlist',
-            runId,
-            note: 'degraded_deterministic_not_ai',
-          }),
-        );
-        result = await this.orchestrator.execute({
-          runId,
-          brandCandidateId,
-          website,
-          domain: domain ?? '',
-          ...(maxPages != null ? { maxPages } : {}),
-        });
-      }
-    } else {
-      result = await this.orchestrator.execute({
-        runId,
-        brandCandidateId,
-        website,
-        domain: domain ?? '',
-        ...(maxPages != null ? { maxPages } : {}),
-      });
-    }
+    const result = await this.mastraOrchestrator.execute({
+      runId,
+      brandCandidateId,
+      influencerId,
+      website,
+      domain: domain ?? '',
+      brandName,
+      niche,
+      ...(maxPages != null ? { maxPages } : {}),
+    });
 
     const interpreted = interpretBbcDiscoveryResult(result);
 
@@ -160,7 +123,6 @@ export class ContactDiscoveryProcessor extends WorkerHost {
           attemptsMade: job.attemptsMade,
         }),
       );
-      // Retry: orchestrator upserts are idempotent; do not treat in-memory FAILED as DB truth.
       throw new Error(
         `BBC_TERMINAL_STATUS_NOT_PERSISTED: ${interpreted.errorMessage ?? 'unknown'}`,
       );
@@ -179,8 +141,6 @@ export class ContactDiscoveryProcessor extends WorkerHost {
       }),
     );
 
-    // Job succeeds for BullMQ even when business outcome is FAILED —
-    // FAILED was persisted; further retries would be incorrect.
     return {
       runStatus: interpreted.runStatus,
       outcome: interpreted.outcome,

@@ -18,12 +18,14 @@ import {
 import { CONTACT_DISCOVERY_JOBS } from '../bullmq/job-types';
 import { QUEUES } from '../bullmq/queue.constants';
 import { PrismaService } from '../prisma/prisma.service';
-import { BBC_BRIGHTDATA_PROVIDER_ID } from './constants';
+import {
+  BBC_V1_DEFAULT_MAX_PAGES,
+  MASTRA_CONTACT_EMAILS_PROVIDER_ID,
+} from './constants';
 import {
   contactDiscoveryJobId,
   type DiscoverBusinessContactsJobData,
 } from './interfaces/discover-business-contacts-job.interface';
-import { BBC_V1_DEFAULT_MAX_PAGES } from './pages/bbc-page-allowlist';
 
 /** Mirrors leadDiscoveryRunSelect shape without importing LeadDiscoveryService (cycle). */
 const bbcRunSelect = {
@@ -74,8 +76,7 @@ export class ContactDiscoveryService {
   ) {}
 
   /**
-   * Start BBC v1 discovery for APPROVED brands.
-   * Path: allowlist HTML only — Bright Data Search is not connected (T4).
+   * Start Mastra FIND_BRAND_EMAILS discovery for APPROVED brands (Paso 5b).
    */
   async startBbcDiscovery(dto: BbcSearchStartDto) {
     const maxPages =
@@ -86,9 +87,11 @@ export class ContactDiscoveryService {
       dto.limit ??
       Number(this.configService.get<number>('LEAD_DISCOVERY_LIMIT') ?? 10);
 
+    const providerId = MASTRA_CONTACT_EMAILS_PROVIDER_ID;
     const providerOptions = {
-      mode: 'bbc-v1-allowlist-html',
-      searchConnected: false,
+      mode: 'mastra-find-brand-emails',
+      engine: 'mastra',
+      searchConnected: true,
       autonomous: true,
     } as const;
 
@@ -157,7 +160,7 @@ export class ContactDiscoveryService {
           brandCandidateId,
           influencerId: candidate.influencerId,
           status: LeadDiscoveryStatus.PROCESSING,
-          providerId: BBC_BRIGHTDATA_PROVIDER_ID,
+          providerId,
           providerOptions,
           limit,
         },

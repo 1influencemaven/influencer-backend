@@ -41,7 +41,10 @@ export function isBrandDomainEmail(
   brandDomain: string,
 ): boolean {
   const emailDomain = extractEmailDomain(email);
-  const brand = brandDomain.trim().toLowerCase().replace(/^www\./, '');
+  const brand = brandDomain
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, '');
   if (!emailDomain || !brand) {
     return false;
   }

@@ -27,7 +27,9 @@ export class AddContactChannelDto {
   @IsEnum(ContactChannelSource)
   source!: ContactChannelSource;
 
-  @ApiPropertyOptional({ description: 'Source page URL (e.g. public web evidence)' })
+  @ApiPropertyOptional({
+    description: 'Source page URL (e.g. public web evidence)',
+  })
   @IsOptional()
   @IsString()
   sourceUrl?: string;

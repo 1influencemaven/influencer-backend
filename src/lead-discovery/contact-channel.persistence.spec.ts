@@ -164,14 +164,20 @@ describe('ContactChannel persistence (D2)', () => {
 
   it('merges metadata evidences by sourceUrl on update', async () => {
     const { leadId } = await seedLead();
-    const channelId = await insertChannel(leadId, 'EMAIL', 'info@test.com', 'info@test.com', {
-      evidences: [
-        {
-          sourceUrl: 'https://example.test/a',
-          evidenceSnippet: 'info@test.com on a',
-        },
-      ],
-    });
+    const channelId = await insertChannel(
+      leadId,
+      'EMAIL',
+      'info@test.com',
+      'info@test.com',
+      {
+        evidences: [
+          {
+            sourceUrl: 'https://example.test/a',
+            evidenceSnippet: 'info@test.com on a',
+          },
+        ],
+      },
+    );
 
     const merged = {
       evidences: [

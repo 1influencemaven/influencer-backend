@@ -130,8 +130,7 @@ export class BrandBusinessContactService {
     const isGeneric =
       input.isGeneric ?? classifyPublicEmailGeneric(emailNormalized);
     const commercialRelevance =
-      input.commercialRelevance ??
-      classifyCommercialRelevance(emailNormalized);
+      input.commercialRelevance ?? classifyCommercialRelevance(emailNormalized);
     const label =
       input.label ?? labelFromEmailLocalPart(emailNormalized) ?? null;
     const evidence: BusinessContactEvidence = {
@@ -160,17 +159,14 @@ export class BrandBusinessContactService {
           commercialRelevance,
           source: ContactChannelSource.PUBLIC_WEB,
           sourceUrl: input.sourceUrl,
-          metadata: { evidences: [evidence] } as Prisma.InputJsonValue,
+          metadata: { evidences: [evidence] },
         },
         select: { id: true },
       });
       return { id: created.id, created: true, updated: false };
     }
 
-    const mergedEvidences = this.mergeEvidences(
-      existing.metadata,
-      evidence,
-    );
+    const mergedEvidences = this.mergeEvidences(existing.metadata, evidence);
     const nextRelevance = pickStrongerRelevance(
       existing.commercialRelevance,
       commercialRelevance,
@@ -184,7 +180,7 @@ export class BrandBusinessContactService {
         isGeneric: nextIsGeneric,
         label: existing.label || label,
         sourceUrl: existing.sourceUrl || input.sourceUrl,
-        metadata: { evidences: mergedEvidences } as Prisma.InputJsonValue,
+        metadata: { evidences: mergedEvidences },
       },
     });
 

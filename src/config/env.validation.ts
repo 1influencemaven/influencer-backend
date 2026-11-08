@@ -33,9 +33,7 @@ export const envValidationSchema = Joi.object({
 
   THROTTLE_LIMIT: Joi.number().required(),
 
-  AI_PROVIDER: Joi.string()
-    .valid('ollama', 'anthropic', 'cursor')
-    .optional(),
+  AI_PROVIDER: Joi.string().valid('ollama', 'anthropic', 'cursor').optional(),
 
   // La key solo es obligatoria (y no vacía) cuando su proveedor es el activo.
   // Docker Compose pasa las variables no definidas como cadena vacía, por lo
@@ -63,9 +61,17 @@ export const envValidationSchema = Joi.object({
 
   // Brand Discovery search-query planning: llm (default) or deterministic templates.
   // Source is always Bright Data SERP (registry id `brightdata`); no BRAND_SOURCE env (BD-01.e).
-  BRAND_SEARCH_STRATEGY: Joi.string()
-    .valid('llm', 'templates')
-    .default('llm'),
+  BRAND_SEARCH_STRATEGY: Joi.string().valid('llm', 'templates').default('llm'),
+
+  /**
+   * Brand Discovery LLM engine (AI-004.4.6).
+   * - legacy (default): AiPlusTavilyBrandSource + Nest AiService
+   * - mastra: BrandDiscoveryAiOrchestrator (BullMQ → influencer-ai)
+   * No automatic fallback between engines.
+   */
+  BRAND_DISCOVERY_ENGINE: Joi.string()
+    .valid('legacy', 'mastra')
+    .default('legacy'),
 
   BRIGHTDATA_API_KEY: Joi.string().optional().allow(''),
 
@@ -86,15 +92,21 @@ export const envValidationSchema = Joi.object({
   BRIGHTDATA_UNLOCKER_ZONE: Joi.string().optional().allow(''),
 
   /** Demo caps for AI-orchestrated contact research (P0). */
-  AI_RESEARCH_MAX_SERP_QUERIES: Joi.number().integer().min(1).max(20).default(5),
+  /** Caps forwarded to Mastra FIND_BRAND_EMAILS (influencer-ai). */
+  AI_RESEARCH_MAX_SERP_QUERIES: Joi.number()
+    .integer()
+    .min(1)
+    .max(20)
+    .default(5),
   AI_RESEARCH_MAX_PAGES: Joi.number().integer().min(1).max(20).default(5),
-  AI_RESEARCH_MAX_ITERATIONS: Joi.number().integer().min(1).max(40).default(12),
-  /** When true (default under rebuild), prefer AI research over allowlist-only BBC. */
-  CONTACT_DISCOVERY_AI_ORCHESTRATOR: Joi.boolean().default(true),
 
   BRIGHTDATA_SEARCH_TIMEOUT_MS: Joi.number().integer().min(1000).default(30000),
 
-  BRIGHTDATA_SEARCH_MAX_RETRIES: Joi.number().integer().min(0).max(5).default(2),
+  BRIGHTDATA_SEARCH_MAX_RETRIES: Joi.number()
+    .integer()
+    .min(0)
+    .max(5)
+    .default(2),
 
   BRIGHTDATA_SEARCH_RETRY_BACKOFF_MS: Joi.number()
     .integer()
@@ -111,10 +123,6 @@ export const envValidationSchema = Joi.object({
     .min(500)
     .default(3000),
 
-  MAX_EMAIL_DISCOVERY_PAGES: Joi.number().integer().min(1).max(20).default(6),
-
-  MAX_EMAIL_CANDIDATES: Joi.number().integer().min(1).max(100).default(20),
-
   MAX_BRAND_BUSINESS_CONTACT_PAGES: Joi.number()
     .integer()
     .min(1)
@@ -127,12 +135,6 @@ export const envValidationSchema = Joi.object({
     .max(50)
     .default(15),
 
-  LEAD_DISCOVERY_MAX_SEARCH_REQUESTS: Joi.number()
-    .integer()
-    .min(1)
-    .max(100)
-    .default(30),
-
   LEAD_DISCOVERY_LIMIT: Joi.number().integer().min(1).max(20).default(10),
 
   APOLLO_API_KEY: Joi.string().optional().allow(''),
@@ -141,9 +143,4 @@ export const envValidationSchema = Joi.object({
 
   // ADMIN Unlocker diagnostic probe (local only; ignored / forbidden in production).
   UNLOCKER_DIAGNOSTICS_ENABLED: Joi.boolean().default(false),
-
-  // Phase 1 Lead Discovery controlled removal. Default false.
-  // Enable ONLY in local .env — never production without explicit approval.
-  CONTACT_DISCOVERY_REBUILD_MODE: Joi.boolean().default(false),
 });
-

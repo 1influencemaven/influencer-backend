@@ -93,8 +93,13 @@ export function extractLiteralEmailsFromText(
       index + email.length + snippetRadius,
     );
     const evidenceSnippet = text.slice(snippetStart, snippetEnd);
-    if (!evidenceSnippet.includes(email) && !evidenceSnippet.includes(normalized)) {
-      const caseInsensitive = evidenceSnippet.toLowerCase().includes(normalized);
+    if (
+      !evidenceSnippet.includes(email) &&
+      !evidenceSnippet.includes(normalized)
+    ) {
+      const caseInsensitive = evidenceSnippet
+        .toLowerCase()
+        .includes(normalized);
       if (!caseInsensitive) {
         continue;
       }

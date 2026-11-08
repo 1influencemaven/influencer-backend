@@ -31,15 +31,6 @@ import {
   parseLeadDiscoveryPlan,
   type LeadDiscoveryPlan,
 } from './schemas/lead-discovery-plan.schema';
-import {
-  parseContactResearchDecision,
-  type ContactResearchDecision,
-} from './schemas/contact-research-decision.schema';
-import type { ContactResearchStateSnapshot } from './schemas/contact-research-state.types';
-import {
-  buildContactResearchDecisionCorrectionPrompt,
-  buildContactResearchDecisionPrompt,
-} from './prompts/generate-contact-research-decision.prompt';
 
 @Injectable()
 export class AiService {
@@ -111,33 +102,6 @@ export class AiService {
         buildBrandSearchStrategyCorrectionPrompt(rawResponse, errorMessage),
       );
       return parseBrandSearchStrategyPlan(rawResponse);
-    }
-  }
-
-  /**
-   * One AI-orchestrated contact research step. Structured JSON only.
-   * Does not call Bright Data — tools are executed by the backend orchestrator.
-   */
-  async decideContactResearchStep(
-    state: ContactResearchStateSnapshot,
-  ): Promise<ContactResearchDecision> {
-    const prompt = buildContactResearchDecisionPrompt(state);
-    let rawResponse = await this.llmProvider.complete(prompt);
-
-    try {
-      return parseContactResearchDecision(rawResponse);
-    } catch (firstError) {
-      const errorMessage =
-        firstError instanceof Error ? firstError.message : 'Invalid JSON';
-
-      this.logger.warn(
-        `Contact research decision parse failed, retrying: ${errorMessage}`,
-      );
-
-      rawResponse = await this.llmProvider.complete(
-        buildContactResearchDecisionCorrectionPrompt(rawResponse, errorMessage),
-      );
-      return parseContactResearchDecision(rawResponse);
     }
   }
 

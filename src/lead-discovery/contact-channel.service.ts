@@ -14,10 +14,6 @@ import {
 
 import { PrismaService } from '../prisma/prisma.service';
 import type { AddContactChannelDto } from './dto/add-contact-channel.dto';
-import type {
-  PublicEmailCandidate,
-  PublicEmailDiscoveryResult,
-} from './interfaces/public-email-evidence.interface';
 import { emailLiteralInEvidence } from './utils/literal-email-extract.util';
 import { normalizeChannelValue } from './utils/contact-channel-normalize.util';
 import {
@@ -52,15 +48,6 @@ export type CreateChannelInput = {
   isGeneric?: boolean;
   metadata?: Prisma.InputJsonValue;
   status?: ContactChannelStatus;
-};
-
-export type EnrichmentStats = {
-  channelsAdded: { linkedin: number; website: number; email: number };
-  genericEmails: number;
-  nonGenericEmails: number;
-  pagesAttempted: number;
-  pagesSucceeded: number;
-  errors: number;
 };
 
 @Injectable()
@@ -143,10 +130,7 @@ export class ContactChannelService {
     }
   }
 
-  assertPublicWebEmailEvidence(
-    email: string,
-    metadata: unknown,
-  ): void {
+  assertPublicWebEmailEvidence(email: string, metadata: unknown): void {
     const evidences = this.extractEvidences(metadata);
     if (evidences.length === 0) {
       throw new BadRequestException(
@@ -173,64 +157,6 @@ export class ContactChannelService {
       await this.upsertChannel(tx, leadId, channel);
     }
     await this.syncLegacyLeadFields(tx, leadId);
-  }
-
-  async persistPublicEmailEnrichment(
-    tx: Prisma.TransactionClient,
-    leadId: string,
-    result: PublicEmailDiscoveryResult,
-  ): Promise<EnrichmentStats> {
-    const stats: EnrichmentStats = {
-      channelsAdded: { linkedin: 0, website: 0, email: 0 },
-      genericEmails: result.summary.genericEmailsFound,
-      nonGenericEmails: result.summary.nonGenericEmailsFound,
-      pagesAttempted: result.summary.pagesAttempted,
-      pagesSucceeded: result.summary.pagesSucceeded,
-      errors: result.summary.errors,
-    };
-
-    const website = result.summary.website?.trim();
-    if (website) {
-      const created = await this.upsertChannel(tx, leadId, {
-        type: ContactChannelType.WEBSITE,
-        value: website,
-        source: ContactChannelSource.BRAND_WEBSITE,
-      });
-      if (created) {
-        stats.channelsAdded.website += 1;
-      }
-    }
-
-    for (const candidate of result.candidates) {
-      const channelInput = this.mapPublicEmailCandidateToChannel(candidate);
-      const created = await this.upsertChannel(tx, leadId, channelInput);
-      if (created) {
-        stats.channelsAdded.email += 1;
-      }
-    }
-
-    await this.syncLegacyLeadFields(tx, leadId);
-    return stats;
-  }
-
-  mapPublicEmailCandidateToChannel(
-    candidate: PublicEmailCandidate,
-  ): CreateChannelInput {
-    const metadata = {
-      evidences: candidate.evidences.map((evidence) => ({
-        sourceUrl: evidence.sourceUrl,
-        evidenceSnippet: evidence.evidenceSnippet,
-        discoveredAt: evidence.discoveredAt,
-      })),
-    };
-    return {
-      type: ContactChannelType.EMAIL,
-      value: candidate.email,
-      source: ContactChannelSource.PUBLIC_WEB,
-      sourceUrl: candidate.evidences[0]?.sourceUrl,
-      isGeneric: candidate.isGeneric,
-      metadata,
-    };
   }
 
   private async upsertChannel(
@@ -263,9 +189,7 @@ export class ContactChannelService {
           where: { id: existing.id },
           data: {
             metadata: mergedMetadata,
-            sourceUrl:
-              channel.sourceUrl?.trim() ||
-              existing.sourceUrl,
+            sourceUrl: channel.sourceUrl?.trim() || existing.sourceUrl,
             isGeneric: channel.isGeneric ?? existing.isGeneric,
           },
         });
@@ -308,7 +232,7 @@ export class ContactChannelService {
         (evidence as { sourceUrl?: string }).sourceUrl ?? '',
       ).trim();
       if (url) {
-        byUrl.set(url, evidence as never);
+        byUrl.set(url, evidence);
       }
     }
     for (const evidence of incomingEvidences) {
@@ -316,7 +240,7 @@ export class ContactChannelService {
         (evidence as { sourceUrl?: string }).sourceUrl ?? '',
       ).trim();
       if (url && !byUrl.has(url)) {
-        byUrl.set(url, evidence as never);
+        byUrl.set(url, evidence);
       }
     }
 
@@ -330,7 +254,7 @@ export class ContactChannelService {
     return {
       ...base,
       evidences: [...byUrl.values()],
-    } as Prisma.InputJsonValue;
+    };
   }
 
   async syncLegacyLeadFields(

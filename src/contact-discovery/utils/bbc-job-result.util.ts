@@ -1,4 +1,4 @@
-import type { BbcDiscoveryResult } from '../orchestrator/bbc-discovery.orchestrator';
+import type { BbcDiscoveryResult } from '../orchestrator/bbc-discovery.types';
 
 /**
  * Translates an in-process orchestrator result for the processor / callers.

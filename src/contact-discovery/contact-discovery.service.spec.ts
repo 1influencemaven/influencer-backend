@@ -15,7 +15,7 @@ import {
 } from '../generated/prisma/enums';
 import { CONTACT_DISCOVERY_JOBS } from '../bullmq/job-types';
 import { QUEUES } from '../bullmq/queue.constants';
-import { BBC_BRIGHTDATA_PROVIDER_ID } from './constants';
+import { MASTRA_CONTACT_EMAILS_PROVIDER_ID } from './constants';
 import { ContactDiscoveryService } from './contact-discovery.service';
 import { contactDiscoveryJobId } from './interfaces/discover-business-contacts-job.interface';
 
@@ -54,10 +54,11 @@ describe('ContactDiscoveryService', () => {
     brandCandidateId: 'b1',
     influencerId: 'i1',
     status: LeadDiscoveryStatus.PROCESSING,
-    providerId: BBC_BRIGHTDATA_PROVIDER_ID,
+    providerId: MASTRA_CONTACT_EMAILS_PROVIDER_ID,
     providerOptions: {
-      mode: 'bbc-v1-allowlist-html',
-      searchConnected: false,
+      mode: 'mastra-find-brand-emails',
+      engine: 'mastra',
+      searchConnected: true,
       autonomous: true,
     },
     limit: 10,
@@ -88,7 +89,7 @@ describe('ContactDiscoveryService', () => {
     );
   });
 
-  it('creates PROCESSING run with bbc-brightdata and enqueues contact-discovery job', async () => {
+  it('creates PROCESSING run with mastra-contact-emails and enqueues contact-discovery job', async () => {
     const result = await service.startBbcDiscovery({
       brandCandidateIds: ['b1'],
       limit: 5,
@@ -99,11 +100,12 @@ describe('ContactDiscoveryService', () => {
     expect(prisma.leadDiscoveryRun.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          providerId: BBC_BRIGHTDATA_PROVIDER_ID,
+          providerId: MASTRA_CONTACT_EMAILS_PROVIDER_ID,
           status: LeadDiscoveryStatus.PROCESSING,
           providerOptions: expect.objectContaining({
-            mode: 'bbc-v1-allowlist-html',
-            searchConnected: false,
+            mode: 'mastra-find-brand-emails',
+            engine: 'mastra',
+            searchConnected: true,
           }),
         }),
       }),

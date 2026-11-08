@@ -1,10 +1,12 @@
-import type { UnlockerProviderFailureKind } from '../port/bright-data-unlocker.port';
+/** Failure categories for page-level Unlocker / fetch diagnostics (metadata only). */
+export type UnlockerProviderFailureKind =
+  | 'transport'
+  | 'http'
+  | 'empty_body'
+  | 'malformed';
 
-/** Business outcome for COMPLETED BBC v1 runs (ADR-0020). */
-export type BbcRunOutcome =
-  | 'RESULTS_FOUND'
-  | 'NO_MATCHES'
-  | 'PROVIDER_FAILURE';
+/** Business outcome for COMPLETED BBC / Mastra contact runs (ADR-0020). */
+export type BbcRunOutcome = 'RESULTS_FOUND' | 'NO_MATCHES' | 'PROVIDER_FAILURE';
 
 export type BbcPageAttemptResult = {
   url: string;

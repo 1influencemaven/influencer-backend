@@ -1,5 +1,5 @@
 import { interpretBbcDiscoveryResult } from './bbc-job-result.util';
-import type { BbcDiscoveryResult } from '../orchestrator/bbc-discovery.orchestrator';
+import type { BbcDiscoveryResult } from '../orchestrator/bbc-discovery.types';
 
 describe('interpretBbcDiscoveryResult', () => {
   const base: BbcDiscoveryResult = {

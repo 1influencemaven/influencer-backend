@@ -5,10 +5,9 @@ export const AI_JOBS = {
 
 export const PROSPECTING_JOBS = {
   FIND_BRANDS: 'find-brands',
-  FIND_LEADS: 'find-leads',
 } as const;
 
-/** Jobs for QUEUES.CONTACT_DISCOVERY (BBC v1 allowlist HTML; Search not wired). */
+/** Jobs for QUEUES.CONTACT_DISCOVERY (Mastra FIND_BRAND_EMAILS). */
 export const CONTACT_DISCOVERY_JOBS = {
   DISCOVER_BUSINESS_CONTACTS: 'discover-business-contacts',
 } as const;
