@@ -330,6 +330,103 @@ describe('AI-002 contract examples', () => {
     }
   });
 
+  it('parses Contact Research FIND_BRAND_PEOPLE request/result', () => {
+    const request = parseAiExecutionRequest({
+      contractVersion: '1.0',
+      executionId: '44444444-4444-4444-8444-444444444444',
+      correlationId: '22222222-2222-4222-8222-222222222222',
+      idempotencyKey: 'contact-people:1',
+      requestedAt: '2026-11-08T18:00:00.000Z',
+      type: 'CONTACT_RESEARCH',
+      context: {
+        userId: 'u1',
+        influencerId: '33333333-3333-4333-8333-333333333333',
+        resourceId: '55555555-5555-4555-8555-555555555555',
+        resourceType: 'CONTACT_RESEARCH_RUN',
+      },
+      instructions: { business: '', businessHash: 'abcdefghijklmnop' },
+      input: {
+        operation: 'FIND_BRAND_PEOPLE',
+        brandName: 'Demo Co',
+        website: 'https://demo.co',
+        domain: 'demo.co',
+        niche: 'wellness',
+        priorityRoles: ['Influencer Marketing Manager', 'Partnerships'],
+        maxSerpQueries: 4,
+        maxProfilesToScrape: 5,
+        maxBrandPages: 6,
+        ocrEnabled: false,
+      },
+    });
+    expect(request.type).toBe('CONTACT_RESEARCH');
+    if (request.type === 'CONTACT_RESEARCH') {
+      expect(request.input.operation).toBe('FIND_BRAND_PEOPLE');
+      if (request.input.operation === 'FIND_BRAND_PEOPLE') {
+        expect(request.input.maxProfilesToScrape).toBe(5);
+        expect(request.input.ocrEnabled).toBe(false);
+      }
+    }
+
+    const result = parseAiExecutionResult({
+      contractVersion: '1.0',
+      executionId: '44444444-4444-4444-8444-444444444444',
+      correlationId: '22222222-2222-4222-8222-222222222222',
+      type: 'CONTACT_RESEARCH',
+      status: 'COMPLETED',
+      startedAt: '2026-11-08T18:00:00.000Z',
+      finishedAt: '2026-11-08T18:01:00.000Z',
+      durationMs: 60000,
+      metadata: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-20250514',
+        llmCallCount: 1,
+      },
+      output: {
+        operation: 'FIND_BRAND_PEOPLE',
+        outcome: 'RESULTS_FOUND',
+        people: [
+          {
+            name: 'Alex Partner',
+            title: 'Influencer Marketing Manager',
+            linkedinUrl: 'https://www.linkedin.com/in/alex-partner',
+            emails: [
+              {
+                email: 'alex@demo.co',
+                sourceUrl: 'https://demo.co/team',
+                sourceKind: 'brand_web',
+                evidenceSnippet: 'Reach Alex at alex@demo.co',
+              },
+            ],
+          },
+          {
+            name: 'Sam NoEmail',
+            linkedinUrl: 'https://www.linkedin.com/in/sam-noemail',
+            emails: [],
+          },
+        ],
+        summary: '2 people, 1 with email',
+        trace: {
+          queries: ['site:linkedin.com/in "Demo Co" partnerships'],
+          linkedinUrlsConsidered: [
+            'https://www.linkedin.com/in/alex-partner',
+            'https://www.linkedin.com/in/sam-noemail',
+          ],
+          profilesScraped: 2,
+          serpCalls: 2,
+          brandPagesFetched: 3,
+          ocrAttempts: 0,
+        },
+      },
+    });
+    expect(result.type).toBe('CONTACT_RESEARCH');
+    if (result.type === 'CONTACT_RESEARCH' && result.output) {
+      expect(result.output.operation).toBe('FIND_BRAND_PEOPLE');
+      if (result.output.operation === 'FIND_BRAND_PEOPLE') {
+        expect(result.output.people).toHaveLength(2);
+        expect(result.output.people[0].emails[0].sourceKind).toBe('brand_web');
+      }
+    }
+  });
 
   it('rejects cursor as LLM provider in configuration', () => {
     expect(() =>

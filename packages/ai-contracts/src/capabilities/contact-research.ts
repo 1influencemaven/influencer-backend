@@ -49,9 +49,29 @@ const contactResearchFindBrandEmailsInputSchema = z.object({
   maxPages: z.number().int().positive().max(12).default(5),
 });
 
+/**
+ * Track 2B: discover people (LinkedIn) for an approved brand, then attach
+ * emails via LinkedIn text → brand-web PEE → OCR (sourceKind).
+ */
+const contactResearchFindBrandPeopleInputSchema = z.object({
+  operation: z.literal('FIND_BRAND_PEOPLE'),
+  brandName: z.string().min(1),
+  website: z.string().min(1),
+  domain: z.string().min(1),
+  niche: z.string().optional(),
+  priorityRoles: z.array(z.string().min(1)).max(12).optional(),
+  maxSerpQueries: z.number().int().positive().max(12).default(4),
+  maxProfilesToScrape: z.number().int().positive().max(15).default(5),
+  /** Brand-site Unlocker pages for PEE after LinkedIn (Fase B). */
+  maxBrandPages: z.number().int().positive().max(12).default(6),
+  /** When true, runner may attempt vision OCR after A+B (Fase C). */
+  ocrEnabled: z.boolean().default(false),
+});
+
 export const contactResearchInputSchema = z.discriminatedUnion('operation', [
   contactResearchDecideStepInputSchema,
   contactResearchFindBrandEmailsInputSchema,
+  contactResearchFindBrandPeopleInputSchema,
 ]);
 
 export type ContactResearchInput = z.infer<typeof contactResearchInputSchema>;
@@ -76,6 +96,37 @@ export const contactResearchFoundEmailSchema = z.object({
   evidenceSnippet: z.string().max(500).optional(),
 });
 
+/** Where a person-linked email was obtained (Track 2B cascade). */
+export const contactResearchEmailSourceKindSchema = z.enum([
+  'linkedin',
+  'brand_web',
+  'ocr',
+]);
+
+export type ContactResearchEmailSourceKind = z.infer<
+  typeof contactResearchEmailSourceKindSchema
+>;
+
+export const contactResearchPersonEmailSchema = z.object({
+  email: z.string().email(),
+  sourceUrl: z.string().url(),
+  sourceKind: contactResearchEmailSourceKindSchema,
+  evidenceSnippet: z.string().max(500).optional(),
+});
+
+export type ContactResearchPersonEmail = z.infer<
+  typeof contactResearchPersonEmailSchema
+>;
+
+export const contactResearchPersonSchema = z.object({
+  name: z.string().min(1),
+  title: z.string().optional(),
+  linkedinUrl: z.string().url(),
+  emails: z.array(contactResearchPersonEmailSchema).default([]),
+});
+
+export type ContactResearchPerson = z.infer<typeof contactResearchPersonSchema>;
+
 const contactResearchFindBrandEmailsOutputSchema = z.object({
   operation: z.literal('FIND_BRAND_EMAILS'),
   outcome: z.enum(['RESULTS_FOUND', 'NO_MATCHES', 'PROVIDER_FAILURE']),
@@ -91,9 +142,27 @@ const contactResearchFindBrandEmailsOutputSchema = z.object({
     .optional(),
 });
 
+const contactResearchFindBrandPeopleOutputSchema = z.object({
+  operation: z.literal('FIND_BRAND_PEOPLE'),
+  outcome: z.enum(['RESULTS_FOUND', 'NO_MATCHES', 'PROVIDER_FAILURE']),
+  people: z.array(contactResearchPersonSchema),
+  summary: z.string().optional(),
+  trace: z
+    .object({
+      queries: z.array(z.string()),
+      linkedinUrlsConsidered: z.array(z.string()),
+      profilesScraped: z.number().int().nonnegative(),
+      serpCalls: z.number().int().nonnegative(),
+      brandPagesFetched: z.number().int().nonnegative(),
+      ocrAttempts: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
+});
+
 export const contactResearchOutputSchema = z.discriminatedUnion('operation', [
   contactResearchDecideStepOutputSchema,
   contactResearchFindBrandEmailsOutputSchema,
+  contactResearchFindBrandPeopleOutputSchema,
 ]);
 
 export type ContactResearchOutput = z.infer<typeof contactResearchOutputSchema>;

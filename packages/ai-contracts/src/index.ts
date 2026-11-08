@@ -72,9 +72,15 @@ export {
   contactResearchOutputSchema,
   contactResearchActionSchema,
   contactResearchFoundEmailSchema,
+  contactResearchEmailSourceKindSchema,
+  contactResearchPersonEmailSchema,
+  contactResearchPersonSchema,
   type ContactResearchStateSnapshot,
   type ContactResearchInput,
   type ContactResearchOutput,
+  type ContactResearchEmailSourceKind,
+  type ContactResearchPersonEmail,
+  type ContactResearchPerson,
 } from './capabilities/contact-research';
 
 export {
