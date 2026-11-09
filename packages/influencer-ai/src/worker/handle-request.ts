@@ -12,6 +12,7 @@ import { runBrandDiscoveryPlanSearch } from '../brand-discovery/run-plan-search'
 import { runBrandDiscoveryScoreCandidates } from '../brand-discovery/run-score-candidates';
 import type { InfluencerAiEnv } from '../config/env';
 import { runContactResearchFindBrandEmails } from '../contact-research/run-find-brand-emails';
+import { runContactResearchFindBrandPeople } from '../contact-research/run-find-brand-people';
 import { runIbpGeneration } from '../ibp/run-ibp';
 import { resolveProviderMeta } from '../llm/resolve-model';
 import { buildEvent, publishEvent, publishResult } from './publish';
@@ -127,7 +128,7 @@ export async function handleAiExecutionRequest(params: {
     durationMs: finishedAt.getTime() - startedAt.getTime(),
     error: {
       code: 'AI_INTERNAL_ERROR',
-      message: `Capability ${request.type} is not migrated yet (influencer-ai supports IBP_GENERATION, BRAND_DISCOVERY, CONTACT_RESEARCH/FIND_BRAND_EMAILS)`,
+      message: `Capability ${request.type} is not migrated yet (influencer-ai supports IBP_GENERATION, BRAND_DISCOVERY, CONTACT_RESEARCH/FIND_BRAND_EMAILS|FIND_BRAND_PEOPLE)`,
       retryable: false,
       occurredAt: finishedAt.toISOString(),
     },
@@ -347,14 +348,16 @@ async function finalizeContactResearch(params: {
   const run =
     request.input.operation === 'FIND_BRAND_EMAILS'
       ? await runContactResearchFindBrandEmails(env, request)
-      : {
-          ok: false as const,
-          code: 'AI_INTERNAL_ERROR' as const,
-          message:
-            'CONTACT_RESEARCH DECIDE_STEP stays on Nest orchestrator; influencer-ai supports FIND_BRAND_EMAILS only',
-          retryable: false,
-          llmCallCount: 0,
-        };
+      : request.input.operation === 'FIND_BRAND_PEOPLE'
+        ? await runContactResearchFindBrandPeople(env, request)
+        : {
+            ok: false as const,
+            code: 'AI_INTERNAL_ERROR' as const,
+            message:
+              'CONTACT_RESEARCH DECIDE_STEP stays on Nest; influencer-ai supports FIND_BRAND_EMAILS and FIND_BRAND_PEOPLE',
+            retryable: false,
+            llmCallCount: 0,
+          };
 
   const finishedAt = new Date();
   const durationMs = finishedAt.getTime() - startedAt.getTime();

@@ -8,11 +8,15 @@ export type InfluencerAiEnv = {
   ollamaModel: string;
   anthropicApiKey?: string;
   anthropicModel: string;
-  /** Bright Data — used by Contact Research tools (FIND_BRAND_EMAILS). */
+  /** Bright Data — used by Contact Research tools (FIND_BRAND_EMAILS / FIND_BRAND_PEOPLE). */
   brightDataApiKey?: string;
   brightDataSerpZone?: string;
   brightDataUnlockerZone?: string;
   brightDataTimeoutMs: number;
+  /** LinkedIn people profiles dataset (Track 2B scrape). */
+  brightDataLinkedInPeopleDatasetId: string;
+  brightDataScraperPollTimeoutMs: number;
+  brightDataScraperPollIntervalMs: number;
 };
 
 function required(name: string): string {
@@ -52,6 +56,15 @@ export function loadInfluencerAiEnv(): InfluencerAiEnv {
       undefined,
     brightDataTimeoutMs: Number(
       process.env.BRIGHTDATA_SEARCH_TIMEOUT_MS ?? '45000',
+    ),
+    brightDataLinkedInPeopleDatasetId:
+      process.env.BRIGHTDATA_LINKEDIN_PEOPLE_DATASET_ID?.trim() ||
+      'gd_l1viktl72bvl7bjuj0',
+    brightDataScraperPollTimeoutMs: Number(
+      process.env.BRIGHTDATA_SCRAPER_POLL_TIMEOUT_MS ?? '120000',
+    ),
+    brightDataScraperPollIntervalMs: Number(
+      process.env.BRIGHTDATA_SCRAPER_POLL_INTERVAL_MS ?? '3000',
     ),
   };
 }
