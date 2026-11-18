@@ -14,5 +14,14 @@ export const MASTRA_CONTACT_EMAILS_PROVIDER_ID = 'mastra-contact-emails' as cons
 export type MastraContactEmailsProviderId =
   typeof MASTRA_CONTACT_EMAILS_PROVIDER_ID;
 
+/**
+ * Mastra FIND_BRAND_PEOPLE (2B) — Lead.providerId when persisting person leads.
+ */
+export const MASTRA_FIND_BRAND_PEOPLE_PROVIDER_ID =
+  'mastra-find-brand-people' as const;
+
+export type MastraFindBrandPeopleProviderId =
+  typeof MASTRA_FIND_BRAND_PEOPLE_PROVIDER_ID;
+
 /** Default max Unlocker/open_page pages for a BBC/Mastra contact run. */
 export const BBC_V1_DEFAULT_MAX_PAGES = 12;

@@ -125,7 +125,7 @@ async function main() {
       2,
     ),
   );
-  if (page.html) session.pageHtml.set(candidateUrl, page.html);
+  if (page.html) session.setPageHtml(candidateUrl, page.html);
 
   const emails = extractEmailsFromHtml(page.html);
   for (const email of emails) {

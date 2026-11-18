@@ -3,18 +3,46 @@ import {
   evidenceSnippetAroundEmail,
   extractEmailsFromHtml,
 } from '../brightdata/extract-emails';
+import { normalizeUrlKey } from '../brightdata/normalize-url-key';
 import type { ContactResearchToolSession } from '../brightdata/session';
 
-/** Max pages the seed itself may consume (leaves budget for LLM tools). */
+export { normalizeUrlKey } from '../brightdata/normalize-url-key';
+
+/** Max pages the seed itself may consume (leaves budget for LLM tools). RF-02: unchanged. */
 export const CONTACT_EMAIL_SEED_MAX_PAGES = 3;
 
-const CONTACT_PATHS = [
+/**
+ * RF-02 priority path hints (not required to exist).
+ * Order: commercial collab → affiliate → press/marketing → contact → about/corp.
+ */
+export const COMMERCIAL_SEED_PATHS = [
+  '/partnerships',
+  '/partners',
+  '/pages/partnerships',
+  '/collaborations',
+  '/collabs',
+  '/creators',
+  '/influencers',
+  '/creator-program',
+  '/brand-ambassadors',
+  '/affiliate',
+  '/affiliates',
+  '/affiliate-program',
+  '/pages/affiliate',
+  '/marketing',
+  '/press',
+  '/media',
+  '/newsroom',
   '/contact',
   '/pages/contact',
   '/contact-us',
   '/pages/contact-us',
   '/about',
   '/pages/about',
+  '/company',
+  '/team',
+  '/business',
+  '/corporate',
 ] as const;
 
 export type SeedBrandPagesResult = {
@@ -22,6 +50,8 @@ export type SeedBrandPagesResult = {
   openedUrls: string[];
   failedUrls: string[];
   emailsFound: number;
+  /** How many preferred (e.g. Brand Discovery) URLs were among attempts. */
+  preferredAttempted: number;
 };
 
 function normalizeWebsiteUrl(website: string): string | null {
@@ -32,7 +62,6 @@ function normalizeWebsiteUrl(website: string): string | null {
     const url = new URL(withProtocol);
     url.hash = '';
     url.search = '';
-    // Prefer origin + pathname without trailing slash (except root)
     const path = url.pathname.replace(/\/+$/, '') || '/';
     return `${url.origin}${path === '/' ? '/' : path}`;
   } catch {
@@ -48,12 +77,30 @@ function originOf(websiteUrl: string): string | null {
   }
 }
 
+function toCandidateUrl(raw: string): string | null {
+  try {
+    const withProtocol = /^https?:\/\//i.test(raw.trim())
+      ? raw.trim()
+      : `https://${raw.trim()}`;
+    const parsed = new URL(withProtocol);
+    parsed.hash = '';
+    parsed.search = '';
+    const path = parsed.pathname.replace(/\/+$/, '') || '/';
+    return `${parsed.origin}${path === '/' ? '/' : path}`;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Build homepage + contact-ish candidates on the brand domain.
- * Deduped; only URLs allowed by the session host rule.
+ * Build prioritized Unlocker candidates on the brand domain (RF-02).
+ * Order: preferred on-domain URLs → commercial paths → website homepage.
  */
 export function buildSeedCandidateUrls(
   session: ContactResearchToolSession,
+  preferredUrls: string[] = [],
+  /** Override path ladder (default: brand COMMERCIAL_SEED_PATHS). */
+  seedPaths: readonly string[] = COMMERCIAL_SEED_PATHS,
 ): string[] {
   const website = normalizeWebsiteUrl(session.website);
   if (!website) return [];
@@ -61,34 +108,44 @@ export function buildSeedCandidateUrls(
   const origin = originOf(website);
   if (!origin) return [];
 
-  const candidates: string[] = [website];
-  for (const path of CONTACT_PATHS) {
-    candidates.push(`${origin}${path}`);
-  }
-
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const url of candidates) {
-    const key = url.toLowerCase().replace(/\/$/, '');
-    if (seen.has(key)) continue;
-    if (!session.isAllowedUrl(url)) continue;
+
+  const push = (raw: string) => {
+    const url = toCandidateUrl(raw);
+    if (!url) return;
+    const key = normalizeUrlKey(url);
+    if (seen.has(key)) return;
+    if (!session.isAllowedUrl(url)) return;
     seen.add(key);
-    out.push(url.endsWith('/') && url !== `${origin}/` ? url.slice(0, -1) : url);
+    out.push(url);
+  };
+
+  for (const preferred of preferredUrls) {
+    push(preferred);
   }
+  for (const path of seedPaths) {
+    push(`${origin}${path}`);
+  }
+  push(website);
+
   return out;
 }
 
 /**
  * Deterministic Unlocker open + literal email extract before the LLM loop.
- * Mutates `session` (pageCalls, pages, pageHtml, emails, lastError).
+ * Mutates `session`. Continues after single-page failures (RF-02).
  */
 export async function seedBrandPagesForEmailDiscovery(params: {
   client: BrightDataToolsClient;
   session: ContactResearchToolSession;
-  /** Cap seed opens; also clamped by remaining session.maxPages. */
+  preferredUrls?: string[];
   maxSeedPages?: number;
+  /** Optional path ladder override (agency contact research). */
+  seedPaths?: readonly string[];
 }): Promise<SeedBrandPagesResult> {
   const { client, session } = params;
+  const preferredUrls = params.preferredUrls ?? [];
   const maxSeedPages = Math.max(
     0,
     Math.min(
@@ -100,17 +157,39 @@ export async function seedBrandPagesForEmailDiscovery(params: {
   const attemptedUrls: string[] = [];
   const openedUrls: string[] = [];
   const failedUrls: string[] = [];
+  let preferredAttempted = 0;
 
   if (maxSeedPages <= 0) {
-    return { attemptedUrls, openedUrls, failedUrls, emailsFound: 0 };
+    return {
+      attemptedUrls,
+      openedUrls,
+      failedUrls,
+      emailsFound: 0,
+      preferredAttempted: 0,
+    };
   }
 
-  const candidates = buildSeedCandidateUrls(session).slice(0, maxSeedPages);
+  const preferredKeys = new Set(
+    preferredUrls
+      .map((u) => toCandidateUrl(u))
+      .filter((u): u is string => Boolean(u))
+      .map((u) => normalizeUrlKey(u)),
+  );
+
+  const candidates = buildSeedCandidateUrls(
+    session,
+    preferredUrls,
+    params.seedPaths ?? COMMERCIAL_SEED_PATHS,
+  ).slice(0, maxSeedPages);
 
   for (const url of candidates) {
     if (session.pageCalls >= session.maxPages) break;
 
     attemptedUrls.push(url);
+    if (preferredKeys.has(normalizeUrlKey(url))) {
+      preferredAttempted += 1;
+    }
+    session.pageOriginCounts.seedPagesAttempted += 1;
     session.pageCalls += 1;
     session.pages.push(url);
 
@@ -126,7 +205,8 @@ export async function seedBrandPagesForEmailDiscovery(params: {
       continue;
     }
 
-    session.pageHtml.set(url, page.html);
+    session.setPageHtml(url, page.html);
+    session.pageOriginCounts.seedPagesDownloaded += 1;
     openedUrls.push(url);
 
     const found = extractEmailsFromHtml(page.html);
@@ -146,5 +226,6 @@ export async function seedBrandPagesForEmailDiscovery(params: {
     openedUrls,
     failedUrls,
     emailsFound: session.emails.size,
+    preferredAttempted,
   };
 }

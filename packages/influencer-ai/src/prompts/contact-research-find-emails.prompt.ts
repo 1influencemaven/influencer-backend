@@ -7,15 +7,17 @@ export const CONTACT_RESEARCH_FIND_EMAILS_INSTRUCTIONS = `You research commercia
 Goal (2A — brand inboxes only):
 - Find partnership / collaboration / press / affiliate style emails on the brand's own website.
 - Prefer addresses like partnerships@, influencer@, collab@, affiliate@, press@, creators@.
+- Also accept marketing@ / media@ and general info@ / contact@ when commercial pages are scarce.
 
 Tools:
-- search_web: Google via Bright Data. Craft niche + brand partnership queries.
+- search_web: Google via Bright Data. Prefer site:{domain} commercial queries.
 - open_page: open a URL on the brand domain only (Unlocker).
 - extract_emails: pull literal emails from a page you already opened.
 
 Hard rules:
 - Never invent or guess emails. Only report emails returned by extract_emails (or already seeded).
 - Stay on the brand domain for open_page.
+- Do not re-open URLs already listed as seeded/opened.
 - Respect remaining search/page budgets from the user message and tool responses.
 - LinkedIn people profiles and agencies are out of scope for this run.
 - When done, stop calling tools and produce the structured result.`;
@@ -33,6 +35,8 @@ export function buildContactResearchFindEmailsUserPrompt(input: {
   seededEmailCount?: number;
   remainingSearches?: number;
   remainingPages?: number;
+  /** Optional Brand Discovery / preferred URLs already considered. */
+  preferredSeedUrls?: string[];
 }): string {
   const nicheLine = input.niche?.trim()
     ? `Niche / category hint: ${input.niche.trim()}`
@@ -43,14 +47,20 @@ export function buildContactResearchFindEmailsUserPrompt(input: {
   const remainingPages = input.remainingPages ?? input.maxPages;
   const seededPages = input.seededPages ?? [];
   const seededEmailCount = input.seededEmailCount ?? 0;
+  const preferred = input.preferredSeedUrls ?? [];
 
   const seedBlock =
     seededPages.length > 0
-      ? `Deterministic seed already ran (Unlocker + literal extract):
+      ? `Deterministic seed already ran (path seed + optional commercial SERP):
 - Opened pages: ${seededPages.join(', ')}
 - Literal emails found so far: ${seededEmailCount}
-Do not re-open those URLs unless needed. Use remaining budget to search or open other on-domain pages.`
+Do not re-open those URLs. Use remaining budget for other on-domain commercial pages.`
       : `Deterministic seed found no openable pages. Prefer search_web then open_page on the brand domain.`;
+
+  const preferredBlock =
+    preferred.length > 0
+      ? `Preferred URLs from prior brand evidence (already considered if on-domain):\n- ${preferred.join('\n- ')}`
+      : '';
 
   return `Find commercial contact emails for this approved brand.
 
@@ -62,11 +72,15 @@ Budget remaining: ${remainingSearches} search_web calls, ${remainingPages} open_
 (total caps were ${input.maxSerpQueries} searches / ${input.maxPages} pages).
 
 ${seedBlock}
+${preferredBlock}
 
-Suggested query angles (adapt; do not paste blindly):
-- "[niche] brand" influencer collaboration contact email partnerships
-- site:${input.domain} partnerships OR creators OR affiliate OR press email
-- ${input.brandName} influencer partnership contact email
+Suggested query angles (adapt to this brand/domain/niche; do not paste blindly):
+- site:${input.domain} partnerships OR creators OR influencer contact email
+- site:${input.domain} affiliate OR press OR media contact email
+- site:${input.domain} creator program OR brand ambassadors email
+- ${input.brandName} influencer partnership contact email site:${input.domain}
+
+Target page types when opening URLs: partnerships, creators, influencers, affiliate, press, media, marketing, contact, about.
 
 Return structured FIND_BRAND_EMAILS with every literal email extracted in this run (may be empty).`;
 }

@@ -13,7 +13,11 @@ export type BbcPageAttemptResult = {
   outcome: string;
   apiHttpStatus: number;
   bodyLength: number;
-  elapsedMs: number;
+  /**
+   * Per-page Unlocker duration when actually measured.
+   * RF-04.1: omit when unknown — never invent `0` as a placeholder.
+   */
+  elapsedMs?: number;
   zone: string;
   providerFailureKind: UnlockerProviderFailureKind | null;
   errorName?: string;

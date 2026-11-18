@@ -11,9 +11,15 @@ import {
   evidenceSnippetAroundEmail,
   extractEmailsFromHtml,
 } from '../brightdata/extract-emails';
+import { normalizeUrlKey } from '../brightdata/normalize-url-key';
 import type { InfluencerAiEnv } from '../config/env';
 import { buildBrandPeeCandidateUrls } from './brand-pee-pages';
 import { collectLinkedInPeopleUrls } from './linkedin-profile-url';
+import {
+  emptyPeeReuseTrace,
+  htmlFromPeeSnapshot,
+  indexUsablePeeSnapshots,
+} from './pee-snapshot-reuse';
 import { buildPersonQueryLadder } from './person-query-ladder';
 
 export type RunFindBrandPeopleSuccess = {
@@ -49,6 +55,42 @@ function createClientFromEnv(env: InfluencerAiEnv): BrightDataToolsClient {
     scraperPollTimeoutMs: env.brightDataScraperPollTimeoutMs,
     scraperPollIntervalMs: env.brightDataScraperPollIntervalMs,
   });
+}
+
+/** Company inbox locals — never attribute to a LinkedIn person (RF-01 / RF-01.1). */
+const GENERIC_COMPANY_LOCALS = new Set([
+  'info',
+  'hello',
+  'hola',
+  'contact',
+  'contacto',
+  'support',
+  'soporte',
+  'marketing',
+  'sales',
+  'press',
+  'media',
+  'partnerships',
+  'partnership',
+  'partner',
+  'business',
+  'help',
+  'affiliate',
+  'affiliates',
+  'creator',
+  'creators',
+  'collab',
+  'collaboration',
+  'collaborations',
+  'influencer',
+  'influencers',
+  'noreply',
+  'no-reply',
+]);
+
+function isGenericCompanyEmail(email: string): boolean {
+  const local = email.split('@')[0]?.toLowerCase() ?? '';
+  return GENERIC_COMPANY_LOCALS.has(local);
 }
 
 function emailsFromText(
@@ -155,7 +197,9 @@ export async function runContactResearchFindBrandPeople(
       profilesScraped += 1;
 
       const emails: ContactResearchPersonEmail[] = [];
-      // Fase A — LinkedIn dataset email fields + about/text literals
+      // Fase A — LinkedIn dataset + about/text.
+      // RF-01.1: keep shared inboxes on the person payload so Nest can reclassify
+      // them as BBC; do not treat them as personal (Nest canAttribute rejects).
       for (const email of scraped.emailFields) {
         emails.push({
           email,
@@ -185,40 +229,69 @@ export async function runContactResearchFindBrandPeople(
 
     // Fase B — PEE brand website: attach literales when name appears in evidence
     let brandPagesFetched = 0;
+    const incomingSnapshots = input.pageSnapshots ?? [];
+    const peeReuse = emptyPeeReuseTrace(incomingSnapshots.length);
+
     if (people.length > 0 && maxBrandPages > 0) {
       const peeUrls = buildBrandPeeCandidateUrls(input.website, maxBrandPages);
+      const { byKey: reusableByKey, rejected } = indexUsablePeeSnapshots({
+        snapshots: incomingSnapshots,
+        peeCandidateUrls: peeUrls,
+        brandDomain: input.domain,
+      });
+      peeReuse.peePagesRejected = rejected;
+
       const brandHits: ContactResearchPersonEmail[] = [];
       for (const pageUrl of peeUrls) {
-        const page = await client.openPage(pageUrl);
-        brandPagesFetched += 1;
-        if (!page.ok || !page.html) {
-          lastError = page.brdError ?? lastError ?? 'unlocker_failed';
-          continue;
+        const key = normalizeUrlKey(pageUrl);
+        const snap = reusableByKey.get(key);
+        let html: string | undefined;
+
+        if (snap) {
+          // RF-04.3: reuse complete snapshot content; truncated but non-empty is OK.
+          // Do not Unlocker-fallback solely because extraction found no email.
+          html = htmlFromPeeSnapshot(snap);
+          peeReuse.peePagesReused += 1;
+          peeReuse.unlockerCallsAvoided += 1;
+        } else {
+          const page = await client.openPage(pageUrl);
+          brandPagesFetched += 1;
+          peeReuse.peePagesFetchedUnlocker += 1;
+          if (!page.ok || !page.html) {
+            lastError = page.brdError ?? lastError ?? 'unlocker_failed';
+            continue;
+          }
+          html = page.html;
         }
-        for (const e of emailsFromText(page.html, pageUrl, 'brand_web')) {
+
+        for (const e of emailsFromText(html, pageUrl, 'brand_web')) {
           brandHits.push(e);
         }
       }
 
+      // RF-01: attach brand_web email to a person only when the evidence snippet
+      // mentions that person. Never assign a generic brand inbox to the first
+      // LinkedIn profile without an explicit person↔email link.
       for (const person of people) {
         if (person.emails.length > 0) continue;
         const token = firstNameToken(person.name);
-        const matched = token
-          ? brandHits.filter((e) =>
-              (e.evidenceSnippet ?? '').toLowerCase().includes(token),
-            )
-          : [];
+        if (!token) continue;
+        const matched = brandHits.filter((e) => {
+          const email = e.email.toLowerCase();
+          const snippet = (e.evidenceSnippet ?? '').toLowerCase();
+          // Generic company locals stay corporate — not person-attributed here.
+          if (isGenericCompanyEmail(email)) return false;
+          if (!snippet.includes(email)) return false;
+          // Name must appear outside the email local-part.
+          const withoutEmail = snippet.split(email).join(' ');
+          const nameWord = new RegExp(
+            `(^|[^a-z0-9_])${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`,
+          );
+          return nameWord.test(withoutEmail);
+        });
         if (matched.length > 0) {
           person.emails.push(...matched);
-          continue;
         }
-        // If no name match, still surface one generic brand inbox on first person only
-        // so UI can show a reachable email (honest brand_web source).
-      }
-
-      const anyoneHasEmail = people.some((p) => p.emails.length > 0);
-      if (!anyoneHasEmail && brandHits.length > 0 && people[0]) {
-        people[0].emails.push(brandHits[0]);
       }
     }
 
@@ -255,6 +328,8 @@ export async function runContactResearchFindBrandPeople(
         serpCalls,
         brandPagesFetched,
         ocrAttempts,
+        // RF-04.3: only emit when 2A snapshots were present (historical-compatible omit).
+        ...(incomingSnapshots.length > 0 ? { peeReuse } : {}),
       },
     };
 

@@ -11,7 +11,42 @@ import { ContactResearchToolSession } from '../brightdata/session';
 import { createContactResearchAgent } from '../agents/contact-research.agent';
 import type { InfluencerAiEnv } from '../config/env';
 import { buildContactResearchFindEmailsUserPrompt } from '../prompts/contact-research-find-emails.prompt';
-import { seedBrandPagesForEmailDiscovery } from './seed-brand-pages';
+import {
+  COMMERCIAL_SERP_SEED_MAX_PAGES,
+  COMMERCIAL_SERP_SEED_MAX_QUERIES,
+  seedCommercialSerpPages,
+} from './commercial-serp-seed';
+import {
+  maxSeedPagesForBudget,
+  maxSerpSeedPagesForBudget,
+  maxSerpSeedQueriesForBudget,
+} from './llm-budget-reserve';
+import { buildContactResearchPageSnapshots } from './build-page-snapshots';
+import {
+  CONTACT_EMAIL_SEED_MAX_PAGES,
+  seedBrandPagesForEmailDiscovery,
+} from './seed-brand-pages';
+
+/** RF-02.1: keep only absolute http(s) URLs for preferred seed (domain gate stays in seed). */
+function sanitizePreferredSeedUrls(urls: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of urls) {
+    const trimmed = typeof raw === 'string' ? raw.trim() : '';
+    if (!trimmed) continue;
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
+      const key = parsed.href.toLowerCase().replace(/\/$/, '');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(parsed.href);
+    } catch {
+      // drop malformed — do not fail the job
+    }
+  }
+  return out;
+}
 
 export type RunFindBrandEmailsSuccess = {
   ok: true;
@@ -110,7 +145,52 @@ export async function runContactResearchFindBrandEmails(
 
   let llmCallCount = 0;
   try {
-    const seed = await seedBrandPagesForEmailDiscovery({ client, session });
+    const seedUrls = sanitizePreferredSeedUrls(
+      'seedUrls' in input && Array.isArray(input.seedUrls)
+        ? input.seedUrls.filter((u): u is string => typeof u === 'string')
+        : [],
+    );
+
+    // RF-02.1: reserve page/SERP budget for the LLM agent after deterministic passes.
+    const maxSeedPages = maxSeedPagesForBudget(
+      maxPages,
+      CONTACT_EMAIL_SEED_MAX_PAGES,
+    );
+
+    const seed = await seedBrandPagesForEmailDiscovery({
+      client,
+      session,
+      preferredUrls: seedUrls,
+      maxSeedPages,
+    });
+
+    const serpMaxQueries = maxSerpSeedQueriesForBudget(
+      maxSerpQueries,
+      session.serpCalls,
+      COMMERCIAL_SERP_SEED_MAX_QUERIES,
+    );
+    const serpMaxPages = maxSerpSeedPagesForBudget(
+      maxPages,
+      session.pageCalls,
+      COMMERCIAL_SERP_SEED_MAX_PAGES,
+    );
+
+    // RF-02: deterministic commercial SERP within remaining budget (no cap increase).
+    const serpSeed = await seedCommercialSerpPages({
+      client,
+      session,
+      brandName: input.brandName,
+      domain: input.domain,
+      niche: input.niche,
+      maxQueries: serpMaxQueries,
+      maxPages: serpMaxPages,
+    });
+
+    const seededOpened = [...seed.openedUrls, ...serpSeed.openedUrls];
+    const seededAttempted =
+      seed.attemptedUrls.length +
+      serpSeed.openedUrls.length +
+      serpSeed.failedUrls.length;
 
     if (deps?.skipLlm) {
       const trusted = session.listEmails().map((e) => ({
@@ -121,9 +201,10 @@ export async function runContactResearchFindBrandEmails(
       const outcome =
         trusted.length > 0
           ? 'RESULTS_FOUND'
-          : seed.openedUrls.length === 0 && seed.attemptedUrls.length > 0
+          : seededOpened.length === 0 && seededAttempted > 0
             ? 'PROVIDER_FAILURE'
             : 'NO_MATCHES';
+      const pageSnapshots = buildContactResearchPageSnapshots(session);
       const candidate = {
         operation: 'FIND_BRAND_EMAILS' as const,
         outcome,
@@ -131,9 +212,10 @@ export async function runContactResearchFindBrandEmails(
         summary:
           trusted.length > 0
             ? `Found ${trusted.length} literal email(s) on brand web pages`
-            : seed.openedUrls.length === 0
+            : seededOpened.length === 0
               ? 'Seed could not open any brand pages'
               : 'No literal brand emails found within budget',
+        ...(pageSnapshots.length > 0 ? { pageSnapshots } : {}),
         trace: session.toTrace(),
       };
       const contract = contactResearchOutputSchema.safeParse(candidate);
@@ -164,8 +246,9 @@ export async function runContactResearchFindBrandEmails(
       niche: input.niche,
       maxSerpQueries,
       maxPages,
-      seededPages: seed.openedUrls,
-      seededEmailCount: seed.emailsFound,
+      seededPages: seededOpened,
+      seededEmailCount: session.emails.size,
+      preferredSeedUrls: seedUrls,
       remainingSearches: Math.max(0, maxSerpQueries - session.serpCalls),
       remainingPages: Math.max(0, maxPages - session.pageCalls),
     });
@@ -196,8 +279,7 @@ export async function runContactResearchFindBrandEmails(
     const hadUsefulHtml = session.pageHtml.size > 0;
     if (trusted.length === 0 && !hadUsefulHtml) {
       const attemptedSomething =
-        session.serpCalls + session.pageCalls > 0 ||
-        seed.attemptedUrls.length > 0;
+        session.serpCalls + session.pageCalls > 0 || seededAttempted > 0;
       if (attemptedSomething && session.lastError) {
         outcome = 'PROVIDER_FAILURE';
       } else if (
@@ -208,6 +290,7 @@ export async function runContactResearchFindBrandEmails(
       }
     }
 
+    const pageSnapshots = buildContactResearchPageSnapshots(session);
     const candidate = {
       operation: 'FIND_BRAND_EMAILS' as const,
       outcome,
@@ -218,6 +301,7 @@ export async function runContactResearchFindBrandEmails(
           : trusted.length > 0
             ? `Found ${trusted.length} literal email(s) on brand web pages`
             : 'No literal brand emails found within budget',
+      ...(pageSnapshots.length > 0 ? { pageSnapshots } : {}),
       trace: session.toTrace(),
     };
 
