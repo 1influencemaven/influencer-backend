@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 
 import { AuthModule } from '../auth/auth.module';
 import { BrightDataModule } from '../integrations/brightdata';
+import { AgencyDiscoveryModule } from '../agency-discovery/agency-discovery.module';
 import { ContactDiscoveryModule } from '../contact-discovery/contact-discovery.module';
 import { LeadDiscoveryController } from './lead-discovery.controller';
 import { LeadDiscoveryService } from './lead-discovery.service';
@@ -13,7 +14,7 @@ import { UnlockerDiagnosticsService } from './unlocker-diagnostics.service';
 /**
  * Lead Discovery facade (Paso 5b):
  * - Write: Contact Discovery Mastra via ContactDiscoveryModule
- * - Read: historical Leads + BrandBusinessContact + Unlocker diagnostics
+ * - Read: Leads + BrandBusinessContact + AgencyContact commercial (2C.4.7) + Unlocker diagnostics
  */
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { UnlockerDiagnosticsService } from './unlocker-diagnostics.service';
     ConfigModule,
     BrightDataModule,
     ContactDiscoveryModule,
+    AgencyDiscoveryModule,
   ],
   controllers: [LeadDiscoveryController],
   providers: [

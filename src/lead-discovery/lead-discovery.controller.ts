@@ -29,7 +29,9 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Role } from '../generated/prisma/enums';
+import { AgencyContactCommercialReaderService } from '../agency-discovery/agency-contact-commercial-reader.service';
 import {
+  QueryAgencyContactsDto,
   QueryBrandBusinessContactsDto,
   QueryLeadDiscoveryRunsDto,
   QueryLeadsDto,
@@ -54,6 +56,7 @@ export class LeadDiscoveryController {
   constructor(
     private readonly leadDiscoveryService: LeadDiscoveryService,
     private readonly brandBusinessContactService: BrandBusinessContactService,
+    private readonly agencyContactCommercialReader: AgencyContactCommercialReaderService,
     private readonly unlockerDiagnosticsService: UnlockerDiagnosticsService,
   ) {}
 
@@ -107,6 +110,28 @@ export class LeadDiscoveryController {
     return this.brandBusinessContactService.listByBrandCandidateId(
       query.brandCandidateId,
     );
+  }
+
+  @ApiOperation({
+    summary: 'Listar contactos comerciales de agencias (AgencyContact)',
+    description:
+      '2C.4.7 read-only. Filtra por InfluencerAgency del influencer (RELEVANT/UNDER_REVIEW). ' +
+      'No crea Leads ni ContactChannels; no dispara Mastra/Bright Data. ' +
+      '404 si el influencer no existe; [] si no hay contactos visibles.',
+  })
+  @ApiOkResponse({
+    description: 'Lista de AgencyContact comerciales (posiblemente vacía)',
+  })
+  @ApiBadRequestResponse({ description: 'influencerId inválido' })
+  @ApiNotFoundResponse({ description: 'Influencer no encontrado' })
+  @ApiUnauthorizedResponse({ description: 'No autenticado' })
+  @Get('agency-contacts')
+  listAgencyContacts(@Query() query: QueryAgencyContactsDto) {
+    return this.agencyContactCommercialReader.listForInfluencer({
+      influencerId: query.influencerId,
+      contactKind: query.contactKind,
+      commercialRelevance: query.commercialRelevance,
+    });
   }
 
   @ApiOperation({
