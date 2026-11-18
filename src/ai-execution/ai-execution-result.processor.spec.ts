@@ -2,11 +2,17 @@ jest.mock('../prisma/prisma.service', () => ({
   PrismaService: class PrismaService {},
 }));
 
-import { AI_CONTRACT_VERSION } from '@influence-maven/ai-contracts';
+import {
+  AI_CONTRACT_VERSION,
+  insufficientTalentInterpretationFixture,
+} from '@influence-maven/ai-contracts';
 
 import { IbpStatus } from '../generated/prisma/enums';
 import { AI_EXECUTION_JOBS } from './ai-execution.queues';
-import { AiExecutionResultProcessor } from './ai-execution-result.processor';
+import {
+  AiExecutionResultProcessor,
+  IBP_RESULT_PROMPT_VERSION,
+} from './ai-execution-result.processor';
 
 const EXECUTION_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const CORRELATION_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -38,6 +44,7 @@ function baseCompletedResult(overrides: Record<string, unknown> = {}) {
       summary: 'Mid-market tech brands for refurbishment content',
       alertSignals: ['scam claims'],
       desirableCriteria: ['authentic demos'],
+      talentInterpretation: insufficientTalentInterpretationFixture,
     },
     ...overrides,
   };
@@ -73,7 +80,17 @@ describe('AiExecutionResultProcessor', () => {
       findFirst: jest.Mock;
       update: jest.Mock;
     };
+    influencer?: {
+      findUnique: jest.Mock;
+    };
   }) {
+    if (!prisma.influencer) {
+      prisma.influencer = {
+        findUnique: jest.fn().mockResolvedValue({
+          instagramResearchEvidence: null,
+        }),
+      };
+    }
     return new AiExecutionResultProcessor(prisma as never);
   }
 
@@ -102,6 +119,11 @@ describe('AiExecutionResultProcessor', () => {
       idealBrandProfile: {
         findFirst: jest.fn().mockResolvedValue(profile),
         update: jest.fn().mockResolvedValue({}),
+      },
+      influencer: {
+        findUnique: jest.fn().mockResolvedValue({
+          instagramResearchEvidence: null,
+        }),
       },
     };
     const processor = createProcessor(prisma);
@@ -141,7 +163,7 @@ describe('AiExecutionResultProcessor', () => {
       provider: 'ollama',
       model: 'llama3.2:3b',
       lastGeneratedAt: result.finishedAt,
-      promptVersion: '2',
+      promptVersion: IBP_RESULT_PROMPT_VERSION,
       promptInstructionsHash: 'b1e68ccf4e9b99eb',
       llmCallCount: 1,
       aiExecution: {
@@ -151,7 +173,71 @@ describe('AiExecutionResultProcessor', () => {
         finishedAt: result.finishedAt,
         durationMs: 16862,
       },
+      talentInterpretation: insufficientTalentInterpretationFixture,
     });
+  });
+
+  it('marks FAILED when talentInterpretation cites evidence without a snapshot', async () => {
+    const profile = processingProfile();
+    const prisma = {
+      idealBrandProfile: {
+        findFirst: jest.fn().mockResolvedValue(profile),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      influencer: {
+        findUnique: jest.fn().mockResolvedValue({
+          instagramResearchEvidence: null,
+        }),
+      },
+    };
+    const processor = createProcessor(prisma);
+
+    await processor.process({
+      id: `result-${EXECUTION_ID}`,
+      name: AI_EXECUTION_JOBS.RESULT,
+      data: baseCompletedResult({
+        output: {
+          targetSectors: ['tech'],
+          excludedSectors: [],
+          brandSize: ['smb'],
+          markets: [],
+          collaborationTypes: [],
+          summary: 'x',
+          alertSignals: [],
+          desirableCriteria: [],
+          talentInterpretation: {
+            outputVersion: '1.0',
+            insufficientEvidence: false,
+            summary: {
+              text: 'Bio-based',
+              confidence: 'low',
+              evidence: [
+                { fieldPath: 'normalized.biography', value: 'hello' },
+              ],
+            },
+            niches: [
+              {
+                label: 'X',
+                rationale: 'y',
+                confidence: 'low',
+                evidence: [
+                  { fieldPath: 'normalized.biography', value: 'hello' },
+                ],
+              },
+            ],
+            contentCategories: [],
+            commercialSignals: [],
+            limitations: [],
+          },
+        },
+      }),
+    } as never);
+
+    const updateArg = prisma.idealBrandProfile.update.mock.calls[0][0];
+    expect(updateArg.data.status).toBe(IbpStatus.FAILED);
+    expect(updateArg.data.metadata.aiExecution.errorCode).toBe(
+      'AI_INVALID_OUTPUT',
+    );
   });
 
   it('looks up PROCESSING profile by executionId (influencer comes from that row)', async () => {

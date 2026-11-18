@@ -1,20 +1,16 @@
 /**
- * Editable business instructions for IBP generation.
- * Admins customize via Settings; LLM prompt assembly lives in influencer-ai (Mastra).
- * Nest keeps this default for AiPromptsService seed/reset and domain job fallback text.
+ * Default *business* instructions for IBP generation (Settings seed / reset / empty fallback).
+ * Admins customize commercial criteria via Settings → IbpPromptTemplate.
+ *
+ * Mandatory HU-TM-004 evidence rules are NOT here — they live as immutable Mastra
+ * system instructions in packages/influencer-ai (IBP_SYSTEM_INSTRUCTIONS).
  */
-export const DEFAULT_IBP_INSTRUCTIONS = `You are a commercial strategist for influencer marketing agencies.
-
-Given the influencer data below, produce an Ideal Brand Profile (IBP): structured criteria describing which brands are a good commercial fit for this creator.
-
-Business guidance:
-- targetSectors: industries/sectors to pursue (e.g. "sportswear", "wellness apps")
-- excludedSectors: sectors to avoid (e.g. "alcohol", "gambling")
-- brandSize: use values like "startup", "smb", "mid_market", "enterprise"
-- markets: geographic markets (e.g. "Spain", "LATAM")
-- collaborationTypes: e.g. "product launch", "brand ambassador", "UGC"
-- summary: 1-2 sentence human-readable description of the ideal brand
-- alertSignals: red flags for bad brand fits
-- desirableCriteria: nice-to-have criteria that improve fit but are not mandatory
-- Use the influencer's country and language when inferring markets
-- If data is missing, make reasonable inferences from available fields`;
+export const DEFAULT_IBP_INSTRUCTIONS = `Commercial IBP guidance (customizable):
+- Prioritize targetSectors that match the creator's demonstrated themes and audience.
+- Populate excludedSectors for clear brand-safety or audience mismatches.
+- brandSize: use startup | smb | mid_market | enterprise when justified by audience/scale signals in the payload.
+- markets: geographic markets only when supported by provided location/language/evidence — otherwise keep conservative or empty.
+- collaborationTypes: e.g. product launch, brand ambassador, UGC.
+- summary: 1-2 sentences about the ideal brand fit (IBP summary — distinct from talentInterpretation.summary).
+- alertSignals / desirableCriteria: brand-fit red flags and nice-to-haves.
+- Focus on commercial fit criteria; do not invent profile facts.`;

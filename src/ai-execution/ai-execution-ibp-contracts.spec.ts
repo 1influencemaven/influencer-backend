@@ -80,6 +80,15 @@ describe('IBP ai-contracts (Nest consumption)', () => {
         summary: 'ok',
         alertSignals: [],
         desirableCriteria: [],
+        talentInterpretation: {
+          outputVersion: '1.0',
+          insufficientEvidence: true,
+          summary: null,
+          niches: [],
+          contentCategories: [],
+          commercialSignals: [],
+          limitations: ['No Instagram research evidence in test fixture.'],
+        },
       },
     });
     expect(parsed.status).toBe('COMPLETED');

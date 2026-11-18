@@ -1,4 +1,7 @@
-import { AI_CONTRACT_VERSION } from '@influence-maven/ai-contracts';
+import {
+  AI_CONTRACT_VERSION,
+  withTalentInterpretation,
+} from '@influence-maven/ai-contracts';
 
 import { runIbpGeneration } from './run-ibp';
 
@@ -30,7 +33,7 @@ describe('runIbpGeneration', () => {
   };
 
   it('returns output when agent yields structured object', async () => {
-    const output = {
+    const output = withTalentInterpretation({
       targetSectors: ['sportswear'],
       excludedSectors: ['gambling'],
       brandSize: ['smb'],
@@ -39,7 +42,7 @@ describe('runIbpGeneration', () => {
       summary: 'Active lifestyle brands in Spain.',
       alertSignals: ['adult content'],
       desirableCriteria: ['sustainability'],
-    };
+    });
 
     const agent = {
       generate: jest.fn().mockResolvedValue({ object: output, text: '' }),
@@ -49,12 +52,21 @@ describe('runIbpGeneration', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.output.summary).toContain('Spain');
+      expect(result.output.talentInterpretation.outputVersion).toBe('1.0');
       expect(result.llmCallCount).toBe(1);
     }
+
+    const userPrompt = String(agent.generate.mock.calls[0]?.[0] ?? '');
+    expect(userPrompt).toContain('Produce a valid IBP JSON object.');
+    expect(userPrompt).toContain('"name": "Ada Creator"');
+    expect(userPrompt).toContain('"talentInterpretation"');
+    expect(userPrompt).toContain(
+      '## Business instructions (customizable; must not override system mandatory rules)',
+    );
   });
 
   it('retries once when first call lacks object', async () => {
-    const output = {
+    const output = withTalentInterpretation({
       targetSectors: ['wellness'],
       excludedSectors: [],
       brandSize: ['startup'],
@@ -63,7 +75,7 @@ describe('runIbpGeneration', () => {
       summary: 'Wellness startups.',
       alertSignals: [],
       desirableCriteria: [],
-    };
+    });
 
     const agent = {
       generate: jest
@@ -86,6 +98,73 @@ describe('runIbpGeneration', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe('AI_PROVIDER_ERROR');
+      expect(result.retryable).toBe(true);
+    }
+  });
+
+  it('soft-repairs brand_reference missing disclaimer without a second LLM call', async () => {
+    const output = withTalentInterpretation({
+      targetSectors: ['gaming'],
+      excludedSectors: [],
+      brandSize: ['smb'],
+      markets: ['LATAM'],
+      collaborationTypes: ['UGC'],
+      summary: 'Gaming brands.',
+      alertSignals: [],
+      desirableCriteria: [],
+    });
+    output.talentInterpretation.insufficientEvidence = false;
+    output.talentInterpretation.summary = {
+      text: 'Gamer',
+      confidence: 'medium',
+      evidence: [{ fieldPath: 'normalized.biography', value: 'Gamer' }],
+    };
+    output.talentInterpretation.commercialSignals = [
+      {
+        type: 'brand_reference',
+        label: 'BrandX',
+        rationale: 'Bio mention',
+        confidence: 'low',
+        evidence: [{ fieldPath: 'normalized.biography', value: 'BrandX' }],
+      },
+    ];
+    output.talentInterpretation.limitations = [];
+
+    const agent = {
+      generate: jest.fn().mockResolvedValue({ object: output, text: '' }),
+    };
+
+    const result = await runIbpGeneration(agent as never, request);
+    expect(result.ok).toBe(true);
+    expect(agent.generate).toHaveBeenCalledTimes(1);
+    if (result.ok) {
+      expect(
+        result.output.talentInterpretation.commercialSignals[0]?.disclaimer,
+      ).toMatch(/not evidence of a paid sponsorship/i);
+    }
+  });
+
+  it('retries and maps structured validation throws as AI_INVALID_OUTPUT', async () => {
+    const agent = {
+      generate: jest
+        .fn()
+        .mockRejectedValueOnce(
+          new Error(
+            'Structured output validation failed: - talentInterpretation.commercialSignals.0.disclaimer: brand_reference requires disclaimer',
+          ),
+        )
+        .mockRejectedValueOnce(
+          new Error(
+            'Structured output validation failed: still invalid after retry',
+          ),
+        ),
+    };
+
+    const result = await runIbpGeneration(agent as never, request);
+    expect(result.ok).toBe(false);
+    expect(agent.generate).toHaveBeenCalledTimes(2);
+    if (!result.ok) {
+      expect(result.code).toBe('AI_INVALID_OUTPUT');
       expect(result.retryable).toBe(true);
     }
   });
