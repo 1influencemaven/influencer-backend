@@ -1,3 +1,4 @@
+import { AI_CONTRACT_VERSION } from '@influence-maven/ai-contracts';
 import { Worker, Queue, type ConnectionOptions } from 'bullmq';
 
 import { createBrandDiscoveryAgent } from '../agents/brand-discovery.agent';
@@ -8,7 +9,10 @@ import {
   type InfluencerAiEnv,
 } from '../config/env';
 import { AI_EXECUTION_QUEUES } from '../queues';
+import { assertBrandDiscoveryContractsReady } from './assert-brand-discovery-contracts';
 import { handleAiExecutionRequest } from './handle-request';
+
+export { assertBrandDiscoveryContractsReady } from './assert-brand-discovery-contracts';
 
 export type StartedWorker = {
   env: InfluencerAiEnv;
@@ -33,6 +37,7 @@ export function createRedisConnection(
 export async function startInfluencerAiWorker(): Promise<StartedWorker> {
   const env = loadInfluencerAiEnv();
   assertProviderReady(env);
+  assertBrandDiscoveryContractsReady();
   const connection = createRedisConnection(env);
 
   const resultsQueue = new Queue(AI_EXECUTION_QUEUES.RESULTS, { connection });
@@ -75,6 +80,12 @@ export async function startInfluencerAiWorker(): Promise<StartedWorker> {
       provider: env.aiProvider,
       model:
         env.aiProvider === 'anthropic' ? env.anthropicModel : env.ollamaModel,
+      contractVersion: AI_CONTRACT_VERSION,
+      brandDiscoveryOperations: [
+        'PLAN_SEARCH',
+        'SCORE_CANDIDATES',
+        'RESEARCH_BRAND',
+      ],
     }),
   );
 

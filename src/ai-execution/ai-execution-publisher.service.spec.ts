@@ -32,9 +32,15 @@ describe('AiExecutionPublisherService', () => {
     influencerId: 'inf-1',
     influencerName: 'Ada',
     niche: 'fitness' as string | null,
+    subNiche: 'home workouts' as string | null,
+    country: 'Spain' as string | null,
+    language: 'es' as string | null,
+    followers: 120_000 as number | null,
+    engagement: 3.5 as number | null,
     ibp: ibpSnapshot,
     actorRole: 'USER' as const,
     locale: 'es' as const,
+    promptInstructions: 'Prefiere evidencia en sitio oficial',
   };
 
   function buildService(add: jest.Mock, getImpl?: (key: string) => unknown) {
@@ -248,7 +254,7 @@ describe('AiExecutionPublisherService', () => {
   });
 
   describe('Brand Discovery publish', () => {
-    it('publishes PLAN_SEARCH with empty business instructions and run context', async () => {
+    it('publishes PLAN_SEARCH with Settings instructions, influencer profile and run context', async () => {
       const add = jest.fn().mockResolvedValue({ id: 'job-plan' });
       const service = buildService(add);
 
@@ -272,9 +278,12 @@ describe('AiExecutionPublisherService', () => {
       expect(parsed.idempotencyKey).toBe(
         `brand-plan:${brandBase.runId}:${ids.executionId}`,
       );
-      expect(parsed.instructions.business).toBe('');
+      expect(parsed.instructions.business).toBe(brandBase.promptInstructions);
       expect(parsed.instructions.businessHash).toBe(
-        createHash('sha256').update('').digest('hex').slice(0, 16),
+        createHash('sha256')
+          .update(brandBase.promptInstructions)
+          .digest('hex')
+          .slice(0, 16),
       );
       expect(parsed.context).toEqual(
         expect.objectContaining({
@@ -297,6 +306,9 @@ describe('AiExecutionPublisherService', () => {
           expect(parsed.input.maxQueries).toBe(4);
           expect(parsed.input.influencerName).toBe('Ada');
           expect(parsed.input.niche).toBe('fitness');
+          expect(parsed.input.subNiche).toBe('home workouts');
+          expect(parsed.input.country).toBe('Spain');
+          expect(parsed.input.followers).toBe(120_000);
           expect(parsed.input.ibp).toEqual(ibpSnapshot);
         }
       }
@@ -487,6 +499,118 @@ describe('AiExecutionPublisherService', () => {
         }
       }
       expect(add.mock.calls[0][1].idempotencyKey).toMatch(/^contact-emails:/);
+      expect(add.mock.calls[0][1].context.resourceType).toBe(
+        'CONTACT_RESEARCH_RUN',
+      );
+    });
+  });
+
+  describe('publishContactResearchFindAgencyPeople', () => {
+    it('publishes CONTACT_RESEARCH FIND_AGENCY_PEOPLE with ALWAYS policy', async () => {
+      const add = jest.fn().mockResolvedValue({ id: 'job' });
+      const service = buildService(add);
+
+      const ids = await service.publishContactResearchFindAgencyPeople({
+        runId: 'run-agency-p1',
+        userId: 'user-1',
+        influencerId: influencer.id,
+        agencyId: 'agency-1',
+        agencyName: 'Creator Partners',
+        website: 'https://creatorpartners.example',
+        domain: 'creatorpartners.example',
+        maxSerpQueries: 3,
+        maxProfilesToScrape: 4,
+        maxAgencyPages: 5,
+      });
+
+      expect(ids.executionId).toBeTruthy();
+      const parsed = parseAiExecutionRequest(add.mock.calls[0][1]);
+      expect(parsed.type).toBe('CONTACT_RESEARCH');
+      if (parsed.type === 'CONTACT_RESEARCH') {
+        expect(parsed.input.operation).toBe('FIND_AGENCY_PEOPLE');
+        if (parsed.input.operation === 'FIND_AGENCY_PEOPLE') {
+          expect(parsed.input.peoplePassPolicy).toBe('ALWAYS');
+          expect(parsed.input.agencyId).toBe('agency-1');
+        }
+      }
+      expect(add.mock.calls[0][1].idempotencyKey).toMatch(/^agency-people:/);
+    });
+  });
+
+  describe('publishContactResearchFindAgencyEmails', () => {
+    it('publishes CONTACT_RESEARCH FIND_AGENCY_EMAILS', async () => {
+      const add = jest.fn().mockResolvedValue({ id: 'job' });
+      const service = buildService(add);
+
+      const ids = await service.publishContactResearchFindAgencyEmails({
+        runId: 'run-agency-1',
+        userId: 'user-1',
+        influencerId: influencer.id,
+        agencyId: 'agency-1',
+        agencyName: 'Creator Partners',
+        website: 'https://creatorpartners.example',
+        domain: 'creatorpartners.example',
+        niche: 'home',
+        niches: ['home'],
+        maxSerpQueries: 3,
+        maxPages: 4,
+        seedUrls: ['https://creatorpartners.example/contact'],
+      });
+
+      expect(ids.executionId).toBeTruthy();
+      const parsed = parseAiExecutionRequest(add.mock.calls[0][1]);
+      expect(parsed.type).toBe('CONTACT_RESEARCH');
+      if (parsed.type === 'CONTACT_RESEARCH') {
+        expect(parsed.input.operation).toBe('FIND_AGENCY_EMAILS');
+        if (parsed.input.operation === 'FIND_AGENCY_EMAILS') {
+          expect(parsed.input.agencyId).toBe('agency-1');
+          expect(parsed.input.domain).toBe('creatorpartners.example');
+          expect(parsed.input.maxSerpQueries).toBe(3);
+          expect(parsed.input.seedUrls).toEqual([
+            'https://creatorpartners.example/contact',
+          ]);
+        }
+      }
+      expect(add.mock.calls[0][1].idempotencyKey).toMatch(/^agency-emails:/);
+      expect(add.mock.calls[0][1].context.resourceType).toBe(
+        'CONTACT_RESEARCH_RUN',
+      );
+    });
+  });
+
+  describe('publishContactResearchFindBrandPeople', () => {
+    it('publishes CONTACT_RESEARCH FIND_BRAND_PEOPLE', async () => {
+      const add = jest.fn().mockResolvedValue({ id: 'job' });
+      const service = buildService(add);
+
+      const ids = await service.publishContactResearchFindBrandPeople({
+        runId: 'run-people-1',
+        userId: 'user-1',
+        influencerId: influencer.id,
+        brandName: 'Demo Co',
+        website: 'https://demo.co',
+        domain: 'demo.co',
+        niche: 'wellness',
+        priorityRoles: ['Partnerships'],
+        maxSerpQueries: 4,
+        maxProfilesToScrape: 5,
+        maxBrandPages: 6,
+        ocrEnabled: false,
+      });
+
+      expect(ids.executionId).toBeTruthy();
+      const parsed = parseAiExecutionRequest(add.mock.calls[0][1]);
+      expect(parsed.type).toBe('CONTACT_RESEARCH');
+      if (parsed.type === 'CONTACT_RESEARCH') {
+        expect(parsed.input.operation).toBe('FIND_BRAND_PEOPLE');
+        if (parsed.input.operation === 'FIND_BRAND_PEOPLE') {
+          expect(parsed.input.domain).toBe('demo.co');
+          expect(parsed.input.maxProfilesToScrape).toBe(5);
+          expect(parsed.input.ocrEnabled).toBe(false);
+          expect(parsed.input.priorityRoles).toEqual(['Partnerships']);
+        }
+      }
+      expect(add.mock.calls[0][1].idempotencyKey).toMatch(/^contact-people:/);
       expect(add.mock.calls[0][1].context.resourceType).toBe(
         'CONTACT_RESEARCH_RUN',
       );

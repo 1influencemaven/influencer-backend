@@ -54,6 +54,7 @@ describe('ContactDiscoveryProcessor', () => {
     });
     brandFindUnique.mockResolvedValue({
       name: 'Brand Co',
+      evidenceUrls: ['https://brand.com/press'],
       influencer: { niche: 'home' },
     });
     processor = new ContactDiscoveryProcessor(
@@ -91,6 +92,38 @@ describe('ContactDiscoveryProcessor', () => {
     expect(mastraExecute).not.toHaveBeenCalled();
   });
 
+  it('RF-02.1: drops invalid seedUrls and still completes (no job failure)', async () => {
+    brandFindUnique.mockResolvedValue({
+      name: 'Brand Co',
+      evidenceUrls: [
+        'not-a-url',
+        '',
+        'ftp://brand.com/x',
+        'https://brand.com/press',
+        'javascript:alert(1)',
+      ],
+      influencer: { niche: 'home' },
+    });
+    mastraExecute.mockResolvedValue({
+      outcome: 'RESULTS_FOUND',
+      runStatus: 'COMPLETED',
+      errorMessage: null,
+      searchMetadata: null,
+      contactsCreated: 0,
+      contactsUpdated: 0,
+      terminalStatusPersisted: true,
+      partialContactsMayExist: false,
+    } satisfies BbcDiscoveryResult);
+
+    await processor.process(makeJob());
+
+    expect(mastraExecute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        seedUrls: ['https://brand.com/press'],
+      }),
+    );
+  });
+
   it('completes job when Mastra persisted COMPLETED + RESULTS_FOUND', async () => {
     const orchResult: BbcDiscoveryResult = {
       outcome: 'RESULTS_FOUND',
@@ -113,6 +146,7 @@ describe('ContactDiscoveryProcessor', () => {
         website: 'https://brand.com',
         brandName: 'Brand Co',
         niche: 'home',
+        seedUrls: ['https://brand.com/press'],
       }),
     );
     expect(result).toEqual({

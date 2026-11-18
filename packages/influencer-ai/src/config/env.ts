@@ -8,7 +8,7 @@ export type InfluencerAiEnv = {
   ollamaModel: string;
   anthropicApiKey?: string;
   anthropicModel: string;
-  /** Bright Data — used by Contact Research tools (FIND_BRAND_EMAILS / FIND_BRAND_PEOPLE). */
+  /** Bright Data — Contact Research (FIND_BRAND_* / FIND_AGENCY_EMAILS). */
   brightDataApiKey?: string;
   brightDataSerpZone?: string;
   brightDataUnlockerZone?: string;

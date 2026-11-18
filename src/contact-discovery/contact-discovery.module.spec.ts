@@ -6,8 +6,11 @@ jest.mock('../lead-discovery/brand-business-contact.service', () => ({
   BrandBusinessContactService: class BrandBusinessContactService {},
 }));
 
+import 'reflect-metadata';
+
 import { CONTACT_DISCOVERY_JOBS } from '../bullmq/job-types';
 import { QUEUES } from '../bullmq/queue.constants';
+import { CONTACT_DISCOVERY_LOCK_DURATION_MS } from './contact-discovery-worker.options';
 import { ContactDiscoveryModule } from './contact-discovery.module';
 import { ContactDiscoveryService } from './contact-discovery.service';
 import { ContactDiscoveryProcessor } from './processors/contact-discovery.processor';
@@ -36,5 +39,18 @@ describe('ContactDiscoveryModule registration contracts', () => {
     expect(ContactDiscoveryService).toBeDefined();
     expect(ContactDiscoveryProcessor).toBeDefined();
     expect(ContactEmailMastraOrchestrator).toBeDefined();
+  });
+
+  it('keeps queue job retries; worker lockDuration is processor-local only', () => {
+    const workerOpts =
+      (Reflect.getMetadata(
+        'bullmq:worker_metadata',
+        ContactDiscoveryProcessor,
+      ) as { lockDuration?: number; lockRenewTime?: number } | undefined) ??
+      {};
+    expect(workerOpts.lockDuration).toBe(CONTACT_DISCOVERY_LOCK_DURATION_MS);
+    // Queue defaultJobOptions (attempts/removeOn*) live on BullModule.registerQueue —
+    // unchanged by 2C.4.5.1; this asserts we did not disable lock renewal.
+    expect(workerOpts.lockRenewTime).toBeUndefined();
   });
 });

@@ -8,16 +8,18 @@ import {
   type AiExecutionRequest,
   type AiLlmConfiguration,
   type BrandDiscoveryInput,
+  type ContactResearchPageSnapshot,
   type IbpCriteriaSnapshot,
 } from '@influence-maven/ai-contracts';
 import { Queue } from 'bullmq';
 
+import { sanitizeContactResearchSeedUrls } from '../lead-discovery/utils/contact-research-seed-urls.util';
 import { AI_EXECUTION_JOBS, AI_EXECUTION_QUEUES } from './ai-execution.queues';
 import { mapInfluencerToIbpInput } from './map-influencer-to-ibp-input';
 
 type InfluencerLike = Parameters<typeof mapInfluencerToIbpInput>[0];
 
-/** Agreed Brand Discovery plan cap (ADR-0015 / BRAND_SEARCH_MAX_QUERIES). */
+/** Agreed Brand Discovery plan cap (ADR-0015 amend / BRAND_SEARCH_MAX_QUERIES). */
 export const BRAND_DISCOVERY_DEFAULT_MAX_QUERIES = 4;
 
 export type PublishIbpExecutionParams = {
@@ -34,6 +36,12 @@ type BrandDiscoveryPublishContext = {
   influencerId: string;
   influencerName: string;
   niche?: string | null;
+  subNiche?: string | null;
+  niches?: string[] | null;
+  country?: string | null;
+  language?: string | null;
+  followers?: number | null;
+  engagement?: number | null;
   ibp: IbpCriteriaSnapshot;
   actorRole?: 'USER' | 'ADMIN';
   locale?: 'es' | 'en';
@@ -42,6 +50,8 @@ type BrandDiscoveryPublishContext = {
 export type PublishBrandDiscoveryPlanParams = BrandDiscoveryPublishContext & {
   /** Defaults to {@link BRAND_DISCOVERY_DEFAULT_MAX_QUERIES}. */
   maxQueries?: number;
+  /** Settings Brand Discovery prompt — guides query generation. */
+  promptInstructions: string;
 };
 
 type ScoreSearchHit = Extract<
@@ -61,6 +71,19 @@ export type PublishBrandDiscoveryScoreParams = BrandDiscoveryPublishContext & {
   promptInstructions: string;
 };
 
+type ResearchPageSnapshot = Extract<
+  BrandDiscoveryInput,
+  { operation: 'RESEARCH_BRAND' }
+>['pageSnapshots'][number];
+
+export type PublishBrandDiscoveryResearchParams =
+  BrandDiscoveryPublishContext & {
+    brand: { name: string; website: string; domain: string };
+    pageSnapshots: ResearchPageSnapshot[];
+    maxPages?: number;
+    promptInstructions: string;
+  };
+
 export type PublishContactResearchFindEmailsParams = {
   runId: string;
   userId: string;
@@ -71,7 +94,79 @@ export type PublishContactResearchFindEmailsParams = {
   niche?: string | null;
   maxSerpQueries?: number;
   maxPages?: number;
+  /** RF-02: Brand Discovery evidenceUrls (on-domain preferred seed). */
+  seedUrls?: string[];
   /** Optional business instructions; FIND_BRAND_EMAILS uses fixed 2A prompt in worker. */
+  promptInstructions?: string;
+  actorRole?: 'USER' | 'ADMIN';
+  locale?: 'es' | 'en';
+};
+
+export type PublishContactResearchFindPeopleParams = {
+  runId: string;
+  userId: string;
+  influencerId: string;
+  brandName: string;
+  website: string;
+  domain: string;
+  niche?: string | null;
+  priorityRoles?: string[];
+  maxSerpQueries?: number;
+  maxProfilesToScrape?: number;
+  maxBrandPages?: number;
+  ocrEnabled?: boolean;
+  /**
+   * RF-04.3: same-run FIND_BRAND_EMAILS page snapshots for PEE reuse.
+   * In-memory Nest bridge only — never Redis/persisted store.
+   */
+  pageSnapshots?: ContactResearchPageSnapshot[];
+  promptInstructions?: string;
+  actorRole?: 'USER' | 'ADMIN';
+  locale?: 'es' | 'en';
+};
+
+/** 2C.4.5 — Agency mailbox research (CONTACT_RESEARCH / FIND_AGENCY_EMAILS). */
+export type PublishContactResearchFindAgencyEmailsParams = {
+  runId: string;
+  userId: string;
+  influencerId: string;
+  agencyId: string;
+  agencyName: string;
+  website: string;
+  domain: string;
+  niche?: string | null;
+  niches?: string[];
+  country?: string | null;
+  markets?: string[];
+  maxSerpQueries?: number;
+  maxPages?: number;
+  /** On-domain preferred seeds (InfluencerAgency.evidenceUrls). */
+  seedUrls?: string[];
+  promptInstructions?: string;
+  actorRole?: 'USER' | 'ADMIN';
+  locale?: 'es' | 'en';
+};
+
+/** 2C.4.6 — Agency people research (CONTACT_RESEARCH / FIND_AGENCY_PEOPLE). */
+export type PublishContactResearchFindAgencyPeopleParams = {
+  runId: string;
+  userId: string;
+  influencerId: string;
+  agencyId: string;
+  agencyName: string;
+  website: string;
+  domain: string;
+  niche?: string | null;
+  niches?: string[];
+  country?: string | null;
+  markets?: string[];
+  priorityRoles?: string[];
+  maxSerpQueries?: number;
+  maxProfilesToScrape?: number;
+  maxAgencyPages?: number;
+  ocrEnabled?: boolean;
+  /** Same-run FIND_AGENCY_EMAILS snapshots (Nest memory bridge). */
+  pageSnapshots?: ContactResearchPageSnapshot[];
   promptInstructions?: string;
   actorRole?: 'USER' | 'ADMIN';
   locale?: 'es' | 'en';
@@ -123,15 +218,15 @@ export class AiExecutionPublisherService {
   }
 
   /**
-   * Publishes BRAND_DISCOVERY / PLAN_SEARCH.
-   * `instructions.business` is empty (plan does not use Settings scoring prompt).
+   * Publishes BRAND_DISCOVERY / PLAN_SEARCH with Settings instructions +
+   * influencer form profile (country, followers, etc.).
    */
   async publishBrandDiscoveryPlan(
     params: PublishBrandDiscoveryPlanParams,
   ): Promise<PublishAiExecutionIds> {
     const executionId = randomUUID();
     const correlationId = randomUUID();
-    const business = '';
+    const business = params.promptInstructions;
     const businessHash = this.hashBusinessInstructions(business);
     const maxQueries = params.maxQueries ?? BRAND_DISCOVERY_DEFAULT_MAX_QUERIES;
 
@@ -154,8 +249,7 @@ export class AiExecutionPublisherService {
       configuration: this.resolveLlmConfiguration(),
       input: {
         operation: 'PLAN_SEARCH',
-        influencerName: params.influencerName,
-        niche: params.niche,
+        ...this.brandDiscoveryInfluencerInput(params),
         ibp: params.ibp,
         maxQueries,
       },
@@ -195,14 +289,57 @@ export class AiExecutionPublisherService {
       configuration: this.resolveLlmConfiguration(),
       input: {
         operation: 'SCORE_CANDIDATES',
-        influencerName: params.influencerName,
-        niche: params.niche,
+        ...this.brandDiscoveryInfluencerInput(params),
         ibp: params.ibp,
         limit: params.limit,
         searchHits: params.searchHits,
         ...(params.seedBrands !== undefined
           ? { seedBrands: params.seedBrands }
           : {}),
+      },
+    };
+
+    await this.enqueueRequest(request, executionId);
+    return { executionId, correlationId };
+  }
+
+  /**
+   * Publishes BRAND_DISCOVERY / RESEARCH_BRAND with Nest-prepared page snapshots.
+   */
+  async publishBrandDiscoveryResearch(
+    params: PublishBrandDiscoveryResearchParams,
+  ): Promise<PublishAiExecutionIds> {
+    const executionId = randomUUID();
+    const correlationId = randomUUID();
+    const business = params.promptInstructions;
+    const businessHash = this.hashBusinessInstructions(business);
+    const maxPages = Math.min(params.maxPages ?? 4, 4);
+
+    const request: AiExecutionRequest = {
+      contractVersion: AI_CONTRACT_VERSION,
+      executionId,
+      correlationId,
+      idempotencyKey: `brand-research:${params.runId}:${params.brand.domain}:${executionId}`,
+      requestedAt: new Date().toISOString(),
+      type: 'BRAND_DISCOVERY',
+      context: {
+        userId: params.userId,
+        influencerId: params.influencerId,
+        resourceId: params.runId,
+        resourceType: 'BRAND_DISCOVERY_RUN',
+        locale: params.locale,
+        actorRole: params.actorRole,
+      },
+      instructions: { business, businessHash },
+      configuration: this.resolveLlmConfiguration(),
+      limits: { maxPages },
+      input: {
+        operation: 'RESEARCH_BRAND',
+        ...this.brandDiscoveryInfluencerInput(params),
+        ibp: params.ibp,
+        brand: params.brand,
+        pageSnapshots: params.pageSnapshots.slice(0, maxPages),
+        maxPages,
       },
     };
 
@@ -248,11 +385,213 @@ export class AiExecutionPublisherService {
         maxSerpQueries,
         maxPages,
         ...(params.niche?.trim() ? { niche: params.niche.trim() } : {}),
+        ...(() => {
+          const seedUrls = sanitizeContactResearchSeedUrls(params.seedUrls, 12);
+          return seedUrls.length ? { seedUrls } : {};
+        })(),
       },
     };
 
     await this.enqueueRequest(request, executionId);
     return { executionId, correlationId };
+  }
+
+  /**
+   * Publishes CONTACT_RESEARCH / FIND_BRAND_PEOPLE (Track 2B — LinkedIn + PEE).
+   */
+  async publishContactResearchFindBrandPeople(
+    params: PublishContactResearchFindPeopleParams,
+  ): Promise<PublishAiExecutionIds> {
+    const executionId = randomUUID();
+    const correlationId = randomUUID();
+    const business = params.promptInstructions?.trim() ?? '';
+    const businessHash = this.hashBusinessInstructions(business);
+
+    const request: AiExecutionRequest = {
+      contractVersion: AI_CONTRACT_VERSION,
+      executionId,
+      correlationId,
+      idempotencyKey: `contact-people:${params.runId}:${executionId}`,
+      requestedAt: new Date().toISOString(),
+      type: 'CONTACT_RESEARCH',
+      context: {
+        userId: params.userId,
+        influencerId: params.influencerId,
+        resourceId: params.runId,
+        resourceType: 'CONTACT_RESEARCH_RUN',
+        locale: params.locale,
+        actorRole: params.actorRole,
+      },
+      instructions: { business, businessHash },
+      configuration: this.resolveLlmConfiguration(),
+      input: {
+        operation: 'FIND_BRAND_PEOPLE',
+        brandName: params.brandName,
+        website: params.website,
+        domain: params.domain,
+        maxSerpQueries: params.maxSerpQueries ?? 4,
+        maxProfilesToScrape: params.maxProfilesToScrape ?? 5,
+        maxBrandPages: params.maxBrandPages ?? 6,
+        ocrEnabled: params.ocrEnabled ?? false,
+        ...(params.niche?.trim() ? { niche: params.niche.trim() } : {}),
+        ...(params.priorityRoles?.length
+          ? { priorityRoles: params.priorityRoles }
+          : {}),
+        ...(params.pageSnapshots?.length
+          ? { pageSnapshots: params.pageSnapshots.slice(0, 4) }
+          : {}),
+      },
+    };
+
+    await this.enqueueRequest(request, executionId);
+    return { executionId, correlationId };
+  }
+
+  /**
+   * Publishes CONTACT_RESEARCH / FIND_AGENCY_EMAILS (2C.4.5 — agency mailboxes).
+   * Same envelope as brand contact research; subject is Agency identity.
+   */
+  async publishContactResearchFindAgencyEmails(
+    params: PublishContactResearchFindAgencyEmailsParams,
+  ): Promise<PublishAiExecutionIds> {
+    const executionId = randomUUID();
+    const correlationId = randomUUID();
+    const business = params.promptInstructions?.trim() ?? '';
+    const businessHash = this.hashBusinessInstructions(business);
+    const maxSerpQueries = params.maxSerpQueries ?? 5;
+    const maxPages = params.maxPages ?? 5;
+    const niches = (params.niches ?? [])
+      .map((n) => n?.trim())
+      .filter((n): n is string => Boolean(n));
+    const markets = (params.markets ?? [])
+      .map((m) => m?.trim())
+      .filter((m): m is string => Boolean(m));
+
+    const request: AiExecutionRequest = {
+      contractVersion: AI_CONTRACT_VERSION,
+      executionId,
+      correlationId,
+      idempotencyKey: `agency-emails:${params.runId}:${params.agencyId}:${executionId}`,
+      requestedAt: new Date().toISOString(),
+      type: 'CONTACT_RESEARCH',
+      context: {
+        userId: params.userId,
+        influencerId: params.influencerId,
+        resourceId: params.runId,
+        resourceType: 'CONTACT_RESEARCH_RUN',
+        locale: params.locale,
+        actorRole: params.actorRole,
+      },
+      instructions: { business, businessHash },
+      configuration: this.resolveLlmConfiguration(),
+      input: {
+        operation: 'FIND_AGENCY_EMAILS',
+        agencyId: params.agencyId,
+        agencyName: params.agencyName,
+        website: params.website,
+        domain: params.domain,
+        maxSerpQueries,
+        maxPages,
+        ...(params.niche?.trim() ? { niche: params.niche.trim() } : {}),
+        ...(niches.length ? { niches } : {}),
+        ...(params.country?.trim() ? { country: params.country.trim() } : {}),
+        ...(markets.length ? { markets } : {}),
+        ...(() => {
+          const seedUrls = sanitizeContactResearchSeedUrls(params.seedUrls, 12);
+          return seedUrls.length ? { seedUrls } : {};
+        })(),
+      },
+    };
+
+    await this.enqueueRequest(request, executionId);
+    return { executionId, correlationId };
+  }
+
+  /**
+   * Publishes CONTACT_RESEARCH / FIND_AGENCY_PEOPLE (2C.4.6 — people-pass ALWAYS).
+   */
+  async publishContactResearchFindAgencyPeople(
+    params: PublishContactResearchFindAgencyPeopleParams,
+  ): Promise<PublishAiExecutionIds> {
+    const executionId = randomUUID();
+    const correlationId = randomUUID();
+    const business = params.promptInstructions?.trim() ?? '';
+    const businessHash = this.hashBusinessInstructions(business);
+    const niches = (params.niches ?? [])
+      .map((n) => n?.trim())
+      .filter((n): n is string => Boolean(n));
+    const markets = (params.markets ?? [])
+      .map((m) => m?.trim())
+      .filter((m): m is string => Boolean(m));
+
+    const request: AiExecutionRequest = {
+      contractVersion: AI_CONTRACT_VERSION,
+      executionId,
+      correlationId,
+      idempotencyKey: `agency-people:${params.runId}:${params.agencyId}:${executionId}`,
+      requestedAt: new Date().toISOString(),
+      type: 'CONTACT_RESEARCH',
+      context: {
+        userId: params.userId,
+        influencerId: params.influencerId,
+        resourceId: params.runId,
+        resourceType: 'CONTACT_RESEARCH_RUN',
+        locale: params.locale,
+        actorRole: params.actorRole,
+      },
+      instructions: { business, businessHash },
+      configuration: this.resolveLlmConfiguration(),
+      input: {
+        operation: 'FIND_AGENCY_PEOPLE',
+        agencyId: params.agencyId,
+        agencyName: params.agencyName,
+        website: params.website,
+        domain: params.domain,
+        peoplePassPolicy: 'ALWAYS',
+        maxSerpQueries: params.maxSerpQueries ?? 4,
+        maxProfilesToScrape: params.maxProfilesToScrape ?? 5,
+        maxAgencyPages: params.maxAgencyPages ?? 6,
+        ocrEnabled: params.ocrEnabled ?? false,
+        ...(params.niche?.trim() ? { niche: params.niche.trim() } : {}),
+        ...(niches.length ? { niches } : {}),
+        ...(params.country?.trim() ? { country: params.country.trim() } : {}),
+        ...(markets.length ? { markets } : {}),
+        ...(params.priorityRoles?.length
+          ? { priorityRoles: params.priorityRoles }
+          : {}),
+        ...(params.pageSnapshots?.length
+          ? { pageSnapshots: params.pageSnapshots.slice(0, 4) }
+          : {}),
+      },
+    };
+
+    await this.enqueueRequest(request, executionId);
+    return { executionId, correlationId };
+  }
+
+  private brandDiscoveryInfluencerInput(params: BrandDiscoveryPublishContext): {
+    influencerName: string;
+    niche?: string | null;
+    subNiche?: string | null;
+    niches?: string[];
+    country?: string | null;
+    language?: string | null;
+    followers?: number | null;
+    engagement?: number | null;
+  } {
+    const niches = (params.niches ?? [])
+      .map((n) => n?.trim())
+      .filter((n): n is string => Boolean(n));
+    return {
+      influencerName: params.influencerName,
+      niche: params.niche,
+      subNiche: params.subNiche,
+      ...(niches.length > 0 ? { niches } : {}),
+      country: params.country,
+      language: params.language,
+      followers: params.followers,
+      engagement: params.engagement,
+    };
   }
 
   /** sha256 hex truncated to 16 chars — same convention as IBP. */

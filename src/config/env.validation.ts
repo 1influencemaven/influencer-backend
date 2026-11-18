@@ -73,9 +73,54 @@ export const envValidationSchema = Joi.object({
     .valid('legacy', 'mastra')
     .default('legacy'),
 
+  /**
+   * P1b geographic SERP lenses.
+   * - legacy (default): single resolveSerpGeo per run (pre-P1b).
+   * - v1: multi-lens query×market under BRAND_DISCOVERY_MAX_SERP_CALLS.
+   */
+  BRAND_DISCOVERY_GEO_LENSES: Joi.string()
+    .valid('legacy', 'v1')
+    .default('legacy'),
+
+  /** Hard cap on Bright Data SERP calls per Brand Discovery run (P1b v1). */
+  BRAND_DISCOVERY_MAX_SERP_CALLS: Joi.number()
+    .integer()
+    .min(1)
+    .max(24)
+    .default(12),
+
+  /**
+   * Comma-separated countries or gl codes that represent LATAM when IBP.markets
+   * includes LATAM. Empty = do not expand (never invent Mexico-as-LATAM).
+   * Examples: Mexico,Colombia,Argentina  |  mx,co,ar
+   */
+  BRAND_DISCOVERY_REGION_LATAM_COUNTRIES: Joi.string().optional().allow(''),
+
+  /**
+   * Optional Europe region expansion (same format as LATAM).
+   * Empty = do not expand Europe → a single proxy country.
+   */
+  BRAND_DISCOVERY_REGION_EUROPE_COUNTRIES: Joi.string().optional().allow(''),
+
+  /** Max concurrent brand deep-research jobs per discovery run (mastra). */
+  BRAND_DISCOVERY_RESEARCH_CONCURRENCY: Joi.number()
+    .integer()
+    .min(1)
+    .max(5)
+    .default(2),
+
+  /** Wait timeout for RESEARCH_BRAND Mastra result (ms). */
+  BRAND_DISCOVERY_RESEARCH_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(1000)
+    .default(300000),
+
   BRIGHTDATA_API_KEY: Joi.string().optional().allow(''),
 
   BRIGHTDATA_DATASET_ID: Joi.string().optional().allow(''),
+
+  /** Talent Manager Instagram Profiles dataset (default gd_l1vikfch901nx3by4). */
+  BRIGHTDATA_INSTAGRAM_PROFILE_DATASET_ID: Joi.string().optional().allow(''),
 
   /**
    * @deprecated BD-01.f — legacy alias for Unlocker only.
@@ -100,7 +145,18 @@ export const envValidationSchema = Joi.object({
     .default(5),
   AI_RESEARCH_MAX_PAGES: Joi.number().integer().min(1).max(20).default(5),
 
-  BRIGHTDATA_SEARCH_TIMEOUT_MS: Joi.number().integer().min(1000).default(30000),
+  /** Caps forwarded to Mastra FIND_BRAND_PEOPLE (Track 2B). */
+  AI_PEOPLE_MAX_SERP_QUERIES: Joi.number()
+    .integer()
+    .min(1)
+    .max(12)
+    .default(4),
+  AI_PEOPLE_MAX_PROFILES: Joi.number().integer().min(1).max(15).default(5),
+  AI_PEOPLE_MAX_BRAND_PAGES: Joi.number().integer().min(1).max(12).default(6),
+  /** When true, Nest asks worker to attempt OCR after LinkedIn+PEE (Phase 2). */
+  CONTACT_OCR_ENABLED: Joi.boolean().default(false),
+
+  BRIGHTDATA_SEARCH_TIMEOUT_MS: Joi.number().integer().min(1000).default(60000),
 
   BRIGHTDATA_SEARCH_MAX_RETRIES: Joi.number()
     .integer()

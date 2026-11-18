@@ -9,7 +9,14 @@ export { runBrandDiscoveryScoreCandidates } from './brand-discovery/run-score-ca
 export { runContactResearchFindBrandEmails } from './contact-research/run-find-brand-emails';
 export { handleAiExecutionRequest } from './worker/handle-request';
 export { startInfluencerAiWorker } from './worker/start-worker';
-export { buildIbpUserPrompt, DEFAULT_IBP_INSTRUCTIONS } from './prompts/ibp.prompt';
+export {
+  buildIbpUserPrompt,
+  resolveIbpBusinessInstructions,
+  DEFAULT_IBP_INSTRUCTIONS,
+  DEFAULT_IBP_BUSINESS_INSTRUCTIONS,
+  IBP_SYSTEM_INSTRUCTIONS,
+  IBP_PROMPT_VERSION,
+} from './prompts/ibp.prompt';
 export {
   CONTACT_RESEARCH_FIND_EMAILS_INSTRUCTIONS,
   buildContactResearchFindEmailsUserPrompt,

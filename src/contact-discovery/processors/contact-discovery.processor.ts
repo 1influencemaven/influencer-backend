@@ -6,15 +6,23 @@ import { CONTACT_DISCOVERY_JOBS } from '../../bullmq/job-types';
 import { QUEUES } from '../../bullmq/queue.constants';
 import { LeadDiscoveryStatus } from '../../generated/prisma/enums';
 import { PrismaService } from '../../prisma/prisma.service';
+import { sanitizeContactResearchSeedUrls } from '../../lead-discovery/utils/contact-research-seed-urls.util';
+import { CONTACT_DISCOVERY_LOCK_DURATION_MS } from '../contact-discovery-worker.options';
 import { ContactEmailMastraOrchestrator } from '../orchestrator/contact-email-mastra.orchestrator';
 import type { DiscoverBusinessContactsJobData } from '../interfaces/discover-business-contacts-job.interface';
 import { interpretBbcDiscoveryResult } from '../utils/bbc-job-result.util';
 
 /**
  * Consumes `contact-discovery` queue. Does not touch `prospecting` / find-brands.
- * Paso 5b: Mastra FIND_BRAND_EMAILS only.
+ *
+ * Worker lock (2C.4.6.1): lockDuration covers worst-case 2A+2B+2C waits
+ * including agency emails-pass and people-pass (4140s sequential budget).
+ * lockRenewTime / stalledInterval are left at BullMQ defaults so LockManager
+ * keeps renewing (lockRenewTime = lockDuration/2). Do not set lockRenewTime=0.
  */
-@Processor(QUEUES.CONTACT_DISCOVERY)
+@Processor(QUEUES.CONTACT_DISCOVERY, {
+  lockDuration: CONTACT_DISCOVERY_LOCK_DURATION_MS,
+})
 export class ContactDiscoveryProcessor extends WorkerHost {
   private readonly logger = new Logger(ContactDiscoveryProcessor.name);
 
@@ -93,11 +101,14 @@ export class ContactDiscoveryProcessor extends WorkerHost {
       where: { id: brandCandidateId },
       select: {
         name: true,
+        evidenceUrls: true,
         influencer: { select: { niche: true } },
       },
     });
     const brandName = brand?.name ?? undefined;
     const niche = brand?.influencer?.niche ?? undefined;
+    // RF-02.1: drop malformed / non-http(s); never fail the job on bad evidenceUrls.
+    const seedUrls = sanitizeContactResearchSeedUrls(brand?.evidenceUrls);
 
     const result = await this.mastraOrchestrator.execute({
       runId,
@@ -107,6 +118,7 @@ export class ContactDiscoveryProcessor extends WorkerHost {
       domain: domain ?? '',
       brandName,
       niche,
+      seedUrls,
       ...(maxPages != null ? { maxPages } : {}),
     });
 
