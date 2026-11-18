@@ -107,6 +107,20 @@ export function createContactResearchTools(params: {
           remainingPages: Math.max(0, session.maxPages - session.pageCalls),
         };
       }
+
+      // RF-04.2: reuse successful HTML already in this session (no Unlocker / no pageCalls).
+      if (session.hasUsablePageHtml(url)) {
+        const html = session.getPageHtml(url)!;
+        session.pageOriginCounts.llmPagesReused += 1;
+        session.pageOriginCounts.duplicateUrlSkips += 1;
+        return {
+          ok: true,
+          url,
+          textPreview: htmlToTextPreview(html),
+          remainingPages: Math.max(0, session.maxPages - session.pageCalls),
+        };
+      }
+
       if (session.pageCalls >= session.maxPages) {
         return {
           ok: false,
@@ -115,6 +129,8 @@ export function createContactResearchTools(params: {
           remainingPages: 0,
         };
       }
+
+      session.pageOriginCounts.llmPagesAttempted += 1;
       session.pageCalls += 1;
       session.pages.push(url);
       const result = await client.openPage(url);
@@ -133,7 +149,8 @@ export function createContactResearchTools(params: {
           remainingPages: Math.max(0, session.maxPages - session.pageCalls),
         };
       }
-      session.pageHtml.set(url, result.html);
+      session.setPageHtml(url, result.html);
+      session.pageOriginCounts.llmPagesDownloaded += 1;
       return {
         ok: true,
         url,
@@ -159,7 +176,7 @@ export function createContactResearchTools(params: {
       totalUniqueEmails: z.number().int(),
     }),
     execute: async ({ url }) => {
-      const html = session.pageHtml.get(url);
+      const html = session.getPageHtml(url);
       if (!html) {
         return {
           ok: false,

@@ -24,10 +24,78 @@ function isBlockedHost(hostname: string): boolean {
 }
 
 /**
- * Best-effort organic extraction from Google SERP HTML.
- * Enough for the agent tool; Nest has a fuller parser for Brand Discovery.
+ * Prefer Bright Data `brd_json=1` JSON organics; fall back to HTML href scrape.
  */
-export function parseOrganicHits(html: string, limit = 8): BrightDataOrganicHit[] {
+export function parseOrganicHits(
+  body: string,
+  limit = 8,
+): BrightDataOrganicHit[] {
+  const fromJson = parseBrdJsonOrganics(body, limit);
+  if (fromJson !== null) {
+    return fromJson;
+  }
+  return parseOrganicHitsFromHtml(body, limit);
+}
+
+function parseBrdJsonOrganics(
+  body: string,
+  limit: number,
+): BrightDataOrganicHit[] | null {
+  const trimmed = body.trim();
+  if (!trimmed.startsWith('{')) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed) as unknown;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const root = parsed as Record<string, unknown>;
+  const organic = Array.isArray(root.organic) ? root.organic : null;
+  if (!organic) return null;
+
+  const hits: BrightDataOrganicHit[] = [];
+  const seen = new Set<string>();
+  for (const row of organic) {
+    if (hits.length >= limit) break;
+    if (!row || typeof row !== 'object') continue;
+    const item = row as {
+      link?: unknown;
+      url?: unknown;
+      title?: unknown;
+      description?: unknown;
+    };
+    const url =
+      typeof item.link === 'string'
+        ? item.link.trim()
+        : typeof item.url === 'string'
+          ? item.url.trim()
+          : '';
+    if (!url.startsWith('http')) continue;
+    try {
+      const host = new URL(url).hostname;
+      if (isBlockedHost(host)) continue;
+    } catch {
+      continue;
+    }
+    if (seen.has(url)) continue;
+    seen.add(url);
+    const title =
+      typeof item.title === 'string' && item.title.trim()
+        ? item.title.trim()
+        : url;
+    const snippet =
+      typeof item.description === 'string' ? item.description.slice(0, 220) : '';
+    hits.push({ title, url, snippet });
+  }
+  return hits;
+}
+
+/** Best-effort organic extraction from Google SERP HTML (legacy fallback). */
+export function parseOrganicHitsFromHtml(
+  html: string,
+  limit = 8,
+): BrightDataOrganicHit[] {
   const hits: BrightDataOrganicHit[] = [];
   const seen = new Set<string>();
 

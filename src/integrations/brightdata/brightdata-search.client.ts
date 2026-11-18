@@ -8,6 +8,7 @@ import type {
   SearchResult,
 } from './search.types';
 import { classifySerpHtmlWithoutOrganics } from './classify-serp-html';
+import { parseBrightDataSerpJson } from './parse-brightdata-serp-json';
 import {
   looksLikeHtmlDocument,
   parseGoogleSerpHtml,
@@ -77,8 +78,10 @@ export class BrightDataSearchClient {
       this.configService.get<string>('BRIGHTDATA_UNLOCKER_ZONE')?.trim() ||
       this.configService.get<string>('BRIGHTDATA_ZONE')?.trim() ||
       'mcp_unlocker';
+    // SERP often needs 35–45s on trial zones; 30s caused false TimeoutError while
+    // the same query succeeds with a longer client timeout.
     this.timeoutMs =
-      this.configService.get<number>('BRIGHTDATA_SEARCH_TIMEOUT_MS') ?? 30000;
+      this.configService.get<number>('BRIGHTDATA_SEARCH_TIMEOUT_MS') ?? 60000;
     this.maxRetries =
       this.configService.get<number>('BRIGHTDATA_SEARCH_MAX_RETRIES') ?? 2;
     this.retryBackoffMs =
@@ -307,10 +310,11 @@ export class BrightDataSearchClient {
     const hl = query.geo?.hl ?? 'en';
     const gl = query.geo?.gl ?? 'us';
     const num = query.num ?? 10;
-    // Official serp_api sample uses a plain Google search URL + format/raw + data_format/html.
+    // Bright Data SERP: `brd_json=1` returns parsed organics (avoids Google consent HTML).
+    // Panel/docs use this; raw HTML without brd_json often yields consent_page / 0 hits.
     const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(
       query.text,
-    )}&hl=${hl}&gl=${gl}&num=${num}`;
+    )}&hl=${hl}&gl=${gl}&num=${num}&brd_json=1`;
 
     const start = Date.now();
     try {
@@ -319,13 +323,12 @@ export class BrightDataSearchClient {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
-          Accept: 'text/html, application/json;q=0.9, */*;q=0.8',
+          Accept: 'application/json, text/html;q=0.9, */*;q=0.8',
         },
         body: JSON.stringify({
           zone,
           url: googleUrl,
           format: 'raw',
-          data_format: 'html',
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -353,7 +356,7 @@ export class BrightDataSearchClient {
             apiHttpStatus: httpStatus,
             bodyLength: text.length,
             bodyPreview: safeBodyPreview(text),
-            dataFormat: 'html',
+            dataFormat: 'brd_json',
             elapsedMs,
             resultCategory: 'http_error',
           }),
@@ -453,8 +456,31 @@ export class BrightDataSearchClient {
         };
       }
 
+      const brdJson = parseBrightDataSerpJson(text, { maxResults: num });
+      if (brdJson.kind === 'brd_json') {
+        const items = brdJson.items;
+        const resultCategory: BrightDataSearchResultCategory =
+          items.length > 0 ? 'ok' : 'organic_empty';
+        return {
+          items,
+          meta: {
+            provider: 'brightdata',
+            zone,
+            attempt,
+            httpStatus,
+            responseBytes: text.length,
+            elapsedMs,
+            emptyBody: false,
+            query: query.text,
+            resultCategory,
+            organicResultsCount: items.length,
+          },
+        };
+      }
+
+      // Fallback: legacy HTML SERP (consent-prone; kept for resilience).
       if (!looksLikeHtmlDocument(text)) {
-        const parseError = 'SERP_RESPONSE_NOT_HTML';
+        const parseError = 'SERP_RESPONSE_NOT_BRD_JSON_OR_HTML';
         this.logger.warn(
           JSON.stringify({
             event: 'brightdata_search',

@@ -60,21 +60,25 @@ describe('BrightDataSearchClient', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
       zone: string;
       format: string;
-      data_format: string;
+      data_format?: string;
       url: string;
     };
     expect(body.zone).toBe('serp_demo');
     expect(body.zone).not.toBe('mcp_unlocker');
     expect(body.format).toBe('raw');
-    expect(body.data_format).toBe('html');
+    expect(body.data_format).toBeUndefined();
     expect(body.url).toContain('google.com/search');
-    expect(body.url).not.toContain('brd_json');
+    expect(body.url).toContain('brd_json=1');
   });
 
-  it('sends official serp_api payload shape (format raw, data_format html)', async () => {
+  it('sends SERP payload with brd_json=1 (parsed organics)', async () => {
     fetchMock.mockResolvedValue({
       status: 200,
-      text: async () => emptySerpHtml,
+      text: async () =>
+        JSON.stringify({
+          general: { query: 'pizza' },
+          organic: [],
+        }),
     });
     const client = new BrightDataSearchClient(
       mockConfig({ BRIGHTDATA_SERP_ZONE: 'serp_api' }),
@@ -88,12 +92,49 @@ describe('BrightDataSearchClient', () => {
       'Content-Type': 'application/json',
     });
     const body = JSON.parse(String(init.body)) as Record<string, string>;
-    expect(body).toEqual({
-      zone: 'serp_api',
-      url: expect.stringContaining('https://www.google.com/search?q=pizza'),
-      format: 'raw',
-      data_format: 'html',
+    expect(body.zone).toBe('serp_api');
+    expect(body.format).toBe('raw');
+    expect(body.data_format).toBeUndefined();
+    expect(body.url).toContain('https://www.google.com/search?q=pizza');
+    expect(body.url).toContain('brd_json=1');
+  });
+
+  it('parses Bright Data brd_json organic results', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      headers: { get: () => null },
+      text: async () =>
+        JSON.stringify({
+          general: { query: 'pizza' },
+          organic: [
+            {
+              title: 'Pizza Hut',
+              link: 'https://www.pizzahut.com/',
+              description: 'Delivery and carryout',
+              rank: 1,
+            },
+            {
+              title: 'Wikipedia',
+              link: 'https://en.wikipedia.org/wiki/Pizza',
+              description: 'Dish article',
+              rank: 2,
+            },
+          ],
+        }),
     });
+
+    const client = new BrightDataSearchClient(mockConfig());
+    const result = await client.search({ text: 'pizza' });
+
+    expect(result.meta.resultCategory).toBe('ok');
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).toMatchObject({
+      title: 'Pizza Hut',
+      url: 'https://www.pizzahut.com/',
+      domain: 'pizzahut.com',
+      position: 1,
+    });
+    expect(result.items[1].url).toBe('https://en.wikipedia.org/wiki/Pizza');
   });
 
   it('uses BRIGHTDATA_UNLOCKER_ZONE for fetchRawHtml, not SERP zone', async () => {
@@ -276,7 +317,7 @@ describe('BrightDataSearchClient', () => {
     expect(result.meta.resultCategory).toBe('unknown_html');
   });
 
-  it('records parse error when body is not HTML', async () => {
+  it('records parse error when body is neither brd_json nor HTML', async () => {
     fetchMock.mockResolvedValue({
       status: 200,
       headers: { get: () => null },
@@ -287,7 +328,7 @@ describe('BrightDataSearchClient', () => {
     const result = await client.search({ text: 'test query' });
 
     expect(result.items).toHaveLength(0);
-    expect(result.meta.parseError).toBe('SERP_RESPONSE_NOT_HTML');
+    expect(result.meta.parseError).toBe('SERP_RESPONSE_NOT_BRD_JSON_OR_HTML');
     expect(result.meta.emptyBody).toBe(false);
     expect(result.meta.resultCategory).toBe('parse_error');
     expect(result.meta.responseBytes).toBe('not-html-plain-error'.length);
@@ -315,7 +356,7 @@ describe('BrightDataSearchClient', () => {
     expect(result.meta.parseError).toBe('SERP_FAILED_QUERY_REJECTED');
   });
 
-  it('records parse error when body is legacy parsed_light JSON', async () => {
+  it('classifies brd_json with empty organic as organic_empty', async () => {
     const body = JSON.stringify({ organic: [] });
     fetchMock.mockResolvedValue({
       status: 200,
@@ -326,8 +367,9 @@ describe('BrightDataSearchClient', () => {
     const result = await client.search({ text: 'test query' });
 
     expect(result.items).toHaveLength(0);
-    expect(result.meta.resultCategory).toBe('parse_error');
-    expect(result.meta.parseError).toBe('SERP_RESPONSE_NOT_HTML');
+    expect(result.meta.resultCategory).toBe('organic_empty');
+    expect(result.meta.organicResultsCount).toBe(0);
+    expect(result.meta.parseError).toBeUndefined();
   });
 
   it('classifies HTTP 400 as http_error with diagnostic parseError', async () => {

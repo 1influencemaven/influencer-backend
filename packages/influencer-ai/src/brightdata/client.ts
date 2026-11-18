@@ -50,10 +50,10 @@ export class BrightDataToolsClient {
   }
 
   async searchWeb(query: string, num = 8): Promise<BrightDataSerpResult> {
-    // Avoid `num` in Google URL — Bright Data often strips/rejects it.
+    // `brd_json=1` → Bright Data parsed organics (avoids Google consent HTML).
     const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(
       query,
-    )}&hl=en&gl=us`;
+    )}&hl=en&gl=us&brd_json=1`;
     const started = Date.now();
 
     try {
@@ -62,7 +62,7 @@ export class BrightDataToolsClient {
         headers: {
           Authorization: `Bearer ${this.config.apiKey}`,
           'Content-Type': 'application/json',
-          Accept: 'text/html, application/json;q=0.9, */*;q=0.8',
+          Accept: 'application/json, text/html;q=0.9, */*;q=0.8',
         },
         body: JSON.stringify({
           zone: this.config.serpZone,
@@ -71,11 +71,11 @@ export class BrightDataToolsClient {
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs),
       });
-      const html = await response.text();
+      const bodyText = await response.text();
       const brd = pickBrd(response.headers);
-      const emptyBody = html.length === 0;
+      const emptyBody = bodyText.length === 0;
       const organics =
-        !emptyBody && !brd.brdError ? parseOrganicHits(html, num) : [];
+        !emptyBody && !brd.brdError ? parseOrganicHits(bodyText, num) : [];
 
       return {
         ok:
@@ -84,7 +84,7 @@ export class BrightDataToolsClient {
           !brd.brdError &&
           Number(brd.brdStatusCode ?? '200') < 400,
         httpStatus: response.status,
-        bodyLength: html.length,
+        bodyLength: bodyText.length,
         elapsedMs: Date.now() - started,
         organics,
         emptyBody,
