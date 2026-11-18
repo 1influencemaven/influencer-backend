@@ -11,9 +11,25 @@ describe('brand-domain.util', () => {
     expect(normalizeDomain('example.com')).toBe('example.com');
   });
 
-  it('ensures website urls', () => {
+  it('ensures website urls as corporate homepage origins', () => {
     expect(ensureWebsiteUrl('example.com')).toBe('https://example.com');
     expect(ensureWebsiteUrl('https://example.com')).toBe('https://example.com');
+    expect(
+      ensureWebsiteUrl(
+        'https://awisee.com/es/influencer-marketing-spain/',
+      ),
+    ).toBe('https://awisee.com');
+    expect(
+      ensureWebsiteUrl(
+        'https://based.com/?srsltid=AYCX9vIgTrackingToken',
+      ),
+    ).toBe('https://based.com');
+    expect(ensureWebsiteUrl('https://www.Example.com/path?utm=1#x')).toBe(
+      'https://example.com',
+    );
+    expect(ensureWebsiteUrl('https://linktr.ee/somebrand?ref=1')).toBe(
+      'https://linktr.ee/somebrand',
+    );
   });
 
   it('dedupes by domain', () => {

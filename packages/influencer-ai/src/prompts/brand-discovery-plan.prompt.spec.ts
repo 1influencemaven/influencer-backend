@@ -27,21 +27,24 @@ describe('brand-discovery-plan.prompt (AI-004.5.4)', () => {
       );
     });
 
-    it('requires IBP sectors/markets/commercial recipe and diversity slots', () => {
+    it('requires concrete category expansion, recipe, and diversity', () => {
+      expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toContain(
+        'EXPAND ABSTRACT IBP INTO CONCRETE COMMERCIAL CATEGORIES',
+      );
       expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toContain(
         'QUERY RECIPE',
       );
       expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toContain(
-        'COMMERCIAL DIVERSITY',
+        'CATEGORY DIVERSITY',
       );
       expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(
-        /Brand \/ creator partnerships/i,
+        /CONCRETE product OR service category/i,
       );
       expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(
-        /Affiliate \/ performance/i,
+        /collaboration MODES/i,
       );
       expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(
-        /Ambassador \/ sponsorship/i,
+        /At most ONE query in the set may lead with a collaboration-mode/i,
       );
       expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(
         /do not invent/i,
@@ -50,11 +53,20 @@ describe('brand-discovery-plan.prompt (AI-004.5.4)', () => {
         /excludedSectors/i,
       );
       expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(/listicle/i);
+      expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(
+        /Never put follower counts/i,
+      );
+      expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(
+        /entrepreneurship brands LATAM/i,
+      );
+      expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(
+        /maternity products United States/i,
+      );
     });
 
-    it('allows fewer than maxQueries when IBP cannot support four intents', () => {
+    it('allows fewer than maxQueries when IBP cannot support distinct categories', () => {
       expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(
-        /return FEWER queries/i,
+        /Return fewer than maxQueries/i,
       );
       expect(DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS).toMatch(
         /Never invent IBP fields to fill slots/i,
@@ -74,7 +86,7 @@ describe('brand-discovery-plan.prompt (AI-004.5.4)', () => {
       expect(sections).toContain('MARKETS: Europe; Spain');
       expect(sections).toContain('BRAND SIZES: smb; mid-market');
       expect(sections).toContain(
-        'COLLABORATION TYPES: affiliate; brand ambassador',
+        'COLLABORATION TYPES (optional modifiers — not primary query subjects): affiliate; brand ambassador',
       );
       expect(sections).toContain(
         'DESIRABLE CRITERIA: sustainability; creator program',
@@ -100,7 +112,7 @@ describe('brand-discovery-plan.prompt (AI-004.5.4)', () => {
         'BRAND SIZES: (none provided — do not invent)',
       );
       expect(sections).toContain(
-        'COLLABORATION TYPES: (none provided — do not invent)',
+        'COLLABORATION TYPES (optional modifiers — not primary query subjects): (none provided — do not invent)',
       );
       expect(sections).toContain('SUMMARY: (none provided — do not invent)');
     });
@@ -116,14 +128,54 @@ describe('brand-discovery-plan.prompt (AI-004.5.4)', () => {
       });
 
       expect(prompt).toContain('Max queries: 4');
-      expect(prompt).toContain('Influencer name: Solusat');
+      expect(prompt).toContain('Name: Solusat');
       expect(prompt).toContain('Niche: tech hardware');
+      expect(prompt).toContain('INFLUENCER PROFILE');
       expect(prompt).toContain('TARGET SECTORS:');
       expect(prompt).toContain('MARKETS:');
       expect(prompt).toContain('"targetSectors"');
       expect(prompt).toContain('at most one query may contain the influencer');
       expect(prompt).toContain('Prefer zero queries that include "Solusat"');
       expect(prompt).toMatch(/queries: 1 to 4 strings/);
+      expect(prompt).toContain('never as literal query tokens');
+      expect(prompt).toMatch(/distinct concrete product\/service categories/i);
+      expect(prompt).toContain(
+        'COLLABORATION TYPES (optional modifiers — not primary query subjects)',
+      );
+    });
+
+    it('grounds Diana-like IBP fields for category-led discovery', () => {
+      const prompt = buildBrandDiscoveryPlanUserPrompt({
+        influencerName: 'Diana Marcoccia',
+        niche: 'Mama emprendedora',
+        subNiche: 'maternidad',
+        followers: 399591,
+        ibp: {
+          targetSectors: [
+            'entrepreneurship',
+            'maternity',
+            'personal_development',
+          ],
+          excludedSectors: ['alcohol', 'gambling'],
+          brandSize: ['smb', 'startup'],
+          markets: ['LATAM', 'United States'],
+          collaborationTypes: ['brand ambassador', 'UGC'],
+          summary:
+            'Diana Marcoccia is an entrepreneur and mother, focusing on personal development and maternidad',
+          alertSignals: ['Limited verified content'],
+          desirableCriteria: [
+            'Hashtags related to personal development and entrepreneurship',
+          ],
+        },
+        maxQueries: 4,
+      });
+
+      expect(prompt).toContain('TARGET SECTORS: entrepreneurship; maternity; personal_development');
+      expect(prompt).toContain('MARKETS: LATAM; United States');
+      expect(prompt).toContain('Niche: Mama emprendedora');
+      expect(prompt).toContain('Sub-niche: maternidad');
+      expect(prompt).toContain('product/service categories');
+      expect(prompt).not.toMatch(/typically 2\)/);
     });
 
     it('keeps schema as queries-only (no evidenceStatus / brands)', () => {
@@ -131,10 +183,10 @@ describe('brand-discovery-plan.prompt (AI-004.5.4)', () => {
         influencerName: 'Ada',
         niche: 'fitness',
         ibp,
-        maxQueries: 4,
+        maxQueries: 2,
       });
       expect(prompt).toContain('"queries": ["string"]');
-      expect(prompt).not.toContain('"brands"');
+      expect(prompt).not.toMatch(/"brands"\s*:/);
       expect(prompt).not.toMatch(/\bevidenceStatus\b/);
     });
 

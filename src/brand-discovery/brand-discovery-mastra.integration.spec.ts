@@ -28,9 +28,12 @@ import {
   BrandDiscoveryStatus,
   EvidenceStatus,
 } from '../generated/prisma/enums';
-import { MODEL_PRIOR_FIT_REASON } from './utils/brand-score-grounding.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { BrandDiscoveryAiOrchestrator } from './brand-discovery-ai.orchestrator';
+import {
+  BrandDiscoveryAiOrchestrator,
+  BRAND_DISCOVERY_SCORE_TIMEOUT_MS,
+} from './brand-discovery-ai.orchestrator';
+import { BrandDiscoveryResearchService } from './brand-discovery-research.service';
 import { BrandDiscoveryService } from './brand-discovery.service';
 import { BrandSourceRegistry } from './brand-source.registry';
 import { BrightDataWebSearchProvider } from './providers/brightdata-web-search.provider';
@@ -169,11 +172,26 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
           useValue: {
             publishBrandDiscoveryPlan: publishPlan,
             publishBrandDiscoveryScore: publishScore,
+            publishBrandDiscoveryResearch: jest.fn(),
           },
         },
         {
           provide: AiExecutionResultWaitService,
           useValue: { waitForAiExecutionResult: waitForResult },
+        },
+        {
+          provide: BrandDiscoveryResearchService,
+          useValue: {
+            enrichCandidates: jest.fn(
+              async (candidates: unknown[]) => ({
+                candidates,
+                researchedCount: 0,
+                researchFailedCount: 0,
+                researchPartialCount: 0,
+                researchConcurrency: 2,
+              }),
+            ),
+          },
         },
         {
           provide: BrightDataWebSearchProvider,
@@ -217,6 +235,7 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
     configGet.mockImplementation((key: string) => {
       if (key === 'BRAND_DISCOVERY_ENGINE') return 'mastra';
       if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
+      if (key === 'NODE_ENV') return 'test';
       return undefined;
     });
 
@@ -378,7 +397,11 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
           ]),
         }),
       );
-      expect(waitForResult).toHaveBeenNthCalledWith(2, SCORE_ID, 180_000);
+      expect(waitForResult).toHaveBeenNthCalledWith(
+        2,
+        SCORE_ID,
+        BRAND_DISCOVERY_SCORE_TIMEOUT_MS,
+      );
       expect(discover).not.toHaveBeenCalled();
 
       const created = prisma.brandCandidate.createMany.mock.calls[0][0]
@@ -589,7 +612,7 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
       });
     });
 
-    it('persists UNVERIFIED candidates when SERP returns no hits', async () => {
+    it('does not persist MODEL_PRIOR inventados when SERP returns no hits', async () => {
       waitForResult
         .mockResolvedValueOnce(
           planCompleted([
@@ -616,22 +639,7 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
       expect(publishScore).toHaveBeenCalledWith(
         expect.objectContaining({ searchHits: [] }),
       );
-      expect(prisma.brandCandidate.createMany).toHaveBeenCalledWith({
-        data: [
-          expect.objectContaining({
-            name: 'Knowledge Co',
-            domain: 'knowledge.example',
-            evidenceUrls: [],
-            source: 'mastra',
-            evidenceStatus: EvidenceStatus.UNVERIFIED,
-            score: 55,
-            fitReason: MODEL_PRIOR_FIT_REASON,
-            metadata: expect.objectContaining({
-              groundingSource: 'MODEL_PRIOR',
-            }),
-          }),
-        ],
-      });
+      expect(prisma.brandCandidate.createMany).not.toHaveBeenCalled();
       expect(prisma.brandDiscoveryRun.update).toHaveBeenCalledWith({
         where: { id: 'run-int-1' },
         data: expect.objectContaining({
@@ -643,7 +651,8 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
             verifiedCount: 0,
             unverifiedCount: 1,
             discardedByEvidenceCount: 0,
-            persistedCount: 1,
+            persistedCount: 0,
+            skippedPersistReason: 'NO_SERP_HITS',
           }),
         }),
       });
@@ -676,7 +685,7 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
       });
     });
 
-    it('persists UNVERIFIED when SCORE brand domain is outside SERP allowlist', async () => {
+    it('does not persist MODEL_PRIOR when SCORE brand domain is outside SERP allowlist', async () => {
       waitForResult
         .mockResolvedValueOnce(
           planCompleted([
@@ -702,20 +711,7 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
 
       await service.executeDiscovery('run-int-1', 'inf-1');
 
-      expect(prisma.brandCandidate.createMany).toHaveBeenCalledWith({
-        data: [
-          expect.objectContaining({
-            name: 'Fake',
-            evidenceUrls: [],
-            evidenceStatus: EvidenceStatus.UNVERIFIED,
-            score: 55,
-            fitReason: MODEL_PRIOR_FIT_REASON,
-            metadata: expect.objectContaining({
-              groundingSource: 'MODEL_PRIOR',
-            }),
-          }),
-        ],
-      });
+      expect(prisma.brandCandidate.createMany).not.toHaveBeenCalled();
       expect(prisma.brandDiscoveryRun.update).toHaveBeenCalledWith({
         where: { id: 'run-int-1' },
         data: expect.objectContaining({
@@ -726,7 +722,9 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
             discardedByEvidenceCount: 0,
             evidenceAcceptedCount: 0,
             evidenceRejectedCount: 0,
-            persistedCount: 1,
+            skippedModelPriorCount: 1,
+            persistedCount: 0,
+            skippedPersistReason: 'MODEL_PRIOR_WITHOUT_DOMAIN_EVIDENCE',
           }),
         }),
       });

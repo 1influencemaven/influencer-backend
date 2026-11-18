@@ -37,6 +37,9 @@ describe('buildBrandDiscoveryScoreUserPrompt', () => {
     expect(prompt).toContain(
       'Do not emit evidenceStatus, VERIFIED, UNVERIFIED',
     );
+    expect(prompt).toContain('DIRECT vs SECONDARY sources');
+    expect(prompt).toMatch(/Do NOT propose a company that is only named inside/i);
+    expect(prompt).toMatch(/Omit brandSize when you lack evidence/i);
   });
 
   it('marks SERP scenario B when hits are empty', () => {

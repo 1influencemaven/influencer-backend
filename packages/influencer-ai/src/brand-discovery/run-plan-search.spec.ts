@@ -77,7 +77,7 @@ describe('runBrandDiscoveryPlanSearch', () => {
     expect(result.ok).toBe(true);
     expect(agent.generate).toHaveBeenCalledTimes(1);
     expect(agent.generate.mock.calls[0][0]).toContain(
-      'Influencer name: Ana Fit',
+      'Name: Ana Fit',
     );
     expect(agent.generate.mock.calls[0][0]).toContain(
       `Max queries: ${maxQueries}`,
@@ -129,7 +129,7 @@ describe('runBrandDiscoveryPlanSearch', () => {
     const [firstPrompt] = agent.generate.mock.calls[0];
     const [correctionPrompt] = agent.generate.mock.calls[1];
 
-    expect(firstPrompt).toContain('Influencer name: Ana Fit');
+    expect(firstPrompt).toContain('Name: Ana Fit');
     expect(firstPrompt).toContain(`Max queries: ${maxQueries}`);
     expect(correctionPrompt).toContain(
       'invalid JSON for brand search strategy',

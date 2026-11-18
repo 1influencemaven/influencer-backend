@@ -169,6 +169,12 @@ export async function runBrandDiscoveryScoreCandidates(
   const userPrompt = buildBrandDiscoveryScoreUserPrompt({
     influencerName: request.input.influencerName,
     niche: request.input.niche,
+    subNiche: request.input.subNiche,
+    niches: request.input.niches,
+    country: request.input.country,
+    language: request.input.language,
+    followers: request.input.followers,
+    engagement: request.input.engagement,
     ibp: request.input.ibp,
     limit,
     searchHits: request.input.searchHits,

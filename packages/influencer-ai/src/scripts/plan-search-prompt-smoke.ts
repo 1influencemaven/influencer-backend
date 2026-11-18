@@ -88,7 +88,7 @@ function evaluateQueries(
     JSON.stringify(
       {
         queryCount: queries.length,
-        maxOk: queries.length <= 4 && queries.length >= 1,
+        maxOk: queries.length <= 2 && queries.length >= 1,
         influencerNameHits: nameHits,
         nameQuotaOk: nameHits <= 1,
         mentionsSectorToken: sectorHit,
@@ -164,7 +164,7 @@ async function main(): Promise<void> {
       influencerName: c.influencerName,
       niche: c.niche,
       ibp: c.ibp,
-      maxQueries: 4,
+      maxQueries: 2,
     });
 
     console.log(

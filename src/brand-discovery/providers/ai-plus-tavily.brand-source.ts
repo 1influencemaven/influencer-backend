@@ -15,6 +15,7 @@ import {
   BRAND_SEARCH_MAX_QUERIES,
   validateBrandSearchQueries,
 } from '../utils/brand-search-queries.util';
+import { filterBrandDiscoverySearchHits } from '../utils/brand-serp-hit-filter.util';
 import { BrightDataWebSearchProvider } from './brightdata-web-search.provider';
 
 @Injectable()
@@ -37,16 +38,25 @@ export class AiPlusTavilyBrandSource implements BrandSourceProvider {
         ? this.webSearch
         : null;
 
-    const serpOutcomes = await Promise.all(
-      queries.map(async (query) => {
-        if (serpCapable) {
-          return serpCapable.searchWithDiagnostics(query, { maxResults: 6 });
-        }
+    const serpOutcomes: Array<{
+      hits: Awaited<ReturnType<typeof this.webSearch.search>>;
+      diagnostic: undefined | Awaited<
+        ReturnType<BrightDataWebSearchProvider['searchWithDiagnostics']>
+      >['diagnostic'];
+    }> = [];
+    for (const query of queries) {
+      if (serpCapable) {
+        serpOutcomes.push(
+          await serpCapable.searchWithDiagnostics(query, { maxResults: 6 }),
+        );
+      } else {
         const hits = await this.webSearch.search(query, { maxResults: 6 });
-        return { hits, diagnostic: undefined };
-      }),
+        serpOutcomes.push({ hits, diagnostic: undefined });
+      }
+    }
+    const searchHits = filterBrandDiscoverySearchHits(
+      serpOutcomes.flatMap((o) => o.hits),
     );
-    const searchHits = serpOutcomes.flatMap((o) => o.hits);
     const serpDiagnostics = serpOutcomes
       .map((o) => o.diagnostic)
       .filter((d): d is NonNullable<typeof d> => d != null);

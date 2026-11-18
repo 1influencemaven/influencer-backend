@@ -14,10 +14,10 @@ import {
   BrandDiscoveryStatus,
   EvidenceStatus,
 } from '../generated/prisma/enums';
-import { MODEL_PRIOR_FIT_REASON } from './utils/brand-score-grounding.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { BrandDiscoveryAiOrchestrator } from './brand-discovery-ai.orchestrator';
 import { BrandDiscoveryAiOrchestratorError } from './brand-discovery-ai.orchestrator.errors';
+import { BrandDiscoveryResearchService } from './brand-discovery-research.service';
 import {
   BrandDiscoveryService,
   brandCandidateSelect,
@@ -31,6 +31,15 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
 
   const discover = jest.fn();
   const orchestrate = jest.fn();
+  const enrichCandidates = jest.fn(
+    async (candidates: RawBrandCandidate[]) => ({
+      candidates,
+      researchedCount: 0,
+      researchFailedCount: 0,
+      researchPartialCount: 0,
+      researchConcurrency: 2,
+    }),
+  );
 
   const prismaService = {
     brandDiscoveryRun: {
@@ -128,6 +137,10 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
           useValue: { orchestrate },
         },
         {
+          provide: BrandDiscoveryResearchService,
+          useValue: { enrichCandidates },
+        },
+        {
           provide: getQueueToken(QUEUES.PROSPECTING),
           useValue: prospectingQueue,
         },
@@ -136,6 +149,13 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
 
     service = module.get(BrandDiscoveryService);
     jest.clearAllMocks();
+    enrichCandidates.mockImplementation(async (candidates: RawBrandCandidate[]) => ({
+      candidates,
+      researchedCount: 0,
+      researchFailedCount: 0,
+      researchPartialCount: 0,
+      researchConcurrency: 2,
+    }));
 
     configService.get.mockImplementation((key: string) => {
       if (key === 'BRAND_DISCOVERY_ENGINE') return 'legacy';
@@ -202,6 +222,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
     });
 
     await service.executeDiscovery('run-2', 'inf-1');
@@ -235,6 +256,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
     });
 
     await service.executeDiscovery('run-2', 'inf-1');
@@ -268,6 +290,48 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
     ).toBe(true);
   });
 
+  it('keeps global-market brands when IBP markets are regional (mastra)', async () => {
+    configService.get.mockImplementation((key: string) =>
+      key === 'BRAND_DISCOVERY_ENGINE' ? 'mastra' : undefined,
+    );
+    prismaService.brandDiscoveryRun.findUnique.mockResolvedValue({
+      id: 'run-2',
+      influencerId: 'inf-1',
+      limit: 5,
+      status: BrandDiscoveryStatus.PROCESSING,
+      ibpSnapshot: { ...ibpSnapshot, markets: ['Spain', 'LATAM'] },
+    });
+    prismaService.brandCandidate.findMany.mockResolvedValue([]);
+    orchestrate.mockResolvedValue({
+      queries: ['q1'],
+      searchHits: [
+        { title: 'GlobalCo', url: 'https://globalco.example/about', content: 'x' },
+        { title: 'LocalCo', url: 'https://localco.example/about', content: 'y' },
+      ],
+      searchHitsCount: 2,
+      brands: [
+        scored('GlobalCo', 'globalco.example', { market: 'global' }),
+        scored('LocalCo', 'localco.example', { market: 'Spain' }),
+        scored('UsOnly', 'usonly.example', { market: 'USA' }),
+      ],
+      planExecutionId: 'plan-1',
+      scoreExecutionId: 'score-1',
+      strategy: 'llm',
+      plannedQueriesCount: 1,
+      validatedQueriesCount: 1,
+      fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
+    });
+
+    await service.executeDiscovery('run-2', 'inf-1');
+
+    const names =
+      prismaService.brandCandidate.createMany.mock.calls[0][0].data.map(
+        (row: { name: string }) => row.name,
+      );
+    expect(names).toEqual(['GlobalCo', 'LocalCo']);
+  });
+
   it('applies hard filters on mastra path (excluded sector)', async () => {
     configService.get.mockImplementation((key: string) =>
       key === 'BRAND_DISCOVERY_ENGINE' ? 'mastra' : undefined,
@@ -290,6 +354,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
     });
 
     await service.executeDiscovery('run-2', 'inf-1');
@@ -328,6 +393,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
     });
 
     await service.executeDiscovery('run-2', 'inf-1');
@@ -358,6 +424,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
     });
 
     await service.executeDiscovery('run-2', 'inf-1');
@@ -383,6 +450,8 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
+      serpQueryFallbackUsed: false,
     });
 
     await service.executeDiscovery('run-2', 'inf-1');
@@ -399,12 +468,48 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
           scoreExecutionId: 'score-empty-serp',
           scoredBrandsCount: 0,
           persistedCount: 0,
+          skippedPersistReason: 'NO_SERP_HITS',
         }),
       }),
     });
   });
 
-  it('persists UNVERIFIED brands when domain is outside SERP allowlist (mastra)', async () => {
+  it('skips persisting SCORE inventados when searchHitsCount is 0 (mastra)', async () => {
+    configService.get.mockImplementation((key: string) =>
+      key === 'BRAND_DISCOVERY_ENGINE' ? 'mastra' : undefined,
+    );
+    prismaService.brandCandidate.findMany.mockResolvedValue([]);
+    orchestrate.mockResolvedValue({
+      queries: ['q1'],
+      searchHits: [],
+      searchHitsCount: 0,
+      brands: [scored('Invented Co', 'invented.example')],
+      planExecutionId: 'plan-1',
+      scoreExecutionId: 'score-1',
+      strategy: 'llm',
+      plannedQueriesCount: 1,
+      validatedQueriesCount: 1,
+      fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
+      serpQueryFallbackUsed: true,
+    });
+
+    await service.executeDiscovery('run-2', 'inf-1');
+
+    expect(prismaService.brandCandidate.createMany).not.toHaveBeenCalled();
+    expect(prismaService.brandDiscoveryRun.update).toHaveBeenCalledWith({
+      where: { id: 'run-2' },
+      data: expect.objectContaining({
+        searchMetadata: expect.objectContaining({
+          skippedPersistReason: 'NO_SERP_HITS',
+          persistedCount: 0,
+          serpQueryFallbackUsed: true,
+        }),
+      }),
+    });
+  });
+
+  it('does not persist MODEL_PRIOR when SERP hits are for a foreign domain (mastra)', async () => {
     configService.get.mockImplementation((key: string) =>
       key === 'BRAND_DISCOVERY_ENGINE' ? 'mastra' : undefined,
     );
@@ -426,25 +531,12 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
     });
 
     await service.executeDiscovery('run-2', 'inf-1');
 
-    expect(prismaService.brandCandidate.createMany).toHaveBeenCalledWith({
-      data: [
-        expect.objectContaining({
-          name: 'Fake',
-          domain: 'fake.example',
-          evidenceUrls: [],
-          evidenceStatus: EvidenceStatus.UNVERIFIED,
-          score: 55,
-          fitReason: MODEL_PRIOR_FIT_REASON,
-          metadata: expect.objectContaining({
-            groundingSource: 'MODEL_PRIOR',
-          }),
-        }),
-      ],
-    });
+    expect(prismaService.brandCandidate.createMany).not.toHaveBeenCalled();
     expect(prismaService.brandDiscoveryRun.update).toHaveBeenCalledWith({
       where: { id: 'run-2' },
       data: expect.objectContaining({
@@ -455,7 +547,9 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
           discardedByEvidenceCount: 0,
           evidenceAcceptedCount: 0,
           evidenceRejectedCount: 0,
-          persistedCount: 1,
+          skippedModelPriorCount: 1,
+          persistedCount: 0,
+          skippedPersistReason: 'MODEL_PRIOR_WITHOUT_DOMAIN_EVIDENCE',
         }),
       }),
     });
@@ -489,6 +583,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
     });
 
     await service.executeDiscovery('run-2', 'inf-1');
@@ -612,6 +707,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
     });
     prismaService.$transaction.mockRejectedValue(new Error('db down'));
 
@@ -645,6 +741,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 2,
       validatedQueriesCount: 1,
       fallbackUsed: true,
+      geoLensesMode: 'legacy' as const,
     });
 
     await service.executeDiscovery('run-2', 'inf-1');
@@ -662,6 +759,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
           scoredBrandsCount: 1,
           evidenceAcceptedCount: 1,
           fallbackUsed: true,
+      geoLensesMode: 'legacy' as const,
           persistedCount: 1,
         }),
       },
@@ -738,6 +836,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       plannedQueriesCount: 1,
       validatedQueriesCount: 1,
       fallbackUsed: false,
+      geoLensesMode: 'legacy' as const,
       searchHitsCount: 6,
     };
     discover.mockResolvedValue({
@@ -857,6 +956,10 @@ describe('BrandDiscoveryService.removeCandidate', () => {
           useValue: { orchestrate: jest.fn() },
         },
         {
+          provide: BrandDiscoveryResearchService,
+          useValue: { enrichCandidates: jest.fn() },
+        },
+        {
           provide: getQueueToken(QUEUES.PROSPECTING),
           useValue: prospectingQueue,
         },
@@ -942,6 +1045,10 @@ describe('BrandDiscoveryService.listCandidates (evidenceStatus API)', () => {
         {
           provide: BrandDiscoveryAiOrchestrator,
           useValue: { orchestrate: jest.fn() },
+        },
+        {
+          provide: BrandDiscoveryResearchService,
+          useValue: { enrichCandidates: jest.fn() },
         },
         {
           provide: getQueueToken(QUEUES.PROSPECTING),

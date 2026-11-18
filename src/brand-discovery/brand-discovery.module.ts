@@ -11,6 +11,7 @@ import { QUEUES } from '../bullmq/queue.constants';
 import { BrightDataModule } from '../integrations/brightdata';
 import { BrandDiscoveryAiOrchestrator } from './brand-discovery-ai.orchestrator';
 import { BrandDiscoveryController } from './brand-discovery.controller';
+import { BrandDiscoveryResearchService } from './brand-discovery-research.service';
 import { BrandDiscoveryService } from './brand-discovery.service';
 import {
   BrandSourceRegistry,
@@ -36,6 +37,7 @@ import { MockBrandSource } from './providers/mock.brand-source';
   controllers: [BrandDiscoveryController],
   providers: [
     BrandDiscoveryService,
+    BrandDiscoveryResearchService,
     FindBrandsProcessor,
     BrightDataWebSearchProvider,
     BrandDiscoveryAiOrchestrator,

@@ -2,70 +2,99 @@ import type { IbpCriteriaSnapshot } from '@influence-maven/ai-contracts';
 
 /**
  * Fixed commercial search-strategy guidance for Brand Discovery PLAN_SEARCH.
- * AI-004.5.4: stronger IBP coverage, commercial diversity, influencer-name quota.
+ * Product/service category discovery first; collaboration modes are optional modifiers.
  * Query count caps are supplied per request via maxQueries in the user prompt.
  */
 export const DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS = `You are a search strategy assistant for influencer marketing.
 
 OBJECTIVE:
-Generate search queries that help discover realistic commercial brand opportunities for a specific influencer — companies that may partner, sponsor, affiliate, or run creator programs — NOT pages that merely mention the influencer's name.
+Generate Google search queries that surface REAL companies selling SPECIFIC products or services relevant to this influencer's Ideal Brand Profile (IBP) — corporate brand sites, DTC shops, specialized service companies — that could be realistic commercial prospects.
+
+UGC, brand ambassador, affiliate, and partnerships are collaboration MODES / opportunity signals, NOT company categories by themselves. Do not make those words the primary subject of every query.
+
+STEP 0 — EXPAND ABSTRACT IBP INTO CONCRETE COMMERCIAL CATEGORIES (before writing queries):
+- Read targetSectors, niche, sub-niche, content niches, summary, and useful desirableCriteria
+- Convert abstract sectors into sellable product/service types grounded in THAT context
+  (e.g. maternity → apparel, breastfeeding products, baby care, prenatal/postpartum services —
+   entrepreneurship → education courses, small-business coaching, solopreneur tools —
+   personal development → courses, coaching, related wellness products)
+- Ignore hashtag-only or "Hashtags related to…" desirableCriteria when choosing categories
+- Do NOT invent categories unrelated to the IBP; do NOT copy example phrases verbatim
 
 PRIORITY (highest first):
-1. Commercial realism (brands that may actually partner with creators)
-2. Fit to IBP targetSectors + niche (sector/product reality)
-3. Market fit (IBP markets)
-4. Creator / partnership / affiliate / sponsorship signals
-5. Brand size alignment (IBP brandSize when present)
-6. Brand fame (lowest — do NOT optimize for famous brands)
+1. Concrete product or service categories (not bare sector names)
+2. Market / geography fit (IBP markets; else influencer country)
+3. Companies that sell those products/services (brands, DTC, specialized services)
+4. Optional collaboration-mode modifiers (creator, ambassador, affiliate, UGC) on AT MOST one query when it improves discovery
+5. Brand size alignment (IBP brandSize when present) as a soft modifier — never invent sizes
+6. Brand fame (lowest — do NOT optimize for famous airlines, mega-corps, or household names)
 
 QUERY RECIPE (each query MUST):
-- Ground in IBP targetSectors and/or the influencer niche when those values exist — do not invent sectors
-- Include IBP markets when markets are non-empty — do not invent markets
-- Include exactly one clear commercial intent (see diversity slots below)
-- Prefer brandSize and collaborationTypes as modifiers when present (do not invent sizes or collaboration types)
-- Optionally weave desirableCriteria as positive filters and avoid phrasing that triggers alertSignals
-- Be specific enough to find companies, not listicles or directories
+- Combine: (CONCRETE product OR service category) + (market/geography) + (company/brand language such as "brands", "companies", "DTC", "products", or "services")
+- The category must name what is sold (apparel, courses, coaching, baby care, skincare, software for solopreneurs, …) — not only the niche word
+- Include IBP markets when markets are non-empty — do not invent markets; keep each query geographically coherent
+- Prefer brandSize only as an optional soft modifier when present
+- Be specific enough to find company websites, not listicles, directories, org charts, or news roundups
+- Discover brands that SELL or are AVAILABLE in the market — including international / global ecommerce brands (e.g. Asian marketplaces) when relevant. Prefer phrasing like "brands selling in {market}", "international brands available in {market}", "products available in {market}"
+- Do NOT restrict discovery to company HQ / country of incorporation. Avoid "headquartered in", "based in", "founded in {country}" unless that is the explicit research question (it is not)
 
-COMMERCIAL DIVERSITY (aim for distinct intents across the set; do NOT pad empty slots):
-When maxQueries allows and the IBP supports it, cover different angles such as:
-1. Brand / creator partnerships (influencer marketing, brand collaborations)
-2. Affiliate / performance programs
-3. Ambassador / sponsorship opportunities
-4. One IBP-specific angle (e.g. collaborationTypes, emerging/DTC, niche product line, regional mid-market)
-
-If the IBP cannot support four distinct intents, return FEWER queries. Never invent IBP fields to fill slots. Never create near-duplicate queries that only swap synonyms.
+CATEGORY DIVERSITY (when maxQueries >= 2):
+- Each query should target a DIFFERENT concrete product/service category (or a clearly different market×category pair)
+- Do NOT emit near-duplicates that only swap synonyms or word order
+- Do NOT emit a set where most queries are about "brand ambassador", "UGC programs", or "influencer marketing" without a product/service category
+- Do NOT emit multiple queries that only restate the same abstract sector (e.g. four variants of "entrepreneurship brands")
+- At most ONE query in the set may lead with a collaboration-mode signal; the rest must lead with product/service categories
+- Return fewer than maxQueries if the IBP cannot support distinct concrete categories. Never invent IBP fields to fill slots
 
 INFLUENCER NAME QUOTA (hard rule):
 - Prefer ZERO queries that contain the influencer's personal name
-- At most ONE query in the whole set may include the influencer's name, and only when it clearly improves commercial discovery (e.g. known partnership context)
+- At most ONE query in the whole set may include the influencer's name, and only when it clearly improves commercial discovery
 - Never make the influencer name the primary subject of most queries
-- Never generate a set where a majority of queries contain the influencer name
 
-COMMERCIAL SIGNALS TO FAVOR IN QUERY LANGUAGE (adapt to the IBP; do not paste all into every query):
-- influencer partnerships, creator partnerships, creator programs
-- affiliate programs, ambassador programs, sponsorships
-- brand collaborations, UGC opportunities, influencer marketing
+GOOD SHAPE (patterns only — derive categories from THIS influencer's IBP; do not copy these strings):
+- "{concrete product category} brands selling in {market}"
+- "{concrete service category} companies {market}"
+- "{concrete product category} DTC {market}"
+- "{concrete product category} international brands available in {market}"
+- optionally one: "{concrete product category} {market} creator partnerships" or similar
 
-ALSO ALLOW when grounded in the IBP:
-- emerging / DTC / ecommerce / specialized niche / mid-market / regional brands
+BAD SHAPE (reject — too broad / mode-led / non-commercial):
+- "entrepreneurship brands LATAM" (sector + market only)
+- "maternity products United States" (sector + generic "products" + market)
+- "personal development companies LATAM" (abstract sector only)
+- "smb startups entrepreneurship United States" (size + sector, no sellable category)
+- "personal development brand ambassador" (mode without product category)
+- "startup maternity UGC programs" (mode-led, vague)
+- "brands headquartered in United States" (HQ restriction — not commercial availability)
+- "best brands …", directories, "list of companies", article-only phrasing
 
 STRICT RULES:
 - Return ONLY search query strings — not brands, websites, contacts, emails, people, or scores
 - Stay grounded in the provided IBP fields; do not invent markets, sectors, brand sizes, collaboration types, or brand names
+- Prefer influencer country when IBP markets are empty; when both exist, prefer IBP markets and keep queries geographically coherent
+- Never put follower counts, engagement %, or "k followers" into queries — use those only as mental scale when choosing brand-size language
 - Respect markets and targetSectors; never include excludedSectors terms in queries
 - Consider collaborationTypes, brandSize, desirableCriteria, alertSignals, and summary when present
-- Avoid overly generic queries ("brands that work with influencers" with no sector/market)
+- Keep each query short and specific
 - NEVER use "best brands", "top brands", "best companies", "top companies", or ranking/listicle phrasing
-- Avoid company directories, "list of companies", "brands directory", or article-only discovery phrasing
+- Avoid company directories, "list of companies", "brands directory", org-chart sites, or article-only discovery phrasing
 - Do not invent programs, companies, or relationships
 - Do not return URLs or emails
-- Prefer quality and diversity over reaching the maximum query count`;
+- Prefer quality and distinct concrete categories over reaching the maximum query count`;
 
 export type BrandDiscoveryPlanPromptInput = {
   influencerName: string;
   niche?: string | null;
+  subNiche?: string | null;
+  niches?: string[] | null;
+  country?: string | null;
+  language?: string | null;
+  followers?: number | null;
+  engagement?: number | null;
   ibp: IbpCriteriaSnapshot;
   maxQueries: number;
+  /** Settings Brand Discovery prompt (business strategy for queries). */
+  businessInstructions?: string;
 };
 
 function buildPlanOutputContract(maxQueries: number): string {
@@ -90,7 +119,7 @@ function formatList(label: string, values: string[]): string {
 }
 
 /**
- * Labeled IBP sections for model attention (AI-004.5.4), plus raw JSON for completeness.
+ * Labeled IBP sections for model attention, plus raw JSON for completeness.
  */
 export function formatBrandDiscoveryPlanIbpSections(
   ibp: IbpCriteriaSnapshot,
@@ -100,17 +129,46 @@ export function formatBrandDiscoveryPlanIbpSections(
     formatList('EXCLUDED SECTORS (never use in queries)', ibp.excludedSectors),
     formatList('MARKETS', ibp.markets),
     formatList('BRAND SIZES', ibp.brandSize),
-    formatList('COLLABORATION TYPES', ibp.collaborationTypes),
+    formatList(
+      'COLLABORATION TYPES (optional modifiers — not primary query subjects)',
+      ibp.collaborationTypes,
+    ),
     formatList('DESIRABLE CRITERIA', ibp.desirableCriteria),
     formatList('ALERT SIGNALS (avoid triggering)', ibp.alertSignals),
     `SUMMARY: ${ibp.summary?.trim() || '(none provided — do not invent)'}`,
   ].join('\n');
 }
 
+function formatOptional(label: string, value: string | number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return `${label}: (not provided — do not invent)`;
+  }
+  if (typeof value === 'string' && !value.trim()) {
+    return `${label}: (not provided — do not invent)`;
+  }
+  return `${label}: ${typeof value === 'string' ? value.trim() : value}`;
+}
+
+function formatInfluencerProfileSection(input: BrandDiscoveryPlanPromptInput): string {
+  const niches = (input.niches ?? []).map((n) => n.trim()).filter(Boolean);
+  return [
+    formatOptional('Name', input.influencerName),
+    formatOptional('Niche', input.niche),
+    formatOptional('Sub-niche', input.subNiche),
+    niches.length > 0
+      ? `Content niches: ${niches.join('; ')}`
+      : 'Content niches: (not provided — do not invent)',
+    formatOptional('Country / base location', input.country),
+    formatOptional('Language', input.language),
+    formatOptional('Followers', input.followers),
+    formatOptional('Engagement %', input.engagement),
+  ].join('\n');
+}
+
 /**
- * User prompt for PLAN_SEARCH. Embeds the full commercial strategy (Agent.instructions are neutral).
- * Does not include instructions.business or scoring copy.
- * The LLM returns only { queries }; the runner adds operation: PLAN_SEARCH.
+ * User prompt for PLAN_SEARCH.
+ * Settings business instructions (when present) steer query strategy for this influencer;
+ * operational constraints stay fixed in code. LLM returns only { queries }.
  */
 export function buildBrandDiscoveryPlanUserPrompt(
   input: BrandDiscoveryPlanPromptInput,
@@ -118,13 +176,20 @@ export function buildBrandDiscoveryPlanUserPrompt(
   const outputContract = buildPlanOutputContract(input.maxQueries);
   const ibpSections = formatBrandDiscoveryPlanIbpSections(input.ibp);
   const ibpJson = JSON.stringify(input.ibp, null, 2);
+  const business = input.businessInstructions?.trim() ?? '';
+  const businessSection = business
+    ? `SEARCH STRATEGY (Settings business instructions — apply when crafting queries for THIS influencer; ignore pure scoring-only lines if present):
+${business}
 
-  return `${DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS}
+`
+    : '';
+
+  return `${businessSection}${DEFAULT_BRAND_DISCOVERY_PLAN_INSTRUCTIONS}
 
 ${outputContract}
 
-Influencer name: ${input.influencerName}
-Niche: ${input.niche?.trim() || 'n/a'}
+INFLUENCER PROFILE (from the product form — ground queries in this reality):
+${formatInfluencerProfileSection(input)}
 Max queries: ${input.maxQueries}
 
 Ideal Brand Profile (use these labeled fields; do not invent missing ones):
@@ -133,7 +198,15 @@ ${ibpSections}
 Ideal Brand Profile (JSON, same data):
 ${ibpJson}
 
-Return AT MOST ${input.maxQueries} search queries with distinct commercial intents. Prefer fewer high-quality queries over padding. Prefer zero queries that include "${input.influencerName}".`;
+Return AT MOST ${input.maxQueries} search queries with DISTINCT CONCRETE product/service categories (and markets).
+First expand abstract IBP sectors/niches into sellable categories; then write one query per category×market.
+Ground geography in influencer country and/or IBP markets.
+Do NOT emit sector+market-only queries (bad: "maternity products United States", "entrepreneurship brands LATAM").
+Collaboration types are optional modifiers on at most one query — not the theme of the whole set.
+Do NOT emit queries whose main subject is UGC, ambassador, affiliate, or partnerships without a concrete product/service category and company language (brands/companies/products/services/DTC).
+Ignore hashtag-only desirableCriteria when inventing categories.
+Use followers/engagement only to judge brand-size fit mentally — never as literal query tokens.
+Prefer fewer high-quality concrete-category queries over padding. Prefer zero queries that include "${input.influencerName}".`;
 }
 
 /**
@@ -155,5 +228,5 @@ ${params.previousRaw}
 
 ${outputContract}
 
-Return ONLY the corrected JSON with a "queries" array of search strings. Remember: at most one query may contain the influencer name; prefer zero; do not invent IBP fields.`;
+Return ONLY the corrected JSON with a "queries" array of search strings. Remember: at most one query may contain the influencer name; prefer zero; lead with CONCRETE product/service categories (not bare sectors); each query a distinct category; do not invent IBP fields.`;
 }

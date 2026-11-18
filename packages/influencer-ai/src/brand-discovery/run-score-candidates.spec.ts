@@ -116,7 +116,7 @@ describe('runBrandDiscoveryScoreCandidates', () => {
 
     expect(result.ok).toBe(true);
     expect(agent.generate).toHaveBeenCalledTimes(1);
-    expect(agent.generate.mock.calls[0][0]).toContain('Influencer: Ana Fit');
+    expect(agent.generate.mock.calls[0][0]).toContain('Name: Ana Fit');
     expect(agent.generate.mock.calls[0][0]).toContain('SERP scenario: A');
     expect(agent.generate.mock.calls[0][0]).toContain('Limit: 2');
     expect(agent.generate.mock.calls[0][0]).toContain(
@@ -207,7 +207,7 @@ describe('runBrandDiscoveryScoreCandidates', () => {
 
     expect(result.ok).toBe(true);
     expect(agent.generate).toHaveBeenCalledTimes(2);
-    expect(agent.generate.mock.calls[0][0]).toContain('Influencer: Ana Fit');
+    expect(agent.generate.mock.calls[0][0]).toContain('Name: Ana Fit');
     expect(agent.generate.mock.calls[1][0]).toContain(
       'invalid JSON for brand discovery scoring',
     );

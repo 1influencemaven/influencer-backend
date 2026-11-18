@@ -20,6 +20,7 @@ import {
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { BrandDiscoveryAiOrchestrator } from './brand-discovery-ai.orchestrator';
+import { BrandDiscoveryResearchService } from './brand-discovery-research.service';
 import { BrandSourceRegistry } from './brand-source.registry';
 import { SearchBrandsDto } from './dto/search-brands.dto';
 import { UpdateBrandCandidateStatusDto } from './dto/update-brand-candidate-status.dto';
@@ -35,6 +36,7 @@ import {
   excludeExistingDomains,
   normalizeDomain,
 } from './utils/brand-domain.util';
+import { filterBrandsByCommercialEligibility } from './utils/brand-commercial-eligibility.util';
 import { filterScoredBrandsByEvidence } from './utils/brand-evidence-filter.util';
 import { enrichScoredBrandForPersistence } from './utils/brand-score-grounding.util';
 
@@ -89,6 +91,7 @@ export class BrandDiscoveryService {
     private readonly aiPromptsService: AiPromptsService,
     private readonly brandSourceRegistry: BrandSourceRegistry,
     private readonly brandDiscoveryAiOrchestrator: BrandDiscoveryAiOrchestrator,
+    private readonly brandDiscoveryResearchService: BrandDiscoveryResearchService,
     @InjectQueue(QUEUES.PROSPECTING)
     private readonly prospectingQueue: Queue,
   ) {}
@@ -317,12 +320,24 @@ export class BrandDiscoveryService {
             influencerId,
             influencerName: influencer.name,
             niche: influencer.niche,
+            subNiche: influencer.subNiche,
+            niches: influencer.niches,
+            country: influencer.country,
+            language: influencer.language,
+            followers: influencer.followers,
+            engagement:
+              influencer.engagement != null
+                ? Number(influencer.engagement)
+                : null,
             ibp,
             limit: fetchLimit,
             promptInstructions: instructions,
           });
 
-        const evidence = filterScoredBrandsByEvidence(orchestrated.brands, {
+        const commercial = filterBrandsByCommercialEligibility(
+          orchestrated.brands,
+        );
+        const evidence = filterScoredBrandsByEvidence(commercial.eligible, {
           searchHits: orchestrated.searchHits,
         });
 
@@ -374,7 +389,55 @@ export class BrandDiscoveryService {
         const filtered = this.applyHardFilters(rawCandidates, ibp);
         const unique = dedupeByDomain(filtered) as typeof filtered;
         const novel = excludeExistingDomains(unique, existingDomains);
-        const toPersist = novel.slice(0, run.limit);
+        // Prefer VERIFIED, then grounded UNVERIFIED (SEED). Never persist inventados
+        // when SERP was empty, and never persist MODEL_PRIOR (foreign SERP ≠ domain claim).
+        const orderedNovel = [
+          ...novel.filter((c) => c.evidenceStatus === 'VERIFIED'),
+          ...novel.filter((c) => c.evidenceStatus !== 'VERIFIED'),
+        ];
+        const skippedPersistNoSerp = orchestrated.searchHitsCount === 0;
+        const withoutModelPrior = orderedNovel.filter(
+          (c) => c.groundingSource !== 'MODEL_PRIOR',
+        );
+        const skippedModelPriorCount =
+          orderedNovel.length - withoutModelPrior.length;
+        let toPersist = skippedPersistNoSerp
+          ? []
+          : withoutModelPrior.slice(0, run.limit);
+
+        let researchedCount = 0;
+        let researchFailedCount = 0;
+        let researchPartialCount = 0;
+        let researchConcurrency: number | undefined;
+
+        if (toPersist.length > 0) {
+          const enriched =
+            await this.brandDiscoveryResearchService.enrichCandidates(
+              toPersist,
+              {
+                runId,
+                userId: BRAND_DISCOVERY_MASTRA_ACTOR_USER_ID,
+                influencerId,
+                influencerName: influencer.name,
+                niche: influencer.niche,
+                subNiche: influencer.subNiche,
+                country: influencer.country,
+                language: influencer.language,
+                followers: influencer.followers,
+                engagement:
+                  influencer.engagement != null
+                    ? Number(influencer.engagement)
+                    : null,
+                ibp,
+                promptInstructions: instructions,
+              },
+            );
+          toPersist = enriched.candidates;
+          researchedCount = enriched.researchedCount;
+          researchFailedCount = enriched.researchFailedCount;
+          researchPartialCount = enriched.researchPartialCount;
+          researchConcurrency = enriched.researchConcurrency;
+        }
 
         searchMetadata = {
           engine: 'mastra',
@@ -383,10 +446,46 @@ export class BrandDiscoveryService {
           plannedQueriesCount: orchestrated.plannedQueriesCount,
           validatedQueriesCount: orchestrated.validatedQueriesCount,
           fallbackUsed: orchestrated.fallbackUsed,
+          ...(orchestrated.planQueryValidation
+            ? { planQueryValidation: orchestrated.planQueryValidation }
+            : {}),
+          serpQueryFallbackUsed: orchestrated.serpQueryFallbackUsed,
+          geoLensesMode: orchestrated.geoLensesMode,
+          ...(orchestrated.serpLenses
+            ? { serpLenses: orchestrated.serpLenses }
+            : {}),
+          ...(orchestrated.unresolvedSerpRegions
+            ? { unresolvedSerpRegions: orchestrated.unresolvedSerpRegions }
+            : {}),
+          ...(orchestrated.serpCallsPlanned != null
+            ? { serpCallsPlanned: orchestrated.serpCallsPlanned }
+            : {}),
+          ...(orchestrated.serpCallsExecuted != null
+            ? { serpCallsExecuted: orchestrated.serpCallsExecuted }
+            : {}),
+          ...(orchestrated.serpCallsOmitted != null
+            ? { serpCallsOmitted: orchestrated.serpCallsOmitted }
+            : {}),
+          ...(orchestrated.serpCallsMax != null
+            ? { serpCallsMax: orchestrated.serpCallsMax }
+            : {}),
+          ...(orchestrated.hitGeoAttribution
+            ? { hitGeoAttribution: orchestrated.hitGeoAttribution }
+            : {}),
           searchHitsCount: orchestrated.searchHitsCount,
           planExecutionId: orchestrated.planExecutionId,
           scoreExecutionId: orchestrated.scoreExecutionId,
           scoredBrandsCount: orchestrated.brands.length,
+          commercialEligibleCount: commercial.eligible.length,
+          commercialDiscardedCount: commercial.discarded.length,
+          commercialDiscardReasons: commercial.discarded.reduce(
+            (acc, row) => {
+              const key = row.eligibility.reason;
+              acc[key] = (acc[key] ?? 0) + 1;
+              return acc;
+            },
+            {} as Record<string, number>,
+          ),
           verifiedCount: evidence.verified.length,
           unverifiedCount: evidence.unverified.length,
           discardedByEvidenceCount: evidence.discarded.length,
@@ -396,8 +495,22 @@ export class BrandDiscoveryService {
           afterHardFiltersCount: filtered.length,
           afterDedupeCount: unique.length,
           afterExcludeExistingCount: novel.length,
+          skippedModelPriorCount,
           persistedCount: toPersist.length,
+          researchedCount,
+          researchFailedCount,
+          researchPartialCount,
+          ...(researchConcurrency != null ? { researchConcurrency } : {}),
+          ...(skippedPersistNoSerp
+            ? { skippedPersistReason: 'NO_SERP_HITS' as const }
+            : skippedModelPriorCount > 0 && toPersist.length === 0
+              ? {
+                  skippedPersistReason:
+                    'MODEL_PRIOR_WITHOUT_DOMAIN_EVIDENCE' as const,
+                }
+              : {}),
           serpDiagnostics: orchestrated.serpDiagnostics ?? [],
+          serpHitFilter: orchestrated.serpHitFilter,
         };
 
         await this.persistDiscoveryResult({
@@ -528,11 +641,7 @@ export class BrandDiscoveryService {
       }
 
       if (markets.size > 0 && candidate.market) {
-        const market = candidate.market.trim().toLowerCase();
-        const marketOk = [...markets].some(
-          (allowed) => market.includes(allowed) || allowed.includes(market),
-        );
-        if (!marketOk) {
+        if (!isIbpCompatibleMarket(candidate.market, markets)) {
           return false;
         }
       }
@@ -540,6 +649,32 @@ export class BrandDiscoveryService {
       return true;
     });
   }
+}
+
+/** Global / worldwide brands stay eligible against regional IBP markets. */
+const GLOBAL_MARKET_TOKENS = [
+  'global',
+  'worldwide',
+  'international',
+  'multinational',
+  'multi-market',
+  'multi market',
+] as const;
+
+export function isIbpCompatibleMarket(
+  candidateMarket: string,
+  ibpMarkets: ReadonlySet<string>,
+): boolean {
+  const market = candidateMarket.trim().toLowerCase();
+  if (!market) {
+    return true;
+  }
+  if (GLOBAL_MARKET_TOKENS.some((token) => market.includes(token))) {
+    return true;
+  }
+  return [...ibpMarkets].some(
+    (allowed) => market.includes(allowed) || allowed.includes(market),
+  );
 }
 
 export type BrandDiscoveryRunRecord = Prisma.BrandDiscoveryRunGetPayload<{

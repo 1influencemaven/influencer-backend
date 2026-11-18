@@ -60,7 +60,8 @@ export type BrandDiscoverySerpQueryDiagnostic = {
     | 'empty_body'
     | 'parse_error'
     | 'http_error'
-    | 'network_error';
+    | 'network_error'
+    | 'omitted';
   httpStatus: number;
   responseBytes: number;
   latencyMs: number;
@@ -68,6 +69,13 @@ export type BrandDiscoverySerpQueryDiagnostic = {
   organicResultsCount: number;
   parseError?: string;
   zone?: string;
+  /** P1b additive geo attribution (optional for legacy runs). */
+  gl?: string;
+  hl?: string;
+  marketLabel?: string;
+  lensRole?: string;
+  queryTargetMarket?: string | null;
+  omitReason?: string;
 };
 
 export type BrandSearchMetadata = {
@@ -77,6 +85,10 @@ export type BrandSearchMetadata = {
   plannedQueriesCount: number;
   validatedQueriesCount: number;
   fallbackUsed: boolean;
+  /** At least one planned SERP query used a short simplified retry. */
+  serpQueryFallbackUsed?: boolean;
+  /** When set, Nest skipped persisting inventados (e.g. SERP returned 0 hits). */
+  skippedPersistReason?: 'NO_SERP_HITS';
   searchHitsCount: number;
   planExecutionId?: string | null;
   scoreExecutionId?: string | null;
@@ -94,8 +106,62 @@ export type BrandSearchMetadata = {
   afterDedupeCount?: number;
   afterExcludeExistingCount?: number;
   persistedCount?: number;
+  /** Deep research (RESEARCH_BRAND) counters — mastra path only. */
+  researchedCount?: number;
+  researchFailedCount?: number;
+  researchPartialCount?: number;
+  researchConcurrency?: number;
   /** AI-004.5.1.1 — one entry per SERP query (order matches `queries`). */
   serpDiagnostics?: BrandDiscoverySerpQueryDiagnostic[];
+  /**
+   * Soft SERP hit filter audit (noise hosts, dedupe) before SCORE.
+   * No HTML bodies — URLs/titles/reasons only.
+   */
+  serpHitFilter?: {
+    receivedCount: number;
+    keptCount: number;
+    discardedCount: number;
+    duplicateDomainCount: number;
+    noiseHostCount: number;
+    invalidUrlCount: number;
+    fallbackToRaw: boolean;
+    keptDomains: string[];
+    discarded: Array<{
+      title: string;
+      url: string;
+      domain: string;
+      reason: 'noise_host' | 'duplicate_domain' | 'invalid_url';
+    }>;
+  };
+  /** P1b — geographic lens mode actually used for this run. */
+  geoLensesMode?: 'legacy' | 'v1';
+  /** P1b — planned lenses (deduped). */
+  serpLenses?: Array<{
+    role: string;
+    marketLabel: string;
+    gl: string;
+    hl: string;
+    regionLabel?: string;
+  }>;
+  unresolvedSerpRegions?: Array<{
+    regionLabel: string;
+    reason: string;
+  }>;
+  serpCallsPlanned?: number;
+  serpCallsExecuted?: number;
+  serpCallsOmitted?: number;
+  serpCallsMax?: number;
+  /** Domains kept after dedupe with multi-lens market attribution. */
+  hitGeoAttribution?: Array<{
+    domain: string;
+    marketsSeen: string[];
+    serpLenses: Array<{
+      marketLabel: string;
+      role: string;
+      gl: string;
+      hl: string;
+    }>;
+  }>;
 };
 
 export type BrandDiscoverResult = {

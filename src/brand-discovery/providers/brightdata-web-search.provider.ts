@@ -71,7 +71,7 @@ export class BrightDataWebSearchProvider implements WebSearchProvider {
 
   async search(
     query: string,
-    options?: { maxResults?: number },
+    options?: { maxResults?: number; geo?: { hl?: string; gl?: string } },
   ): Promise<WebSearchHit[]> {
     const { hits } = await this.searchWithDiagnostics(query, options);
     return hits;
@@ -82,11 +82,12 @@ export class BrightDataWebSearchProvider implements WebSearchProvider {
    */
   async searchWithDiagnostics(
     query: string,
-    options?: { maxResults?: number },
+    options?: { maxResults?: number; geo?: { hl?: string; gl?: string } },
   ): Promise<WebSearchWithDiagnostics> {
     const result = await this.client.search({
       text: query,
       num: options?.maxResults ?? DEFAULT_MAX_RESULTS,
+      ...(options?.geo ? { geo: options.geo } : {}),
     });
 
     const category = result.meta.resultCategory ?? 'empty_body';

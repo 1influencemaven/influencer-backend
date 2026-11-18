@@ -1,3 +1,15 @@
+/**
+ * Hosts where the brand identity lives in the path (not the registrable domain).
+ * Keep pathname; still strip query/hash tracking.
+ */
+const PATH_SCOPED_WEBSITE_HOSTS = new Set([
+  'linktr.ee',
+  'linkin.bio',
+  'bio.site',
+  'beacons.ai',
+  'carrd.co',
+]);
+
 export function normalizeDomain(website: string): string {
   try {
     const withProtocol = /^https?:\/\//i.test(website)
@@ -15,11 +27,48 @@ export function normalizeDomain(website: string): string {
   }
 }
 
+/**
+ * Corporate website hygiene (Tavily-era rule: prefer a real brand homepage).
+ * - adds https when missing
+ * - strips www, query, and hash (SERP tracking e.g. srsltid)
+ * - reduces to origin for normal domains (no deep landing paths as website)
+ * - keeps pathname only for known path-scoped hosts (linktr.ee, …)
+ *
+ * evidenceUrls may still keep the original SERP deep link.
+ */
 export function ensureWebsiteUrl(website: string): string {
-  if (/^https?:\/\//i.test(website)) {
-    return website;
+  const trimmed = website?.trim() ?? '';
+  if (!trimmed) {
+    return trimmed;
   }
-  return `https://${website}`;
+
+  try {
+    const withProtocol = /^https?:\/\//i.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+    const parsed = new URL(withProtocol);
+    if (!parsed.hostname) {
+      return withProtocol;
+    }
+
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    if (PATH_SCOPED_WEBSITE_HOSTS.has(host)) {
+      let pathname = parsed.pathname || '/';
+      if (pathname.length > 1 && pathname.endsWith('/')) {
+        pathname = pathname.slice(0, -1);
+      }
+      return pathname === '/'
+        ? `https://${host}`
+        : `https://${host}${pathname}`;
+    }
+
+    return `https://${host}`;
+  } catch {
+    if (/^https?:\/\//i.test(trimmed)) {
+      return trimmed;
+    }
+    return `https://${trimmed}`;
+  }
 }
 
 export function dedupeByDomain(

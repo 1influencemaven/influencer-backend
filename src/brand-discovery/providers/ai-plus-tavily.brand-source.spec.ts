@@ -94,7 +94,7 @@ describe('AiPlusTavilyBrandSource', () => {
     expect(planBrandSearch).toHaveBeenCalled();
     expect(search).toHaveBeenCalledTimes(2);
     expect(scoreBrandCandidates).toHaveBeenCalledWith(
-      expect.objectContaining({ searchHits: [hit, hit] }),
+      expect.objectContaining({ searchHits: [hit] }),
     );
     expect(result.candidates[0]).toEqual(
       expect.objectContaining({ name: 'Movavi', source: 'ai+brightdata' }),
@@ -105,7 +105,8 @@ describe('AiPlusTavilyBrandSource', () => {
       plannedQueriesCount: 2,
       validatedQueriesCount: 2,
       fallbackUsed: false,
-      searchHitsCount: 2,
+      // Same mock hit per query → domain dedupe keeps 1
+      searchHitsCount: 1,
     });
   });
 
@@ -131,7 +132,7 @@ describe('AiPlusTavilyBrandSource', () => {
     ]);
     expect(result.searchMetadata?.fallbackUsed).toBe(false);
     expect(search).toHaveBeenCalledTimes(2);
-    expect(result.searchMetadata?.searchHitsCount).toBe(2);
+    expect(result.searchMetadata?.searchHitsCount).toBe(1);
   });
 
   it('falls back to templates when planBrandSearch fails', async () => {
@@ -144,7 +145,7 @@ describe('AiPlusTavilyBrandSource', () => {
       ibp,
       context.influencerName,
       context.influencerNiche,
-    ).slice(0, 4);
+    );
 
     expect(planBrandSearch).toHaveBeenCalled();
     expect(search).toHaveBeenCalledTimes(fallback.length);
@@ -154,7 +155,7 @@ describe('AiPlusTavilyBrandSource', () => {
       plannedQueriesCount: 0,
       validatedQueriesCount: fallback.length,
       fallbackUsed: true,
-      searchHitsCount: fallback.length,
+      searchHitsCount: 1,
     });
   });
 
@@ -170,7 +171,7 @@ describe('AiPlusTavilyBrandSource', () => {
       ibp,
       context.influencerName,
       context.influencerNiche,
-    ).slice(0, 4);
+    );
 
     expect(result.searchMetadata).toEqual({
       strategy: 'llm',
@@ -178,7 +179,7 @@ describe('AiPlusTavilyBrandSource', () => {
       plannedQueriesCount: 2,
       validatedQueriesCount: fallback.length,
       fallbackUsed: true,
-      searchHitsCount: fallback.length,
+      searchHitsCount: 1,
     });
     expect(search).toHaveBeenCalledTimes(fallback.length);
   });
@@ -193,7 +194,7 @@ describe('AiPlusTavilyBrandSource', () => {
       ibp,
       context.influencerName,
       context.influencerNiche,
-    ).slice(0, 4);
+    );
 
     expect(planBrandSearch).not.toHaveBeenCalled();
     expect(search).toHaveBeenCalledTimes(templates.length);
@@ -203,7 +204,7 @@ describe('AiPlusTavilyBrandSource', () => {
       plannedQueriesCount: templates.length,
       validatedQueriesCount: templates.length,
       fallbackUsed: false,
-      searchHitsCount: templates.length,
+      searchHitsCount: 1,
     });
   });
 });

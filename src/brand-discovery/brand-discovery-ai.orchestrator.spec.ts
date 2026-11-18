@@ -183,7 +183,12 @@ describe('BrandDiscoveryAiOrchestrator', () => {
       jest.fn().mockResolvedValue('default instructions');
     const getConfig =
       opts?.getConfig ??
-      ((key: string) => (key === 'BRAND_SEARCH_STRATEGY' ? 'llm' : undefined));
+      ((key: string) => {
+        if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
+        if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'legacy';
+        if (key === 'NODE_ENV') return 'test';
+        return undefined;
+      });
 
     const orchestrator = new BrandDiscoveryAiOrchestrator(
       {
@@ -221,12 +226,13 @@ describe('BrandDiscoveryAiOrchestrator', () => {
   };
 
   it('runs PLAN_SEARCH → SERP → SCORE_CANDIDATES successfully', async () => {
-    const { orchestrator, publishPlan, publishScore, wait, search } = build({
-      wait: jest
-        .fn()
-        .mockResolvedValueOnce(planCompleted(validQueries))
-        .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
-    });
+    const { orchestrator, publishPlan, publishScore, wait, searchWithDiagnostics } =
+      build({
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(validQueries))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
 
     const result = await orchestrator.orchestrate(baseParams);
 
@@ -235,6 +241,7 @@ describe('BrandDiscoveryAiOrchestrator', () => {
         runId: 'run-bd-1',
         maxQueries: 4,
         influencerName: 'Ada',
+        promptInstructions: 'Prefiere evidencia oficial',
       }),
     );
     expect(wait).toHaveBeenNthCalledWith(
@@ -242,8 +249,12 @@ describe('BrandDiscoveryAiOrchestrator', () => {
       PLAN_EXECUTION_ID,
       BRAND_DISCOVERY_PLAN_TIMEOUT_MS,
     );
-    expect(search).toHaveBeenCalledWith(validQueries[0], {
+    expect(searchWithDiagnostics).toHaveBeenCalledWith(validQueries[0], {
       maxResults: BRAND_DISCOVERY_SERP_MAX_RESULTS_PER_QUERY,
+      geo: expect.objectContaining({
+        gl: expect.any(String),
+        hl: expect.any(String),
+      }),
     });
     expect(publishScore).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -267,9 +278,79 @@ describe('BrandDiscoveryAiOrchestrator', () => {
     expect(result.planExecutionId).toBe(PLAN_EXECUTION_ID);
     expect(result.scoreExecutionId).toBe(SCORE_EXECUTION_ID);
     expect(result.planExecutionId).not.toBe(result.scoreExecutionId);
-    expect(result.searchHitsCount).toBe(2);
+    // Two SERP calls return the same demo domain; filter dedupes by host.
+    expect(result.searchHitsCount).toBe(1);
+    expect(result.serpHitFilter.receivedCount).toBeGreaterThanOrEqual(1);
+    expect(result.serpHitFilter.keptCount).toBe(1);
     expect(result.fallbackUsed).toBe(false);
     expect(result.strategy).toBe('llm');
+    expect(result.geoLensesMode).toBe('legacy');
+  });
+
+  it('v1 geo lenses: US query uses gl=us and expands configured LATAM countries', async () => {
+    const search = jest.fn().mockResolvedValue([
+      {
+        title: 'SHEIN US',
+        url: 'https://shein.com/',
+        content: 'fashion available in United States',
+      },
+    ]);
+    const { orchestrator, searchWithDiagnostics } = build({
+      search,
+      getConfig: (key: string) => {
+        if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
+        if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'v1';
+        if (key === 'BRAND_DISCOVERY_MAX_SERP_CALLS') return 12;
+        if (key === 'BRAND_DISCOVERY_REGION_LATAM_COUNTRIES') return 'co,mx';
+        if (key === 'NODE_ENV') return 'test';
+        return undefined;
+      },
+      wait: jest
+        .fn()
+        .mockResolvedValueOnce(
+          planCompleted([
+            'maternity apparel brands United States',
+            'coaching companies LATAM',
+          ]),
+        )
+        .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+    });
+
+    const result = await orchestrator.orchestrate({
+      ...baseParams,
+      country: null,
+      language: null,
+      ibp: {
+        ...ibp,
+        markets: ['LATAM', 'United States'],
+      },
+    });
+
+    expect(result.geoLensesMode).toBe('v1');
+    expect(result.serpLenses?.some((l) => l.gl === 'us')).toBe(true);
+    expect(result.serpLenses?.map((l) => l.gl).sort()).toEqual(['co', 'mx', 'us']);
+    expect(result.serpCallsExecuted).toBeLessThanOrEqual(12);
+    expect(result.unresolvedSerpRegions ?? []).toEqual([]);
+
+    const usCalls = searchWithDiagnostics.mock.calls.filter(
+      (call) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('United States') &&
+        (call[1] as { geo?: { gl?: string } })?.geo?.gl === 'us',
+    );
+    expect(usCalls.length).toBeGreaterThanOrEqual(1);
+
+    const usOnMx = searchWithDiagnostics.mock.calls.filter(
+      (call) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('United States') &&
+        (call[1] as { geo?: { gl?: string } })?.geo?.gl === 'mx',
+    );
+    expect(usOnMx.length).toBe(0);
+
+    expect(result.hitGeoAttribution?.some((h) => h.domain.includes('shein'))).toBe(
+      true,
+    );
   });
 
   it('propagates PLAN_SEARCH FAILED with worker code (no silent fallback)', async () => {
@@ -390,14 +471,14 @@ describe('BrandDiscoveryAiOrchestrator', () => {
     const result = await orchestrator.orchestrate(baseParams);
 
     expect(searchWithDiagnostics).toHaveBeenCalled();
-    expect(result.serpDiagnostics).toHaveLength(validQueries.length);
+    // Primary empty + simplified retry may collapse into fewer diagnostic rows.
+    expect(result.serpDiagnostics.length).toBeGreaterThanOrEqual(1);
     expect(result.serpDiagnostics[0]).toEqual(
       expect.objectContaining({
-        resultCategory: 'organic_empty',
         organicResultsCount: 0,
-        httpStatus: 200,
       }),
     );
+    expect(result.serpQueryFallbackUsed).toBe(true);
   });
 
   it('runs SCORE_CANDIDATES with empty searchHits when SERP returns no usable hits', async () => {
@@ -574,7 +655,7 @@ describe('BrandDiscoveryAiOrchestrator', () => {
   });
 
   it('loads Settings instructions when promptInstructions omitted', async () => {
-    const { orchestrator, publishScore, getInstructions } = build({
+    const { orchestrator, publishPlan, publishScore, getInstructions } = build({
       wait: jest
         .fn()
         .mockResolvedValueOnce(planCompleted(validQueries))
@@ -587,6 +668,11 @@ describe('BrandDiscoveryAiOrchestrator', () => {
     });
 
     expect(getInstructions).toHaveBeenCalled();
+    expect(publishPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptInstructions: 'default instructions',
+      }),
+    );
     expect(publishScore).toHaveBeenCalledWith(
       expect.objectContaining({
         promptInstructions: 'default instructions',

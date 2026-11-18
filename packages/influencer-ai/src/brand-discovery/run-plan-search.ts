@@ -155,8 +155,15 @@ export async function runBrandDiscoveryPlanSearch(
   const userPrompt = buildBrandDiscoveryPlanUserPrompt({
     influencerName: request.input.influencerName,
     niche: request.input.niche,
+    subNiche: request.input.subNiche,
+    niches: request.input.niches,
+    country: request.input.country,
+    language: request.input.language,
+    followers: request.input.followers,
+    engagement: request.input.engagement,
     ibp: request.input.ibp,
     maxQueries,
+    businessInstructions: request.instructions.business,
   });
 
   let llmCallCount = 0;
