@@ -1,4 +1,5 @@
 export { BrightDataSearchClient } from './brightdata-search.client';
+export { BrightDataDatasetClient } from './brightdata-dataset.client';
 export { BrightDataModule } from './brightdata.module';
 export {
   BrightDataSerpProviderError,

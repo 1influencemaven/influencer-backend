@@ -5,6 +5,10 @@ jest.mock('./influencers.service', () => ({
   InfluencersService: class InfluencersService {},
 }));
 
+jest.mock('./instagram-research.service', () => ({
+  InstagramResearchService: class InstagramResearchService {},
+}));
+
 jest.mock('../auth/guards/jwt-auth.guard', () => ({
   JwtAuthGuard: class JwtAuthGuard {},
 }));
@@ -17,6 +21,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { InfluencersController } from './influencers.controller';
 import { InfluencersService } from './influencers.service';
+import { InstagramResearchService } from './instagram-research.service';
 
 describe('InfluencersController', () => {
   let influencersController: InfluencersController;
@@ -24,9 +29,15 @@ describe('InfluencersController', () => {
   const influencersService = {
     findAll: jest.fn(),
     findOne: jest.fn(),
+    findEligibleManagers: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     remove: jest.fn(),
+  };
+
+  const instagramResearchService = {
+    researchByInfluencerId: jest.fn(),
+    researchByUsername: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -34,6 +45,10 @@ describe('InfluencersController', () => {
       controllers: [InfluencersController],
       providers: [
         { provide: InfluencersService, useValue: influencersService },
+        {
+          provide: InstagramResearchService,
+          useValue: instagramResearchService,
+        },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -74,8 +89,23 @@ describe('InfluencersController', () => {
     });
   });
 
+  it('should delegate findEligibleManagers to the service', async () => {
+    const managers = [
+      { id: 'u1', name: 'Ana', email: 'ana@example.com', role: 'ADMIN' },
+    ];
+    influencersService.findEligibleManagers.mockResolvedValue(managers);
+
+    await expect(
+      influencersController.findEligibleManagers(),
+    ).resolves.toEqual(managers);
+  });
+
   it('should delegate create to the service', async () => {
-    const dto = { name: 'Laura Martínez' };
+    const dto = {
+      name: 'Laura Martínez',
+      instagram: '@laurafit_es',
+      country: 'ES',
+    };
     influencersService.create.mockResolvedValue({
       id: 'influencer-id',
       ...dto,
@@ -118,6 +148,39 @@ describe('InfluencersController', () => {
 
     await expect(influencersController.findOne('missing-id')).rejects.toThrow(
       NotFoundException,
+    );
+  });
+
+  it('should delegate Instagram research to InstagramResearchService', async () => {
+    const payload = {
+      influencer: { id: 'influencer-id' },
+      research: { outcome: 'UPDATED', handle: 'laurafit_es' },
+    };
+    instagramResearchService.researchByInfluencerId.mockResolvedValue(payload);
+
+    await expect(
+      influencersController.researchInstagram('influencer-id'),
+    ).resolves.toEqual(payload);
+    expect(
+      instagramResearchService.researchByInfluencerId,
+    ).toHaveBeenCalledWith('influencer-id');
+  });
+
+  it('should delegate username Instagram research without influencer id', async () => {
+    const payload = {
+      research: { outcome: 'FOUND', persisted: false },
+      normalized: { followers: 1 },
+      provider: {},
+    };
+    instagramResearchService.researchByUsername.mockResolvedValue(payload);
+
+    await expect(
+      influencersController.researchInstagramByUsername({
+        username: '@belu.deltoro',
+      }),
+    ).resolves.toEqual(payload);
+    expect(instagramResearchService.researchByUsername).toHaveBeenCalledWith(
+      '@belu.deltoro',
     );
   });
 });

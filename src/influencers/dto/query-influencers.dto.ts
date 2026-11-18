@@ -5,12 +5,16 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 
-import { IbpStatus } from '../../generated/prisma/enums';
+import {
+  IbpStatus,
+  InfluencerQuarter,
+} from '../../generated/prisma/enums';
 
 export enum InfluencerSortBy {
   NAME = 'name',
@@ -53,7 +57,7 @@ export class QueryInfluencersDto {
   limit?: number = 20;
 
   @ApiPropertyOptional({
-    description: 'Búsqueda en nombre, redes sociales y email',
+    description: 'Búsqueda en nombre, Instagram (raw/normalizado), redes y email',
     example: 'laura',
   })
   @IsOptional()
@@ -80,13 +84,22 @@ export class QueryInfluencersDto {
   language?: string;
 
   @ApiPropertyOptional({
-    description: 'Filtro por nicho',
+    description: 'Filtro por nicho legacy (string exacto case-insensitive)',
     example: 'Fitness',
   })
   @IsOptional()
   @IsString()
   @MaxLength(100)
   niche?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filtro: el array niches contiene este valor',
+    example: 'Fitness',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  niches?: string;
 
   @ApiPropertyOptional({
     description: 'Filtro por subnicho',
@@ -96,6 +109,34 @@ export class QueryInfluencersDto {
   @IsString()
   @MaxLength(100)
   subNiche?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filtro por manager (User.id)',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  @IsOptional()
+  @IsUUID()
+  managerId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filtro por año de asignación de trimestre',
+    example: 2026,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2000)
+  @Max(2100)
+  year?: number;
+
+  @ApiPropertyOptional({
+    description: 'Filtro por trimestre (requiere coherencia con year si ambos)',
+    enum: InfluencerQuarter,
+    example: InfluencerQuarter.Q1,
+  })
+  @IsOptional()
+  @IsEnum(InfluencerQuarter)
+  quarter?: InfluencerQuarter;
 
   @ApiPropertyOptional({
     description: 'Filtro por estado del perfil ideal (IBP)',
