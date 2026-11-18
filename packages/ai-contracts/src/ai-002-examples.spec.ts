@@ -67,6 +67,15 @@ describe('AI-002 contract examples', () => {
         summary: 'Marcas wellness auténticas…',
         alertSignals: ['miracle claims'],
         desirableCriteria: ['sustainability'],
+        talentInterpretation: {
+          outputVersion: '1.0',
+          insufficientEvidence: true,
+          summary: null,
+          niches: [],
+          contentCategories: [],
+          commercialSignals: [],
+          limitations: ['No Instagram research evidence in example.'],
+        },
       },
     });
 
@@ -180,6 +189,148 @@ describe('AI-002 contract examples', () => {
     });
 
     expect(parsed.status).toBe('COMPLETED');
+  });
+
+  it('parses Brand Discovery RESEARCH_BRAND request/result (additive 1.0)', () => {
+    const request = parseAiExecutionRequest({
+      contractVersion: '1.0',
+      executionId: '77777777-7777-4777-8777-777777777777',
+      correlationId: '22222222-2222-4222-8222-222222222222',
+      idempotencyKey: 'brand-research:run-bd-1:v1',
+      type: 'BRAND_DISCOVERY',
+      requestedAt: '2026-11-14T18:00:00.000Z',
+      context: {
+        userId: 'user-1',
+        influencerId: 'inf-9',
+        resourceId: 'run-bd-1',
+        resourceType: 'BRAND_DISCOVERY_RUN',
+      },
+      instructions: { business: 'Investiga con evidencia…' },
+      limits: { maxPages: 4 },
+      input: {
+        operation: 'RESEARCH_BRAND',
+        influencerName: 'Ana Fit',
+        niche: 'fitness',
+        ibp: {
+          targetSectors: ['wellness'],
+          excludedSectors: [],
+          brandSize: ['smb'],
+          markets: ['Spain'],
+          collaborationTypes: [],
+          summary: 'x',
+          alertSignals: [],
+          desirableCriteria: [],
+        },
+        brand: {
+          name: 'Demo Wellness Co',
+          website: 'https://www.demowellness.example',
+          domain: 'demowellness.example',
+        },
+        pageSnapshots: [
+          {
+            url: 'https://www.demowellness.example/',
+            role: 'homepage',
+            textContent: 'Demo Wellness Co — sportswear',
+          },
+        ],
+        maxPages: 4,
+      },
+    });
+    expect(request.type).toBe('BRAND_DISCOVERY');
+    if (request.type === 'BRAND_DISCOVERY') {
+      expect(request.input.operation).toBe('RESEARCH_BRAND');
+    }
+
+    const result = parseAiExecutionResult({
+      contractVersion: '1.0',
+      executionId: '77777777-7777-4777-8777-777777777777',
+      correlationId: '22222222-2222-4222-8222-222222222222',
+      type: 'BRAND_DISCOVERY',
+      status: 'COMPLETED',
+      startedAt: '2026-11-14T18:00:01.000Z',
+      finishedAt: '2026-11-14T18:00:20.000Z',
+      durationMs: 19000,
+      metadata: { provider: 'ollama', model: 'llama3.2:3b', llmCallCount: 1 },
+      output: {
+        operation: 'RESEARCH_BRAND',
+        researchStatus: 'PARTIAL',
+        identity: {
+          name: {
+            value: 'Demo Wellness Co',
+            status: 'VERIFIED',
+            evidence: [{ url: 'https://www.demowellness.example/' }],
+          },
+          officialWebsite: {
+            value: 'https://www.demowellness.example',
+            status: 'VERIFIED',
+            evidence: [{ url: 'https://www.demowellness.example/' }],
+          },
+          domain: {
+            value: 'demowellness.example',
+            status: 'VERIFIED',
+            evidence: [{ url: 'https://www.demowellness.example/' }],
+          },
+        },
+        company: {
+          description: {
+            value: null,
+            status: 'NOT_FOUND',
+            evidence: [],
+          },
+          brandSize: { value: null, status: 'NOT_FOUND', evidence: [] },
+        },
+        industry: {
+          sectors: {
+            value: ['wellness'],
+            status: 'PARTIAL',
+            evidence: [{ url: 'https://www.demowellness.example/' }],
+          },
+          categories: { value: null, status: 'NOT_FOUND', evidence: [] },
+        },
+        offerings: {
+          productsAndServices: {
+            value: null,
+            status: 'NOT_FOUND',
+            evidence: [],
+          },
+        },
+        markets: {
+          countriesOrRegions: {
+            value: null,
+            status: 'NOT_FOUND',
+            evidence: [],
+          },
+        },
+        commercialSignals: [
+          {
+            kind: 'affiliate',
+            value: null,
+            status: 'NOT_FOUND',
+            evidence: [],
+            note: 'No affiliate program found on consulted pages',
+          },
+        ],
+        influencerFit: {
+          rationale: {
+            value: 'Possible niche overlap',
+            status: 'PARTIAL',
+            evidence: [{ url: 'https://www.demowellness.example/' }],
+          },
+        },
+        pages: [
+          {
+            url: 'https://www.demowellness.example/',
+            role: 'homepage',
+            fetchStatus: 'ok',
+            httpStatus: 200,
+          },
+        ],
+      },
+    });
+    expect(result.type).toBe('BRAND_DISCOVERY');
+    if (result.type === 'BRAND_DISCOVERY' && result.output) {
+      expect(result.output.operation).toBe('RESEARCH_BRAND');
+    }
   });
 
   it('parses Lead Discovery PLAN result (§14.6)', () => {
@@ -321,13 +472,59 @@ describe('AI-002 contract examples', () => {
           },
         ],
         summary: '1 email',
-        trace: { queries: ['q1'], pages: ['https://demo.co/contact'], serpCalls: 1, pageCalls: 1 },
+        trace: {
+          queries: ['q1'],
+          pages: ['https://demo.co/contact'],
+          serpCalls: 1,
+          pageCalls: 1,
+          // RF-04.2 optional additive counters
+          pageOriginCounts: {
+            seedPagesAttempted: 1,
+            seedPagesDownloaded: 1,
+            serpSeedPagesAttempted: 0,
+            serpSeedPagesDownloaded: 0,
+            llmPagesAttempted: 0,
+            llmPagesDownloaded: 0,
+            llmPagesReused: 0,
+            duplicateUrlSkips: 0,
+          },
+        },
       },
     });
     expect(result.type).toBe('CONTACT_RESEARCH');
     if (result.type === 'CONTACT_RESEARCH' && result.output) {
       expect(result.output.operation).toBe('FIND_BRAND_EMAILS');
+      if (result.output.operation === 'FIND_BRAND_EMAILS') {
+        expect(result.output.trace?.pageOriginCounts?.seedPagesDownloaded).toBe(
+          1,
+        );
+      }
     }
+
+    // Historical: trace without pageOriginCounts still valid
+    const legacy = parseAiExecutionResult({
+      contractVersion: '1.0',
+      executionId: '44444444-4444-4444-8444-444444444444',
+      correlationId: '22222222-2222-4222-8222-222222222222',
+      type: 'CONTACT_RESEARCH',
+      status: 'COMPLETED',
+      startedAt: '2026-11-08T12:00:00.000Z',
+      finishedAt: '2026-11-08T12:00:05.000Z',
+      durationMs: 5000,
+      metadata: { provider: 'ollama', model: 'llama3.2:3b', llmCallCount: 1 },
+      output: {
+        operation: 'FIND_BRAND_EMAILS',
+        outcome: 'NO_MATCHES',
+        emails: [],
+        trace: {
+          queries: [],
+          pages: [],
+          serpCalls: 0,
+          pageCalls: 0,
+        },
+      },
+    });
+    expect(legacy.type).toBe('CONTACT_RESEARCH');
   });
 
   it('parses Contact Research FIND_BRAND_PEOPLE request/result', () => {
