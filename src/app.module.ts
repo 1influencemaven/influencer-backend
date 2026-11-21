@@ -8,6 +8,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
 import { AuthModule } from './auth/auth.module';
+import { AiExecutionModule } from './ai-execution/ai-execution.module';
 import { BullMqModule } from './bullmq/bullmq.module';
 import { databaseConfig } from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
@@ -19,6 +20,12 @@ import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { UsersModule } from './users/users.module';
+import { InfluencersModule } from './influencers/influencers.module';
+import { IdealBrandProfilesModule } from './ideal-brand-profiles/ideal-brand-profiles.module';
+import { AiPromptsModule } from './ai-prompts/ai-prompts.module';
+import { BrandDiscoveryModule } from './brand-discovery/brand-discovery.module';
+import { ContactDiscoveryModule } from './contact-discovery/contact-discovery.module';
+import { LeadDiscoveryModule } from './lead-discovery/lead-discovery.module';
 
 @Module({
   imports: [
@@ -29,16 +36,26 @@ import { UsersModule } from './users/users.module';
       validationOptions: {
         abortEarly: true,
         allowUnknown: true,
+        convert: true,
       },
     }),
+
+    // Bull root before queue consumers (IBP domain + ai.execution.*)
+    BullMqModule,
+    AiExecutionModule,
 
     PrismaModule,
     AuthModule,
     UsersModule,
+    InfluencersModule,
+    IdealBrandProfilesModule,
+    AiPromptsModule,
+    BrandDiscoveryModule,
+    ContactDiscoveryModule,
+    LeadDiscoveryModule,
     LoggerModule,
     HealthModule,
     RedisModule,
-    BullMqModule,
 
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],

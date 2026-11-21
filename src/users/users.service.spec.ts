@@ -182,11 +182,11 @@ describe('UsersService', () => {
       prismaService.user.findUnique.mockResolvedValue(mockUser);
       prismaService.user.delete.mockResolvedValue(mockUser);
 
-      await expect(
-        usersService.remove('user-id', 'admin-id'),
-      ).resolves.toEqual({
-        message: 'User deleted successfully',
-      });
+      await expect(usersService.remove('user-id', 'admin-id')).resolves.toEqual(
+        {
+          message: 'User deleted successfully',
+        },
+      );
 
       expect(prismaService.user.delete).toHaveBeenCalledWith({
         where: { id: 'user-id' },
@@ -194,9 +194,9 @@ describe('UsersService', () => {
     });
 
     it('should forbid deleting the current user account', async () => {
-      await expect(
-        usersService.remove('admin-id', 'admin-id'),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(usersService.remove('admin-id', 'admin-id')).rejects.toThrow(
+        ForbiddenException,
+      );
 
       expect(prismaService.user.delete).not.toHaveBeenCalled();
     });

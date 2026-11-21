@@ -83,7 +83,10 @@ describe('UsersController', () => {
 
   it('should delegate update to the service', async () => {
     const dto = { name: 'Updated Name' };
-    usersService.update.mockResolvedValue({ id: 'user-id', name: 'Updated Name' });
+    usersService.update.mockResolvedValue({
+      id: 'user-id',
+      name: 'Updated Name',
+    });
 
     await expect(usersController.update('user-id', dto)).resolves.toEqual({
       id: 'user-id',
@@ -92,17 +95,23 @@ describe('UsersController', () => {
   });
 
   it('should delegate remove to the service with the current user id', async () => {
-    usersService.remove.mockResolvedValue({ message: 'User deleted successfully' });
-
-    await expect(usersController.remove('user-id', adminUser)).resolves.toEqual({
+    usersService.remove.mockResolvedValue({
       message: 'User deleted successfully',
     });
+
+    await expect(usersController.remove('user-id', adminUser)).resolves.toEqual(
+      {
+        message: 'User deleted successfully',
+      },
+    );
 
     expect(usersService.remove).toHaveBeenCalledWith('user-id', 'admin-id');
   });
 
   it('should propagate service exceptions', async () => {
-    usersService.findOne.mockRejectedValue(new NotFoundException('User not found'));
+    usersService.findOne.mockRejectedValue(
+      new NotFoundException('User not found'),
+    );
 
     await expect(usersController.findOne('missing-id')).rejects.toThrow(
       NotFoundException,

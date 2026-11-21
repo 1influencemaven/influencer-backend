@@ -104,8 +104,11 @@ export class AuthController {
   ) {
     const refreshToken = req.cookies?.refresh_token as string | undefined;
 
-    const { accessToken, refreshToken: newRefreshToken, user } =
-      await this.authService.refresh(refreshToken);
+    const {
+      accessToken,
+      refreshToken: newRefreshToken,
+      user,
+    } = await this.authService.refresh(refreshToken);
 
     this.authCookieService.set(res, accessToken, newRefreshToken);
 
@@ -133,10 +136,7 @@ export class AuthController {
     description: 'Token de actualización inválido o ausente',
   })
   @Post('logout')
-  async logout(
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const refreshToken = req.cookies?.refresh_token as string | undefined;
 
     await this.authService.logout(refreshToken);

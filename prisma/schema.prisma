@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider     = "prisma-client"
   output       = "../src/generated/prisma"
@@ -18,15 +16,137 @@ enum Role {
   ADMIN
 }
 
+enum IbpStatus {
+  DRAFT
+  PROCESSING
+  ACTIVE
+  FAILED
+}
+
+enum BrandDiscoveryStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum BrandCandidateStatus {
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  POSTPONED
+}
+
+/// Nest evidence classifier outcome for Brand Discovery (AI-004.5.5).
+/// Orthogonal to BrandCandidateStatus (review workflow).
+/// Historical rows and Legacy creates use NOT_ASSESSED — never inferred from evidenceUrls.
+enum EvidenceStatus {
+  VERIFIED
+  UNVERIFIED
+  NOT_ASSESSED
+}
+
+enum LeadDiscoveryStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum LeadStatus {
+  UNDER_REVIEW
+  APPROVED
+  DISCARDED
+  DUPLICATE
+}
+
+enum LeadEmailConfidence {
+  VALID
+  PROBABLE
+  DOUBTFUL
+  INVALID
+  UNKNOWN
+}
+
+enum ContactChannelType {
+  LINKEDIN
+  EMAIL
+  WEBSITE
+}
+
+enum ContactChannelStatus {
+  ACTIVE
+  INVALID
+}
+
+enum ContactChannelSource {
+  LINKEDIN_SCRAPER
+  PUBLIC_WEB
+  MANUAL
+  LEGACY_MIGRATION
+  BRAND_WEBSITE
+}
+
+/// Commercial value for outreach prioritization (ADR-0016).
+/// Orthogonal to isGeneric (technical company/role inbox flag).
+enum CommercialRelevance {
+  HIGH
+  NEUTRAL
+  LOW
+  UNKNOWN
+}
+
+/// Calendar quarter assignment for a talent (Talent Manager).
+enum InfluencerQuarter {
+  Q1
+  Q2
+  Q3
+  Q4
+}
+
+/// Provenance of a talent profile field value (Talent Manager metadata).
+enum InfluencerDataOrigin {
+  MANUAL
+  EXTERNAL
+  LEGACY
+}
+
+/// Track 2C — agency taxonomy (identity-level; evidence-backed classification later).
+enum AgencyType {
+  INFLUENCER_MARKETING_AGENCY
+  TALENT_REPRESENTATION
+  MARKETPLACE
+  GENERAL_MARKETING
+  DIRECTORY
+  OTHER
+}
+
+/// Track 2C — relevance of an Agency to a specific Influencer (association-level).
+enum AgencyRelevanceStatus {
+  UNDER_REVIEW
+  RELEVANT
+  NOT_RELEVANT
+  DISCARDED
+}
+
+/// Track 2C.4 — Agency Contact Research: mailbox vs evidenced person at an Agency.
+enum AgencyContactKind {
+  MAILBOX
+  PERSON
+}
+
 model User {
-  id            String         @id @default(uuid())
-  name          String
-  email         String         @unique
-  password      String
-  role          Role           @default(USER)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  refreshTokens RefreshToken[]
+  id                            String                         @id @default(uuid())
+  name                          String
+  email                         String                         @unique
+  password                      String
+  role                          Role                           @default(USER)
+  createdAt                     DateTime                       @default(now())
+  updatedAt                     DateTime                       @updatedAt
+  refreshTokens                 RefreshToken[]
+  ibpPromptTemplates            IbpPromptTemplate[]
+  brandDiscoveryPromptTemplates BrandDiscoveryPromptTemplate[]
+  leadDiscoveryPromptTemplates  LeadDiscoveryPromptTemplate[]
+  /// Talents where this user is the assigned manager (Talent Manager).
+  managedInfluencers            Influencer[]                   @relation("InfluencerManager")
 }
 
 model RefreshToken {
@@ -38,4 +158,369 @@ model RefreshToken {
   createdAt          DateTime @default(now())
 
   @@index([userId])
+}
+
+model Influencer {
+  id                        String                        @id @default(uuid())
+  name                      String
+  instagram                 String?
+  /// Normalized Instagram handle for dedupe (Talent Manager). Independent of raw `instagram`.
+  instagramNormalized       String?                       @unique
+  tiktok                    String?
+  youtube                   String?
+  country                   String?
+  language                  String?
+  niche                     String?
+  subNiche                  String?
+  /// Multi-value niches (Talent Manager PASO 1). Legacy `niche` / `subNiche` retained.
+  niches                    String[]                      @default([])
+  followers                 Int?
+  engagement                Decimal?                      @db.Decimal(5, 2)
+  email                     String?
+  /// Outbound / send-from email (Talent Manager PASO 1). Independent of legacy `email`.
+  outgoingEmail             String?
+  mediaKitUrl               String?
+  /// Snapshot of Instagram username research at create (for Mastra). Null if created without lookup.
+  /// Does not replace first-class columns (`followers`, `email`); hashtags are not niches.
+  instagramResearchEvidence Json?
+  managerId                 String?
+  manager                   User?                         @relation("InfluencerManager", fields: [managerId], references: [id], onDelete: SetNull)
+  createdAt                 DateTime                      @default(now())
+  updatedAt                 DateTime                      @updatedAt
+  idealBrandProfile         IdealBrandProfile?
+  brandDiscoveryRuns        BrandDiscoveryRun[]
+  brandCandidates           BrandCandidate[]
+  leadDiscoveryRuns         LeadDiscoveryRun[]
+  leads                     Lead[]
+  influencerAgencies        InfluencerAgency[]
+  quarterAssignments        InfluencerQuarterAssignment[]
+  fieldProvenances          InfluencerFieldProvenance[]
+
+  @@index([country])
+  @@index([niche])
+  @@index([createdAt])
+  @@index([managerId])
+}
+
+/// Historical quarter assignments for a talent. Multiple years/quarters allowed; never overwrite prior rows.
+model InfluencerQuarterAssignment {
+  id           String            @id @default(uuid())
+  influencerId String
+  influencer   Influencer        @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  quarter      InfluencerQuarter
+  year         Int
+  assignedAt   DateTime          @default(now())
+
+  @@unique([influencerId, year, quarter])
+  @@index([year])
+}
+
+/// Technical metadata: origin of a stored talent field value (not a functional form field).
+model InfluencerFieldProvenance {
+  id           String               @id @default(uuid())
+  influencerId String
+  influencer   Influencer           @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  fieldKey     String
+  origin       InfluencerDataOrigin
+  source       String?
+  fetchedAt    DateTime?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@unique([influencerId, fieldKey])
+}
+
+model IdealBrandProfile {
+  id                 String     @id @default(uuid())
+  influencerId       String     @unique
+  influencer         Influencer @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  status             IbpStatus  @default(DRAFT)
+  targetSectors      String[]
+  excludedSectors    String[]
+  brandSize          String[]
+  markets            String[]
+  collaborationTypes String[]
+  summary            String     @default("")
+  alertSignals       String[]
+  desirableCriteria  String[]
+  metadata           Json?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@index([status])
+}
+
+model IbpPromptTemplate {
+  id           String   @id @default("default")
+  instructions String
+  updatedById  String?
+  updatedBy    User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedById])
+}
+
+model BrandDiscoveryPromptTemplate {
+  id           String   @id @default("default")
+  instructions String
+  updatedById  String?
+  updatedBy    User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedById])
+}
+
+model LeadDiscoveryPromptTemplate {
+  id           String   @id @default("default")
+  instructions String
+  updatedById  String?
+  updatedBy    User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedById])
+}
+
+model BrandDiscoveryRun {
+  id             String               @id @default(uuid())
+  influencerId   String
+  influencer     Influencer           @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  status         BrandDiscoveryStatus @default(PROCESSING)
+  source         String
+  limit          Int                  @default(20)
+  ibpSnapshot    Json
+  /// Search strategy audit: strategy, queries used, counts, fallback. Null on historical runs.
+  searchMetadata Json?
+  errorMessage   String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  candidates     BrandCandidate[]
+
+  @@index([influencerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model BrandCandidate {
+  id                    String                 @id @default(uuid())
+  influencerId          String
+  influencer            Influencer             @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  discoveryRunId        String
+  discoveryRun          BrandDiscoveryRun      @relation(fields: [discoveryRunId], references: [id], onDelete: Cascade)
+  name                  String
+  website               String
+  domain                String
+  sector                String?
+  market                String?
+  brandSize             String?
+  score                 Float?
+  fitReason             String?
+  source                String
+  evidenceUrls          String[]
+  /// Nest-classified evidence state (AI-004.5.5). Default NOT_ASSESSED for Legacy / historical.
+  evidenceStatus        EvidenceStatus         @default(NOT_ASSESSED)
+  status                BrandCandidateStatus   @default(UNDER_REVIEW)
+  metadata              Json?
+  /// Lead selected for future outreach (ADR-0011). Orthogonal to Lead.status.
+  selectedLeadId        String?                @unique
+  selectedLead          Lead?                  @relation("BrandCandidateSelectedLead", fields: [selectedLeadId], references: [id], onDelete: SetNull)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  leadDiscoveryRuns     LeadDiscoveryRun[]
+  leads                 Lead[]                 @relation("BrandCandidateLeads")
+  brandBusinessContacts BrandBusinessContact[]
+
+  @@index([influencerId])
+  @@index([discoveryRunId])
+  @@index([status])
+  @@index([domain])
+  @@index([createdAt])
+}
+
+model LeadDiscoveryRun {
+  id               String              @id @default(uuid())
+  brandCandidateId String
+  brandCandidate   BrandCandidate      @relation(fields: [brandCandidateId], references: [id], onDelete: Cascade)
+  influencerId     String
+  influencer       Influencer          @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  status           LeadDiscoveryStatus @default(PROCESSING)
+  providerId       String
+  providerOptions  Json
+  limit            Int                 @default(10)
+  /// Contact Discovery audit (ADR-0017). Null on historical / FAILED runs.
+  searchMetadata   Json?
+  errorMessage     String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  leads            Lead[]
+
+  @@index([brandCandidateId])
+  @@index([influencerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Lead {
+  id                       String              @id @default(uuid())
+  brandCandidateId         String
+  brandCandidate           BrandCandidate      @relation("BrandCandidateLeads", fields: [brandCandidateId], references: [id], onDelete: Cascade)
+  influencerId             String
+  influencer               Influencer          @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  runId                    String
+  run                      LeadDiscoveryRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  contactName              String
+  title                    String?
+  /// Legacy mirror — future source of truth: ContactChannel (EMAIL). Nullable since ADR-0014.
+  email                    String?
+  emailConfidence          LeadEmailConfidence @default(UNKNOWN)
+  isGeneric                Boolean             @default(false)
+  /// Legacy mirror — future source of truth: ContactChannel (LINKEDIN).
+  profileUrl               String?
+  providerId               String
+  sourceOptionId           String?
+  fitReason                String?
+  source                   String
+  status                   LeadStatus          @default(UNDER_REVIEW)
+  metadata                 Json?
+  /// Inverse of BrandCandidate.selectedLead (ADR-0011). At most one brand points here.
+  selectedByBrandCandidate BrandCandidate?     @relation("BrandCandidateSelectedLead")
+  contactChannels          ContactChannel[]
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+
+  @@index([brandCandidateId])
+  @@index([influencerId])
+  @@index([runId])
+  @@index([status])
+  @@index([email])
+  @@index([createdAt])
+}
+
+model ContactChannel {
+  id                  String               @id @default(uuid())
+  leadId              String
+  lead                Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type                ContactChannelType
+  value               String
+  valueNormalized     String
+  status              ContactChannelStatus @default(ACTIVE)
+  source              ContactChannelSource
+  sourceUrl           String?
+  isGeneric           Boolean?
+  /// Business priority; independent of isGeneric. Default UNKNOWN for historical rows (ADR-0016).
+  commercialRelevance CommercialRelevance  @default(UNKNOWN)
+  metadata            Json?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@unique([leadId, type, valueNormalized])
+  @@index([leadId])
+  @@index([type])
+}
+
+/// Company-level commercial contact without an identified person (Contact Discovery 2A).
+/// Must NOT be modeled as a Lead (Lead = person only). See ADR-0016.
+model BrandBusinessContact {
+  id                  String               @id @default(uuid())
+  brandCandidateId    String
+  brandCandidate      BrandCandidate       @relation(fields: [brandCandidateId], references: [id], onDelete: Cascade)
+  email               String
+  emailNormalized     String
+  /// Optional display label (e.g. "Partnerships") — not a person name.
+  label               String?
+  isGeneric           Boolean              @default(true)
+  commercialRelevance CommercialRelevance  @default(UNKNOWN)
+  source              ContactChannelSource
+  sourceUrl           String?
+  metadata            Json?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@unique([brandCandidateId, emailNormalized])
+  @@index([brandCandidateId])
+  @@index([emailNormalized])
+}
+
+/// Track 2C — unique agency identity (not a BrandCandidate).
+/// Dedup key: `domain` (normalized host, no www). `normalizedName` aids search only.
+model Agency {
+  id                 String             @id @default(uuid())
+  name               String
+  /// Lowercase collapsed name for search / soft matching (not unique).
+  normalizedName     String
+  website            String?
+  /// Unique normalized host (lowercase, no leading www).
+  domain             String             @unique
+  country            String?
+  description        String?
+  agencyType         AgencyType         @default(OTHER)
+  /// Extensible identity metadata (future enrichment); not association evidence.
+  metadata           Json?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  influencerAgencies InfluencerAgency[]
+  contacts           AgencyContact[]
+
+  @@index([normalizedName])
+  @@index([agencyType])
+  @@index([createdAt])
+}
+
+/// Track 2C — discovery / relevance of an Agency for one Influencer.
+model InfluencerAgency {
+  id                   String                @id @default(uuid())
+  influencerId         String
+  influencer           Influencer            @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  agencyId             String
+  agency               Agency                @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  relevanceStatus      AgencyRelevanceStatus @default(UNDER_REVIEW)
+  relevanceExplanation String?
+  niches               String[]              @default([])
+  markets              String[]              @default([])
+  evidenceUrls         String[]              @default([])
+  /// Per-discovery audit (queries, SERP diagnostics, classifier notes). Null until 2C runs.
+  searchMetadata       Json?
+  discoveredAt         DateTime              @default(now())
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@unique([influencerId, agencyId])
+  @@index([influencerId])
+  @@index([agencyId])
+  @@index([relevanceStatus])
+  @@index([discoveredAt])
+}
+
+/// Track 2C.4 — commercial contact at an Agency (mailbox or evidenced person).
+/// Not BrandBusinessContact / Lead / ContactChannel. Provenance (RF-01) lives in metadata.
+model AgencyContact {
+  id                  String              @id @default(uuid())
+  agencyId            String
+  agency              Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  email               String
+  emailNormalized     String
+  /// Optional role/inbox label (e.g. "Partnerships") — not a person name.
+  label               String?
+  /// Person display name when contactKind = PERSON and RF-01 attribution holds.
+  displayName         String?
+  title               String?
+  contactKind         AgencyContactKind   @default(MAILBOX)
+  isGeneric           Boolean             @default(true)
+  /// Outreach priority (ADR-0016 / RF-02 mapping). Orthogonal to AgencyRelevanceStatus.
+  commercialRelevance CommercialRelevance @default(UNKNOWN)
+  /// Evidences, discoveryStatus, attributionStatus, verificationStatus (UNVERIFIED),
+  /// outreachRole, sourceUrl, sourceKind — Nest-owned; never invent VERIFIED.
+  metadata            Json?
+  discoveredAt        DateTime            @default(now())
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@unique([agencyId, emailNormalized])
+  @@index([agencyId])
+  @@index([emailNormalized])
+  @@index([commercialRelevance])
+  @@index([contactKind])
+  @@index([discoveredAt])
 }

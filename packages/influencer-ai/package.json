@@ -1,0 +1,62 @@
+{
+  "name": "@influence-maven/influencer-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mastra AI execution worker (NestJS ↔ BullMQ ↔ LLM)",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx src/main.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:ibp-live": "tsx src/scripts/ibp-live-smoke.ts"
+  },
+  "dependencies": {
+    "@influence-maven/ai-contracts": "*",
+    "@mastra/core": "^1.81.0",
+    "bullmq": "^5.78.0",
+    "ioredis": "^5.11.1",
+    "ollama-ai-provider-v2": "^1.5.5",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.13.3",
+    "jest": "^30.0.0",
+    "ts-jest": "^29.2.5",
+    "tsx": "^4.20.5",
+    "typescript": "^5.7.3"
+  },
+  "jest": {
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": "<rootDir>/../tsconfig.json"
+        }
+      ]
+    },
+    "testEnvironment": "node"
+  }
+}

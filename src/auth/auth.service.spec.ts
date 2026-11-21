@@ -159,10 +159,7 @@ describe('AuthService', () => {
       expect(jwtService.verifyAsync).toHaveBeenCalledWith(refreshToken, {
         secret: 'refresh-secret',
       });
-      expect(bcrypt.compare).toHaveBeenCalledWith(
-        refreshToken,
-        'stored-hash',
-      );
+      expect(bcrypt.compare).toHaveBeenCalledWith(refreshToken, 'stored-hash');
       expect(prismaService.refreshToken.update).toHaveBeenCalled();
       expect(result).toEqual({
         accessToken: 'new-access-token',

@@ -6,6 +6,8 @@
 # Logs
 logs
 *.log
+*-validate.out
+*-validate.err
 npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
