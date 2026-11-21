@@ -2,12 +2,18 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Prisma } from '../generated/prisma/client';
+import {
+  BrandKnowledgeService,
+  type BrandDecisionStatus,
+} from '../brand-knowledge/brand-knowledge.service';
 
 import { AiPromptsService } from '../ai-prompts/ai-prompts.service';
 import { PROSPECTING_JOBS } from '../bullmq/job-types';
@@ -85,6 +91,8 @@ export const brandCandidateSelect = {
 
 @Injectable()
 export class BrandDiscoveryService {
+  private readonly logger = new Logger(BrandDiscoveryService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
@@ -94,6 +102,9 @@ export class BrandDiscoveryService {
     private readonly brandDiscoveryResearchService: BrandDiscoveryResearchService,
     @InjectQueue(QUEUES.PROSPECTING)
     private readonly prospectingQueue: Queue,
+    /** Shared brand memory (BKB). Optional: absent in lightweight test modules. */
+    @Optional()
+    private readonly brandKnowledge?: BrandKnowledgeService,
   ) {}
 
   async search(dto: SearchBrandsDto) {
@@ -236,18 +247,76 @@ export class BrandDiscoveryService {
   async updateCandidateStatus(id: string, dto: UpdateBrandCandidateStatusDto) {
     const existing = await this.prisma.brandCandidate.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, status: true },
     });
 
     if (!existing) {
       throw new NotFoundException('Brand candidate not found');
     }
 
-    return this.prisma.brandCandidate.update({
+    const updated = await this.prisma.brandCandidate.update({
       where: { id },
       data: { status: dto.status },
       select: brandCandidateSelect,
     });
+
+    await this.feedBrandKnowledgeDecision(updated, existing.status);
+    return updated;
+  }
+
+  /** Best-effort: never fails the review action. */
+  private async feedBrandKnowledgeDecision(
+    candidate: {
+      influencerId: string;
+      name: string;
+      website: string;
+      domain: string;
+      sector: string | null;
+      market: string | null;
+      brandSize: string | null;
+      score: number | null;
+      evidenceUrls: string[];
+      evidenceStatus: string;
+      source: string;
+      status: string;
+      metadata?: unknown;
+    },
+    previousStatus: string,
+  ): Promise<void> {
+    if (!this.brandKnowledge) return;
+    try {
+      const meta = (candidate.metadata ?? {}) as Record<string, unknown>;
+      await this.brandKnowledge.recordDecision({
+        candidate: {
+          ...candidate,
+          groundingSource:
+            typeof meta.groundingSource === 'string'
+              ? meta.groundingSource
+              : null,
+        },
+        influencerTerms: await this.influencerNicheTerms(
+          candidate.influencerId,
+        ),
+        from: previousStatus as BrandDecisionStatus,
+        to: candidate.status as BrandDecisionStatus,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `BKB decision feed failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async influencerNicheTerms(
+    influencerId: string,
+  ): Promise<Array<string | null>> {
+    const influencer = await this.prisma.influencer.findUnique({
+      where: { id: influencerId },
+      select: { niche: true, subNiche: true, niches: true },
+    });
+    return influencer
+      ? [influencer.niche, influencer.subNiche, ...influencer.niches]
+      : [];
   }
 
   async removeCandidate(id: string): Promise<void> {
@@ -617,6 +686,23 @@ export class BrandDiscoveryService {
         },
       });
     });
+
+    // After commit and best-effort: BKB problems must not fail the run.
+    if (this.brandKnowledge && toPersist.length > 0) {
+      try {
+        await this.brandKnowledge.recordSurfaced({
+          influencerTerms: await this.influencerNicheTerms(influencerId),
+          candidates: toPersist.map((candidate) => ({
+            ...candidate,
+            groundingSource: candidate.groundingSource ?? null,
+          })),
+        });
+      } catch (error) {
+        this.logger.warn(
+          `BKB surfaced feed failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
   }
 
   private applyHardFilters(

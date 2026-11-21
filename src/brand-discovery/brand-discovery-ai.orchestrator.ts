@@ -31,6 +31,7 @@ import {
   type SerpHitFilterDiagnostics,
 } from './utils/brand-serp-hit-filter.util';
 import { normalizeDomain } from './utils/brand-domain.util';
+import { buildExpandedBrandQueries } from './utils/brand-query-expansion.util';
 import {
   buildSerpLenses,
   buildSimplifiedSerpQuery,
@@ -47,7 +48,14 @@ import {
 
 export const BRAND_DISCOVERY_PLAN_TIMEOUT_MS = 120_000;
 export const BRAND_DISCOVERY_SCORE_TIMEOUT_MS = 300_000;
-export const BRAND_DISCOVERY_SERP_MAX_RESULTS_PER_QUERY = 6;
+/** Organic results requested per SERP query (more hits → more distinct brand domains). */
+export const BRAND_DISCOVERY_SERP_MAX_RESULTS_PER_QUERY = 10;
+/** Below this many validated queries, the plan is topped up from the IBP taxonomy. */
+export const BRAND_DISCOVERY_MIN_QUERIES_DEFAULT = 6;
+/** Cap on queries after top-up (serial SERP + inter-query delay). */
+export const BRAND_DISCOVERY_MAX_QUERIES_DEFAULT = 8;
+/** Max filtered SERP hits sent to SCORE (bounds local-LLM scoring time). */
+export const BRAND_DISCOVERY_MAX_SCORE_HITS_DEFAULT = 30;
 /** Pause between sequential SERP queries to reduce Bright Data empty_body bans. */
 export const BRAND_DISCOVERY_SERP_INTER_QUERY_DELAY_MS = 3_000;
 export const BRAND_DISCOVERY_MAX_SERP_CALLS_DEFAULT = 12;
@@ -193,11 +201,21 @@ export class BrandDiscoveryAiOrchestrator {
         ...this.influencerPublishFields(params),
         ibp: params.ibp,
         limit: params.limit,
-        searchHits: searchHits.map((hit) => ({
-          title: hit.title,
-          url: hit.url,
-          content: hit.content,
-        })),
+        searchHits: searchHits
+          .slice(
+            0,
+            this.readIntConfig(
+              'BRAND_DISCOVERY_MAX_SCORE_HITS',
+              BRAND_DISCOVERY_MAX_SCORE_HITS_DEFAULT,
+              1,
+              100,
+            ),
+          )
+          .map((hit) => ({
+            title: hit.title,
+            url: hit.url,
+            content: hit.content,
+          })),
         seedBrands: params.seedBrands,
         promptInstructions,
         actorRole: params.actorRole,
@@ -551,7 +569,108 @@ export class BrandDiscoveryAiOrchestrator {
     }
   }
 
+  /**
+   * PLAN_SEARCH (or templates) followed by a deterministic top-up: validation
+   * routinely discards most LLM queries, which left a single SERP call and no
+   * brands. Topping up from the IBP's concrete subcategories keeps the query
+   * set diverse without depending on the planner model.
+   */
   private async resolveQueries(
+    params: BrandDiscoveryAiOrchestrateParams,
+  ): Promise<ResolvedQueries> {
+    const base = await this.resolveQueriesBase(params);
+    return this.topUpQueries(params, base);
+  }
+
+  private topUpQueries(
+    params: BrandDiscoveryAiOrchestrateParams,
+    base: ResolvedQueries,
+  ): ResolvedQueries {
+    const minQueries = this.readIntConfig(
+      'BRAND_DISCOVERY_MIN_QUERIES',
+      BRAND_DISCOVERY_MIN_QUERIES_DEFAULT,
+      0,
+      12,
+    );
+    if (base.queries.length >= minQueries) {
+      return base;
+    }
+    const maxTotal = this.readIntConfig(
+      'BRAND_DISCOVERY_MAX_QUERIES',
+      BRAND_DISCOVERY_MAX_QUERIES_DEFAULT,
+      1,
+      12,
+    );
+
+    const expanded = buildExpandedBrandQueries({
+      sectors: params.ibp.targetSectors ?? [],
+      niches: params.niches,
+      niche: params.niche,
+      markets: params.ibp.markets,
+      country: params.country,
+      max: maxTotal,
+    });
+    if (expanded.length === 0) {
+      return base;
+    }
+
+    const merged = validateBrandSearchQueriesWithDiagnostics(
+      [...base.queries, ...expanded],
+      {
+        maxQueries: maxTotal,
+        excludedSectors: params.ibp.excludedSectors,
+        // Expanded queries deliberately mix homepage / creator-program shapes.
+        maxCollaborationModeQueries: 4,
+      },
+    );
+    if (merged.queries.length <= base.queries.length) {
+      return base;
+    }
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'brand_discovery_query_topup',
+        runId: params.runId,
+        before: base.queries.length,
+        after: merged.queries.length,
+        added: merged.queries.filter((q) => !base.queries.includes(q)),
+      }),
+    );
+
+    const previous = base.planQueryValidation;
+    return {
+      ...base,
+      queries: merged.queries,
+      fallbackUsed: true,
+      planQueryValidation: {
+        receivedCount: (previous?.receivedCount ?? 0) + expanded.length,
+        keptCount: merged.queries.length,
+        discardedCount:
+          (previous?.discardedCount ?? 0) + merged.diagnostics.discardedCount,
+        discarded: [
+          ...(previous?.discarded ?? []),
+          ...merged.diagnostics.discarded,
+        ],
+        keptCategorySignatures: merged.diagnostics.keptCategorySignatures,
+      },
+    };
+  }
+
+  private readIntConfig(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const raw = this.configService.get<string | number>(key);
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    if (raw === undefined || raw === null || raw === '' || !Number.isFinite(n)) {
+      return fallback;
+    }
+    return Math.min(Math.max(Math.floor(n), min), max);
+  }
+
+  private async resolveQueriesBase(
     params: BrandDiscoveryAiOrchestrateParams,
   ): Promise<ResolvedQueries> {
     const mode =
@@ -725,7 +844,12 @@ export class BrandDiscoveryAiOrchestrator {
     try {
       const result = await this.resultWait.waitForAiExecutionResult(
         scoreExecutionId,
-        BRAND_DISCOVERY_SCORE_TIMEOUT_MS,
+        this.readIntConfig(
+          'BRAND_DISCOVERY_SCORE_TIMEOUT_MS',
+          BRAND_DISCOVERY_SCORE_TIMEOUT_MS,
+          30_000,
+          1_800_000,
+        ),
       );
 
       if (result.status === 'FAILED') {

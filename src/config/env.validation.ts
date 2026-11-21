@@ -109,6 +109,19 @@ export const envValidationSchema = Joi.object({
     .max(5)
     .default(2),
 
+  /** Min validated SERP queries before the plan is topped up from the IBP taxonomy (0 = off). */
+  BRAND_DISCOVERY_MIN_QUERIES: Joi.number().integer().min(0).max(12).default(6),
+  /** Max SERP queries after the top-up. */
+  BRAND_DISCOVERY_MAX_QUERIES: Joi.number().integer().min(1).max(12).default(8),
+  /** Max filtered SERP hits sent to SCORE_CANDIDATES (bounds local-LLM time). */
+  BRAND_DISCOVERY_MAX_SCORE_HITS: Joi.number().integer().min(1).max(100).default(30),
+  /** Wait timeout for SCORE_CANDIDATES Mastra result (ms). Raise for CPU-only local models. */
+  BRAND_DISCOVERY_SCORE_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(30000)
+    .max(1800000)
+    .default(300000),
+
   /** Wait timeout for RESEARCH_BRAND Mastra result (ms). */
   BRAND_DISCOVERY_RESEARCH_TIMEOUT_MS: Joi.number()
     .integer()

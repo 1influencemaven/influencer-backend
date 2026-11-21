@@ -43,6 +43,46 @@ const BRAND_DISCOVERY_NOISE_HOSTS = new Set([
   'www.craft.co',
   'owler.com',
   'www.owler.com',
+  /**
+   * Pure marketplaces: they sell other brands' products and are not themselves
+   * the advertiser a creator pitches. (Brand-owned retailers stay allowed.)
+   */
+  'amazon.com',
+  'ebay.com',
+  'etsy.com',
+  'walmart.com',
+  'aliexpress.com',
+  'alibaba.com',
+  /** News / editorial publishers and civic hosts — never advertiser brands. */
+  'apnews.com',
+  'nytimes.com',
+  'washingtonpost.com',
+  'forbes.com',
+  'businessinsider.com',
+  'buzzfeed.com',
+  'cnn.com',
+  'bbc.com',
+  'usatoday.com',
+  'theguardian.com',
+  'huffpost.com',
+  'healthline.com',
+  'webmd.com',
+  'byrdie.com',
+  'allure.com',
+  'cosmopolitan.com',
+  'vogue.com',
+  'elle.com',
+  'harpersbazaar.com',
+  'instyle.com',
+  'refinery29.com',
+  'goodhousekeeping.com',
+  'realsimple.com',
+  'housebeautiful.com',
+  'architecturaldigest.com',
+  'bhg.com',
+  'thespruce.com',
+  'popsugar.com',
+  'wirecutter.com',
   /** Document hosts / generic publishers — not corporate brand sites. */
   'scribd.com',
   'www.scribd.com',
@@ -137,8 +177,16 @@ export type SerpHitFilterResult = {
   diagnostics: SerpHitFilterDiagnostics;
 };
 
-function isNoiseHost(domain: string): boolean {
+/** Government / education / military hosts are never advertiser brands. */
+function isNonCommercialTld(domain: string): boolean {
+  return /(^|\.)(gov|edu|mil)(\.[a-z]{2})?$/i.test(domain);
+}
+
+export function isNoiseHost(domain: string): boolean {
   if (!domain) {
+    return true;
+  }
+  if (isNonCommercialTld(domain)) {
     return true;
   }
   if (isEditorialMagazineHost(domain)) {

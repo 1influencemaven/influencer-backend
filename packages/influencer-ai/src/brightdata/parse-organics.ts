@@ -24,6 +24,50 @@ function isBlockedHost(hostname: string): boolean {
 }
 
 /**
+ * Google wraps some organic results as `https://www.google.com/goto?url=<opaque>`.
+ * The real page is not decodable, but `display_link` carries it as
+ * `https://host › path › segments...` (the path may be truncated with "..." / "…").
+ * Rebuild a usable URL from it; null when `link` is not a wrapper or cannot be rebuilt.
+ */
+export function unwrapGoogleGotoLink(
+  link: string,
+  displayLink: unknown,
+): string | null {
+  let host: string;
+  let path: string;
+  try {
+    const parsed = new URL(link);
+    host = parsed.hostname;
+    path = parsed.pathname;
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)google\./i.test(host) || !/^\/(goto|url)\b/.test(path)) {
+    return null;
+  }
+  if (typeof displayLink !== 'string') return null;
+
+  const [origin, ...segments] = displayLink
+    .split('›')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!origin || !/^https?:\/\//i.test(origin)) return null;
+  try {
+    const base = new URL(origin);
+    if (isBlockedHost(base.hostname)) return null;
+    const truncated = segments.some((s) => /(\.{3}|…)$/.test(s));
+    const cleanSegments = segments
+      .map((s) => s.replace(/(\.{3}|…)$/, ''))
+      .filter(Boolean);
+    return truncated || cleanSegments.length === 0
+      ? `${base.origin}/`
+      : `${base.origin}/${cleanSegments.join('/')}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Prefer Bright Data `brd_json=1` JSON organics; fall back to HTML href scrape.
  */
 export function parseOrganicHits(
@@ -64,13 +108,15 @@ function parseBrdJsonOrganics(
       url?: unknown;
       title?: unknown;
       description?: unknown;
+      display_link?: unknown;
     };
-    const url =
+    const rawUrl =
       typeof item.link === 'string'
         ? item.link.trim()
         : typeof item.url === 'string'
           ? item.url.trim()
           : '';
+    const url = unwrapGoogleGotoLink(rawUrl, item.display_link) ?? rawUrl;
     if (!url.startsWith('http')) continue;
     try {
       const host = new URL(url).hostname;

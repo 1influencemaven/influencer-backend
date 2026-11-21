@@ -186,6 +186,7 @@ describe('BrandDiscoveryAiOrchestrator', () => {
       ((key: string) => {
         if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
         if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'legacy';
+        if (key === 'BRAND_DISCOVERY_MIN_QUERIES') return 0;
         if (key === 'NODE_ENV') return 'test';
         return undefined;
       });
@@ -302,6 +303,7 @@ describe('BrandDiscoveryAiOrchestrator', () => {
         if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'v1';
         if (key === 'BRAND_DISCOVERY_MAX_SERP_CALLS') return 12;
         if (key === 'BRAND_DISCOVERY_REGION_LATAM_COUNTRIES') return 'co,mx';
+        if (key === 'BRAND_DISCOVERY_MIN_QUERIES') return 0;
         if (key === 'NODE_ENV') return 'test';
         return undefined;
       },
@@ -678,5 +680,123 @@ describe('BrandDiscoveryAiOrchestrator', () => {
         promptInstructions: 'default instructions',
       }),
     );
+  });
+  describe('query top-up from the IBP taxonomy', () => {
+    const topUpConfig = (extra: Record<string, unknown> = {}) => (key: string) => {
+      if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
+      if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'legacy';
+      if (key === 'NODE_ENV') return 'test';
+      return extra[key];
+    };
+
+    it('tops up a heavily discarded plan with concrete subcategory queries', async () => {
+      const { orchestrator, searchWithDiagnostics } = build({
+        getConfig: topUpConfig(),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(['skincare brands selling in US']))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate({
+        ...baseParams,
+        ibp: { ...ibp, targetSectors: ['beauty', 'fashion', 'home decor'], markets: ['US'] },
+      });
+
+      // 1 LLM query kept + expanded queries, capped at the default 8.
+      expect(result.queries.length).toBeGreaterThanOrEqual(6);
+      expect(result.queries.length).toBeLessThanOrEqual(8);
+      expect(result.queries[0]).toBe('skincare brands selling in US');
+      expect(searchWithDiagnostics).toHaveBeenCalledTimes(result.queries.length);
+      expect(result.fallbackUsed).toBe(true);
+      expect(result.validatedQueriesCount).toBe(result.queries.length);
+      // Expanded queries span sectors, not only the first one.
+      const joined = result.queries.join(' | ');
+      expect(joined).toMatch(/womens clothing|activewear|swimwear|jewelry/);
+      expect(joined).toMatch(/candles|wall art|bedding/);
+      expect(joined).toContain('United States');
+    });
+
+    it('does nothing when the plan already has enough queries', async () => {
+      const { orchestrator } = build({
+        getConfig: topUpConfig({ BRAND_DISCOVERY_MIN_QUERIES: 2 }),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(validQueries))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate(baseParams);
+
+      expect(result.queries).toEqual(validQueries);
+      expect(result.fallbackUsed).toBe(false);
+    });
+
+    it('can be disabled with BRAND_DISCOVERY_MIN_QUERIES=0', async () => {
+      const { orchestrator } = build({
+        getConfig: topUpConfig({ BRAND_DISCOVERY_MIN_QUERIES: 0 }),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(['skincare brands selling in US']))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate({
+        ...baseParams,
+        ibp: { ...ibp, targetSectors: ['beauty'], markets: ['US'] },
+      });
+
+      expect(result.queries).toEqual(['skincare brands selling in US']);
+    });
+
+    it('respects the excluded sectors when expanding', async () => {
+      const { orchestrator } = build({
+        getConfig: topUpConfig(),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(['skincare brands selling in US']))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate({
+        ...baseParams,
+        ibp: {
+          ...ibp,
+          targetSectors: ['beauty', 'fashion'],
+          excludedSectors: ['swimwear', 'lingerie'],
+          markets: ['US'],
+        },
+      });
+
+      expect(result.queries.join(' ')).not.toMatch(/swimwear|lingerie/);
+    });
+
+    it('bounds the hits sent to SCORE and uses the configurable SCORE timeout', async () => {
+      const hits = Array.from({ length: 40 }, (_, i) => ({
+        title: 'Brand ' + i,
+        url: 'https://brand' + i + '.example/',
+        content: 'brand ' + i,
+      }));
+      const { orchestrator, publishScore, wait } = build({
+        search: jest.fn().mockResolvedValue(hits),
+        getConfig: topUpConfig({
+          BRAND_DISCOVERY_MIN_QUERIES: 0,
+          BRAND_DISCOVERY_MAX_SCORE_HITS: 12,
+          BRAND_DISCOVERY_SCORE_TIMEOUT_MS: 900000,
+        }),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(validQueries))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate(baseParams);
+
+      const published = publishScore.mock.calls[0][0] as { searchHits: unknown[] };
+      expect(published.searchHits).toHaveLength(12);
+      // Diagnostics keep the full filtered list.
+      expect(result.searchHitsCount).toBeGreaterThan(12);
+      expect(wait).toHaveBeenNthCalledWith(2, SCORE_EXECUTION_ID, 900000);
+    });
   });
 });

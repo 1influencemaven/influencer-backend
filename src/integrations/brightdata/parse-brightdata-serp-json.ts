@@ -25,7 +25,52 @@ type OrganicRow = {
   snippet?: unknown;
   rank?: unknown;
   global_rank?: unknown;
+  display_link?: unknown;
 };
+
+/**
+ * Google wraps some organic results as `https://www.google.com/goto?url=<opaque>`.
+ * The real page is not decodable, but `display_link` carries it as
+ * `https://host › path › segments...` (path may be truncated with "…"/"...").
+ * Rebuild a usable URL from it; return null when it is not a wrapper or cannot be rebuilt.
+ */
+export function unwrapGoogleGotoLink(
+  link: string,
+  displayLink: unknown,
+): string | null {
+  let host: string;
+  let path: string;
+  try {
+    const parsed = new URL(link);
+    host = parsed.hostname;
+    path = parsed.pathname;
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)google\./i.test(host) || !/^\/(goto|url)\b/.test(path)) {
+    return null;
+  }
+  if (typeof displayLink !== 'string') return null;
+
+  const [origin, ...segments] = displayLink
+    .split('›')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!origin || !/^https?:\/\//i.test(origin)) return null;
+  try {
+    const base = new URL(origin);
+    if (isBlockedHost(base.hostname)) return null;
+    const truncated = segments.some((s) => /(\.{3}|…)$/.test(s));
+    const cleanSegments = segments
+      .map((s) => s.replace(/(\.{3}|…)$/, ''))
+      .filter(Boolean);
+    return truncated || cleanSegments.length === 0
+      ? `${base.origin}/`
+      : `${base.origin}/${cleanSegments.join('/')}`;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Bright Data SERP parsed JSON (`brd_json=1` on the Google URL).
@@ -66,7 +111,9 @@ export function parseBrightDataSerpJson(
         : typeof organicRow.url === 'string'
           ? organicRow.url
           : '';
-    const url = rawUrl.trim();
+    const url =
+      unwrapGoogleGotoLink(rawUrl.trim(), organicRow.display_link) ??
+      rawUrl.trim();
     if (!url.startsWith('http://') && !url.startsWith('https://')) continue;
     if (seen.has(url)) continue;
     seen.add(url);
