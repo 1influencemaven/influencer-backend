@@ -115,12 +115,17 @@ export const envValidationSchema = Joi.object({
   BRAND_DISCOVERY_MAX_QUERIES: Joi.number().integer().min(1).max(12).default(8),
   /** Max filtered SERP hits sent to SCORE_CANDIDATES (bounds local-LLM time). */
   BRAND_DISCOVERY_MAX_SCORE_HITS: Joi.number().integer().min(1).max(100).default(30),
+  /** Hits per SCORE_CANDIDATES call (smaller = faster calls, partial results survive a failure). */
+  BRAND_DISCOVERY_SCORE_BATCH_SIZE: Joi.number().integer().min(1).max(100).default(10),
   /** Wait timeout for SCORE_CANDIDATES Mastra result (ms). Raise for CPU-only local models. */
   BRAND_DISCOVERY_SCORE_TIMEOUT_MS: Joi.number()
     .integer()
     .min(30000)
     .max(1800000)
     .default(300000),
+
+  /** Deep research per brand (Unlocker + RESEARCH_BRAND). Turn off for CPU-only local models. */
+  BRAND_DISCOVERY_RESEARCH_ENABLED: Joi.boolean().default(true),
 
   /** Wait timeout for RESEARCH_BRAND Mastra result (ms). */
   BRAND_DISCOVERY_RESEARCH_TIMEOUT_MS: Joi.number()

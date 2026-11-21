@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Prisma } from '../generated/prisma/client';
+import { isIbpCompatibleMarket } from './utils/ibp-market.util';
 import {
   BrandKnowledgeService,
   type BrandDecisionStatus,
@@ -455,7 +456,11 @@ export class BrandDiscoveryService {
           ...evidence.unverified.map((b) => mapScored(b, 'UNVERIFIED')),
         ];
 
-        const filtered = this.applyHardFilters(rawCandidates, ibp);
+        const hardFilter = this.applyHardFiltersWithDiagnostics(
+          rawCandidates,
+          ibp,
+        );
+        const filtered = hardFilter.kept;
         const unique = dedupeByDomain(filtered) as typeof filtered;
         const novel = excludeExistingDomains(unique, existingDomains);
         // Prefer VERIFIED, then grounded UNVERIFIED (SEED). Never persist inventados
@@ -532,6 +537,9 @@ export class BrandDiscoveryService {
           ...(orchestrated.serpCallsExecuted != null
             ? { serpCallsExecuted: orchestrated.serpCallsExecuted }
             : {}),
+          ...(orchestrated.scoreBatches
+            ? { scoreBatches: orchestrated.scoreBatches }
+            : {}),
           ...(orchestrated.serpCallsOmitted != null
             ? { serpCallsOmitted: orchestrated.serpCallsOmitted }
             : {}),
@@ -562,6 +570,14 @@ export class BrandDiscoveryService {
           evidenceRejectedCount: evidence.discarded.length,
           evidenceRejectReasonCounts: reasonCounts,
           afterHardFiltersCount: filtered.length,
+          hardFilterDiscarded: hardFilter.discarded.slice(0, 30),
+          hardFilterReasonCounts: hardFilter.discarded.reduce(
+            (acc, row) => {
+              acc[row.reason] = (acc[row.reason] ?? 0) + 1;
+              return acc;
+            },
+            {} as Record<string, number>,
+          ),
           afterDedupeCount: unique.length,
           afterExcludeExistingCount: novel.length,
           skippedModelPriorCount,
@@ -709,6 +725,26 @@ export class BrandDiscoveryService {
     candidates: RawBrandCandidate[],
     ibp: IbpCriteriaSnapshot,
   ) {
+    return this.applyHardFiltersWithDiagnostics(candidates, ibp).kept;
+  }
+
+  /**
+   * Same rules as before, but every rejection keeps its reason so a run that
+   * loses all candidates here is explainable from `searchMetadata`.
+   */
+  private applyHardFiltersWithDiagnostics(
+    candidates: RawBrandCandidate[],
+    ibp: IbpCriteriaSnapshot,
+  ): {
+    kept: RawBrandCandidate[];
+    discarded: Array<{
+      name: string;
+      domain: string;
+      reason: 'missing_fields' | 'excluded_sector' | 'market_mismatch';
+      sector?: string | null;
+      market?: string | null;
+    }>;
+  } {
     const excluded = new Set(
       ibp.excludedSectors.map((s) => s.trim().toLowerCase()).filter(Boolean),
     );
@@ -716,52 +752,52 @@ export class BrandDiscoveryService {
       ibp.markets.map((m) => m.trim().toLowerCase()).filter(Boolean),
     );
 
-    return candidates.filter((candidate) => {
+    const kept: RawBrandCandidate[] = [];
+    const discarded: Array<{
+      name: string;
+      domain: string;
+      reason: 'missing_fields' | 'excluded_sector' | 'market_mismatch';
+      sector?: string | null;
+      market?: string | null;
+    }> = [];
+    const reject = (
+      candidate: RawBrandCandidate,
+      reason: 'missing_fields' | 'excluded_sector' | 'market_mismatch',
+    ) =>
+      discarded.push({
+        name: candidate.name,
+        domain: candidate.domain,
+        reason,
+        sector: candidate.sector,
+        market: candidate.market,
+      });
+
+    for (const candidate of candidates) {
       if (!candidate.website?.trim() || !candidate.name?.trim()) {
-        return false;
+        reject(candidate, 'missing_fields');
+        continue;
       }
 
       const sector = candidate.sector?.trim().toLowerCase() ?? '';
       if (sector && [...excluded].some((ex) => sector.includes(ex))) {
-        return false;
+        reject(candidate, 'excluded_sector');
+        continue;
       }
 
       if (markets.size > 0 && candidate.market) {
         if (!isIbpCompatibleMarket(candidate.market, markets)) {
-          return false;
+          reject(candidate, 'market_mismatch');
+          continue;
         }
       }
 
-      return true;
-    });
+      kept.push(candidate);
+    }
+    return { kept, discarded };
   }
 }
 
-/** Global / worldwide brands stay eligible against regional IBP markets. */
-const GLOBAL_MARKET_TOKENS = [
-  'global',
-  'worldwide',
-  'international',
-  'multinational',
-  'multi-market',
-  'multi market',
-] as const;
-
-export function isIbpCompatibleMarket(
-  candidateMarket: string,
-  ibpMarkets: ReadonlySet<string>,
-): boolean {
-  const market = candidateMarket.trim().toLowerCase();
-  if (!market) {
-    return true;
-  }
-  if (GLOBAL_MARKET_TOKENS.some((token) => market.includes(token))) {
-    return true;
-  }
-  return [...ibpMarkets].some(
-    (allowed) => market.includes(allowed) || allowed.includes(market),
-  );
-}
+export { isIbpCompatibleMarket };
 
 export type BrandDiscoveryRunRecord = Prisma.BrandDiscoveryRunGetPayload<{
   select: typeof brandDiscoveryRunSelect;

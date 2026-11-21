@@ -782,6 +782,7 @@ describe('BrandDiscoveryAiOrchestrator', () => {
         getConfig: topUpConfig({
           BRAND_DISCOVERY_MIN_QUERIES: 0,
           BRAND_DISCOVERY_MAX_SCORE_HITS: 12,
+          BRAND_DISCOVERY_SCORE_BATCH_SIZE: 12,
           BRAND_DISCOVERY_SCORE_TIMEOUT_MS: 900000,
         }),
         wait: jest
@@ -797,6 +798,106 @@ describe('BrandDiscoveryAiOrchestrator', () => {
       // Diagnostics keep the full filtered list.
       expect(result.searchHitsCount).toBeGreaterThan(12);
       expect(wait).toHaveBeenNthCalledWith(2, SCORE_EXECUTION_ID, 900000);
+    });
+
+    describe('SCORE batching', () => {
+      const makeHits = (n: number) =>
+        Array.from({ length: n }, (_, i) => ({
+          title: 'Brand ' + i,
+          url: 'https://brand' + i + '.example/',
+          content: 'brand ' + i,
+        }));
+      const brand = (domain: string, score: number) => ({
+        name: domain,
+        website: 'https://' + domain + '/',
+        score,
+        fitReason: 'fit',
+        evidenceUrls: ['https://' + domain + '/about'],
+      });
+      const batchConfig = () =>
+        topUpConfig({
+          BRAND_DISCOVERY_MIN_QUERIES: 0,
+          BRAND_DISCOVERY_MAX_SCORE_HITS: 12,
+          BRAND_DISCOVERY_SCORE_BATCH_SIZE: 5,
+        });
+
+      it('splits hits into batches and merges brands by domain (higher score wins)', async () => {
+        const { orchestrator, publishScore } = build({
+          search: jest.fn().mockResolvedValue(makeHits(40)),
+          getConfig: batchConfig(),
+          wait: jest
+            .fn()
+            .mockResolvedValueOnce(planCompleted(validQueries))
+            .mockResolvedValueOnce(scoreCompleted([brand('a.example', 50)]))
+            .mockResolvedValueOnce(
+              scoreCompleted([brand('a.example', 90), brand('b.example', 70)]),
+            )
+            .mockResolvedValueOnce(scoreCompleted([])),
+        });
+
+        const result = await orchestrator.orchestrate(baseParams);
+
+        const sizes = publishScore.mock.calls.map(
+          (call) => (call[0] as { searchHits: unknown[] }).searchHits.length,
+        );
+        expect(sizes).toEqual([5, 5, 2]);
+        expect(result.brands).toHaveLength(2);
+        expect(result.brands.find((b) => b.website.includes('a.example'))?.score).toBe(90);
+        expect(result.scoreBatches).toEqual({ total: 3, failed: 0, hitsPerBatch: 5 });
+      });
+
+      it('keeps the run alive when one batch fails', async () => {
+        const { orchestrator } = build({
+          search: jest.fn().mockResolvedValue(makeHits(40)),
+          getConfig: batchConfig(),
+          wait: jest
+            .fn()
+            .mockResolvedValueOnce(planCompleted(validQueries))
+            .mockResolvedValueOnce(scoreCompleted([brand('a.example', 80)]))
+            .mockResolvedValueOnce(scoreFailed('SCORE_FAILED', 'model timeout'))
+            .mockResolvedValueOnce(scoreCompleted([brand('c.example', 60)])),
+        });
+
+        const result = await orchestrator.orchestrate(baseParams);
+
+        expect(result.brands.map((b) => b.website).sort()).toEqual([
+          'https://a.example/',
+          'https://c.example/',
+        ]);
+        expect(result.scoreBatches).toEqual({ total: 3, failed: 1, hitsPerBatch: 5 });
+      });
+
+      it('fails the run only when every batch fails', async () => {
+        const { orchestrator } = build({
+          search: jest.fn().mockResolvedValue(makeHits(40)),
+          getConfig: batchConfig(),
+          wait: jest
+            .fn()
+            .mockResolvedValueOnce(planCompleted(validQueries))
+            .mockResolvedValue(scoreFailed('SCORE_FAILED', 'model timeout')),
+        });
+
+        await expect(orchestrator.orchestrate(baseParams)).rejects.toBeInstanceOf(
+          BrandDiscoveryAiOrchestratorError,
+        );
+      });
+
+      it('still runs SCORE once when there are zero hits', async () => {
+        const { orchestrator, publishScore } = build({
+          search: jest.fn().mockResolvedValue([]),
+          getConfig: batchConfig(),
+          wait: jest
+            .fn()
+            .mockResolvedValueOnce(planCompleted(validQueries))
+            .mockResolvedValueOnce(scoreCompleted([])),
+        });
+
+        const result = await orchestrator.orchestrate(baseParams);
+
+        expect(publishScore).toHaveBeenCalledTimes(1);
+        expect((publishScore.mock.calls[0][0] as { searchHits: unknown[] }).searchHits).toEqual([]);
+        expect(result.scoreBatches?.total).toBe(1);
+      });
     });
   });
 });

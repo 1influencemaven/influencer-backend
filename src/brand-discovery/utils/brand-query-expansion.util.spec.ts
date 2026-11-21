@@ -60,6 +60,29 @@ describe('buildExpandedBrandQueries', () => {
     expect(queries[2]).toBe('candles DTC brand ambassador program United States');
   });
 
+  it('lets the IBP sectors rule: unrelated influencer niches are not mixed in', () => {
+    const queries = buildExpandedBrandQueries({
+      sectors: ['Beauty', 'Skincare'],
+      niches: ['Skincare', 'Mama Colombiana', 'Beauty', 'Finanzas'],
+      markets: ['US'],
+      max: 6,
+    });
+    expect(queries).toHaveLength(6);
+    const joined = queries.join(' | ');
+    expect(joined).not.toMatch(/baby|kids|toys|diapers|maternity/);
+    expect(joined).toMatch(/skincare|makeup|haircare|fragrance/);
+  });
+
+  it('falls back to the influencer niches when the IBP sectors give nothing concrete', () => {
+    const queries = buildExpandedBrandQueries({
+      sectors: ['mindset'],
+      niches: ['beauty'],
+      markets: ['US'],
+      max: 3,
+    });
+    expect(queries.join(' ')).toMatch(/skincare/);
+  });
+
   it('never leaks internal IBP enum tokens into queries', () => {
     const queries = buildExpandedBrandQueries({
       sectors: ['beauty'],

@@ -55,12 +55,17 @@ export function buildExpandedBrandQueries(
   input: BrandQueryExpansionInput,
 ): string[] {
   const max = input.max ?? 8;
-  const seeds = [
-    ...input.sectors,
-    ...(input.niches ?? []),
-    ...(input.niche ? [input.niche] : []),
-  ];
-  const subcategories = expandSectorsToSubcategories(seeds, max);
+  // The IBP is what the brand side asked for: it decides the subcategories.
+  // The influencer's own niches (which may include unrelated ones, e.g. a
+  // beauty IBP for a talent that also posts about family) are only a fallback
+  // when the IBP sectors yield nothing concrete.
+  let subcategories = expandSectorsToSubcategories(input.sectors, max);
+  if (subcategories.length === 0) {
+    subcategories = expandSectorsToSubcategories(
+      [...(input.niches ?? []), ...(input.niche ? [input.niche] : [])],
+      max,
+    );
+  }
   if (subcategories.length === 0) return [];
 
   const markets = (input.markets ?? [])

@@ -6,6 +6,11 @@ export type InfluencerAiEnv = {
   aiProvider: 'ollama' | 'anthropic';
   ollamaBaseUrl: string;
   ollamaModel: string;
+  /**
+   * Max wait for an Ollama response (headers + body). CPU-only local models can
+   * take minutes to answer a non-streaming request; undici's default is 300 s.
+   */
+  ollamaRequestTimeoutMs: number;
   anthropicApiKey?: string;
   anthropicModel: string;
   /** Bright Data — Contact Research (FIND_BRAND_* / FIND_AGENCY_EMAILS). */
@@ -45,6 +50,9 @@ export function loadInfluencerAiEnv(): InfluencerAiEnv {
     aiProvider,
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
     ollamaModel: process.env.OLLAMA_MODEL ?? 'llama3.2:3b',
+    ollamaRequestTimeoutMs: Number(
+      process.env.OLLAMA_REQUEST_TIMEOUT_MS ?? '1200000',
+    ),
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || undefined,
     anthropicModel:
       process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-20250514',
