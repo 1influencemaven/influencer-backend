@@ -48,6 +48,33 @@ describe('mapInfluencerToIbpInput', () => {
     expect(input.instagramResearchEvidence).toBeNull();
   });
 
+  it('sends language and engagement as explicit fields (Decimal-like, number or string)', () => {
+    const decimalLike = { toString: () => '3.45' };
+    const base = { id: 'inf-1', name: 'Ada', language: 'es' };
+
+    const fromDecimal = mapInfluencerToIbpInput({ ...base, engagement: decimalLike });
+    expect(fromDecimal.influencer.audienceLanguage).toBe('es');
+    expect(fromDecimal.influencer.engagementRate).toBe(3.45);
+
+    expect(
+      mapInfluencerToIbpInput({ ...base, engagement: 2 }).influencer.engagementRate,
+    ).toBe(2);
+    expect(
+      mapInfluencerToIbpInput({ ...base, engagement: '4.1' }).influencer.engagementRate,
+    ).toBe(4.1);
+  });
+
+  it('omits language and engagement when unknown or not numeric', () => {
+    const input = mapInfluencerToIbpInput({
+      id: 'inf-1',
+      name: 'Ada',
+      engagement: 'n/a',
+    });
+    expect(input.influencer.audienceLanguage).toBeUndefined();
+    expect(input.influencer.engagementRate).toBeUndefined();
+    expect(mapInfluencerToIbpInput({ id: 'x', name: 'y', engagement: null }).influencer.engagementRate).toBeUndefined();
+  });
+
   it('includes manual niches and Instagram research evidence when present', () => {
     const input = mapInfluencerToIbpInput({
       id: 'inf-1',

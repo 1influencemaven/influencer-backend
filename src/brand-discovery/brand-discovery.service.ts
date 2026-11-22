@@ -12,6 +12,10 @@ import { Queue } from 'bullmq';
 import type { Prisma } from '../generated/prisma/client';
 import { isIbpCompatibleMarket } from './utils/ibp-market.util';
 import {
+  parseRetailerPolicy,
+  selectForPersistence,
+} from './utils/brand-retailer.util';
+import {
   BrandKnowledgeService,
   type BrandDecisionStatus,
 } from '../brand-knowledge/brand-knowledge.service';
@@ -475,9 +479,18 @@ export class BrandDiscoveryService {
         );
         const skippedModelPriorCount =
           orderedNovel.length - withoutModelPrior.length;
-        let toPersist = skippedPersistNoSerp
-          ? []
-          : withoutModelPrior.slice(0, run.limit);
+        // Multi-brand retailers are demoted (or excluded) BEFORE the limit so they
+        // cannot displace brand-owned candidates; whatever the limit cuts is
+        // recorded in searchMetadata instead of vanishing.
+        const retailerPolicy = parseRetailerPolicy(
+          this.configService.get<string>('BRAND_DISCOVERY_RETAILER_POLICY'),
+        );
+        const selection = selectForPersistence(
+          withoutModelPrior,
+          run.limit,
+          retailerPolicy,
+        );
+        let toPersist = skippedPersistNoSerp ? [] : selection.selected;
 
         let researchedCount = 0;
         let researchFailedCount = 0;
@@ -580,6 +593,15 @@ export class BrandDiscoveryService {
           ),
           afterDedupeCount: unique.length,
           afterExcludeExistingCount: novel.length,
+          retailerPolicy,
+          retailersSelectedCount: selection.retailersSelected.length,
+          retailersExcluded: selection.retailersExcluded
+            .slice(0, 30)
+            .map((c) => ({ name: c.name, domain: c.domain, score: c.score })),
+          cutByLimitCount: selection.cutByLimit.length,
+          cutByLimit: selection.cutByLimit
+            .slice(0, 30)
+            .map((c) => ({ name: c.name, domain: c.domain, score: c.score })),
           skippedModelPriorCount,
           persistedCount: toPersist.length,
           researchedCount,

@@ -124,6 +124,14 @@ export const envValidationSchema = Joi.object({
     .max(1800000)
     .default(300000),
 
+  /**
+   * Multi-brand retailers (Sephora, Ulta, Nordstrom, Target...) in Brand Discovery results:
+   * demote (default) = persist after brand-owned candidates; exclude = never persist; off = no special handling.
+   */
+  BRAND_DISCOVERY_RETAILER_POLICY: Joi.string()
+    .valid('demote', 'exclude', 'off')
+    .default('demote'),
+
   /** Deep research per brand (Unlocker + RESEARCH_BRAND). Turn off for CPU-only local models. */
   BRAND_DISCOVERY_RESEARCH_ENABLED: Joi.boolean().default(true),
 
