@@ -36,8 +36,10 @@ describe('InfluencersController', () => {
   };
 
   const instagramResearchService = {
-    researchByInfluencerId: jest.fn(),
-    researchByUsername: jest.fn(),
+    enqueueByInfluencerId: jest.fn(),
+    enqueueByUsername: jest.fn(),
+    getRun: jest.fn(),
+    getActiveRunForInfluencer: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -151,36 +153,63 @@ describe('InfluencersController', () => {
     );
   });
 
-  it('should delegate Instagram research to InstagramResearchService', async () => {
+  it('should enqueue Instagram research by influencer id', async () => {
     const payload = {
-      influencer: { id: 'influencer-id' },
-      research: { outcome: 'UPDATED', handle: 'laurafit_es' },
+      id: 'run-1',
+      status: 'PROCESSING',
+      mode: 'INFLUENCER',
+      influencerId: 'influencer-id',
     };
-    instagramResearchService.researchByInfluencerId.mockResolvedValue(payload);
+    instagramResearchService.enqueueByInfluencerId.mockResolvedValue(payload);
 
     await expect(
       influencersController.researchInstagram('influencer-id'),
     ).resolves.toEqual(payload);
     expect(
-      instagramResearchService.researchByInfluencerId,
+      instagramResearchService.enqueueByInfluencerId,
     ).toHaveBeenCalledWith('influencer-id');
   });
 
-  it('should delegate username Instagram research without influencer id', async () => {
+  it('should enqueue username Instagram research without influencer id', async () => {
     const payload = {
-      research: { outcome: 'FOUND', persisted: false },
-      normalized: { followers: 1 },
-      provider: {},
+      id: 'run-2',
+      status: 'PROCESSING',
+      mode: 'USERNAME',
+      handleNormalized: 'belu.deltoro',
     };
-    instagramResearchService.researchByUsername.mockResolvedValue(payload);
+    instagramResearchService.enqueueByUsername.mockResolvedValue(payload);
 
     await expect(
       influencersController.researchInstagramByUsername({
         username: '@belu.deltoro',
       }),
     ).resolves.toEqual(payload);
-    expect(instagramResearchService.researchByUsername).toHaveBeenCalledWith(
+    expect(instagramResearchService.enqueueByUsername).toHaveBeenCalledWith(
       '@belu.deltoro',
     );
+  });
+
+  it('should get Instagram research run by id', async () => {
+    const payload = { id: 'run-3', status: 'COMPLETED' };
+    instagramResearchService.getRun.mockResolvedValue(payload);
+
+    await expect(
+      influencersController.getInstagramResearchRun('run-3'),
+    ).resolves.toEqual(payload);
+    expect(instagramResearchService.getRun).toHaveBeenCalledWith('run-3');
+  });
+
+  it('should get active Instagram research run for influencer', async () => {
+    const payload = { id: 'run-active', status: 'PROCESSING' };
+    instagramResearchService.getActiveRunForInfluencer.mockResolvedValue(
+      payload,
+    );
+
+    await expect(
+      influencersController.getActiveInstagramResearch('influencer-id'),
+    ).resolves.toEqual(payload);
+    expect(
+      instagramResearchService.getActiveRunForInfluencer,
+    ).toHaveBeenCalledWith('influencer-id');
   });
 });

@@ -6,6 +6,7 @@ import {
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 
@@ -18,8 +19,13 @@ jest.mock('./influencers.service', () => ({
   influencerDetailSelect: {},
 }));
 
+import { QUEUES } from '../bullmq/queue.constants';
 import { BrightDataDatasetClient } from '../integrations/brightdata/brightdata-dataset.client';
-import { InfluencerDataOrigin } from '../generated/prisma/enums';
+import {
+  InfluencerDataOrigin,
+  InstagramResearchMode,
+  InstagramResearchStatus,
+} from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { InfluencersService } from './influencers.service';
 import { InstagramResearchService } from './instagram-research.service';
@@ -43,6 +49,16 @@ describe('InstagramResearchService', () => {
     influencer: {
       findFirst: jest.fn(),
     },
+    instagramResearchRun: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+  };
+
+  const queue = {
+    add: jest.fn(),
   };
 
   const configService = {
@@ -77,6 +93,7 @@ describe('InstagramResearchService', () => {
         { provide: BrightDataDatasetClient, useValue: datasetClient },
         { provide: PrismaService, useValue: prisma },
         { provide: ConfigService, useValue: configService },
+        { provide: getQueueToken(QUEUES.INSTAGRAM_RESEARCH), useValue: queue },
       ],
     }).compile();
 
@@ -84,6 +101,7 @@ describe('InstagramResearchService', () => {
     jest.clearAllMocks();
     influencersService.findOne.mockResolvedValue(current);
     datasetClient.isConfigured.mockReturnValue(true);
+    queue.add.mockResolvedValue({ id: 'job-1' });
   });
 
   it('updates EXTERNAL fields and skips MANUAL name', async () => {
@@ -333,6 +351,130 @@ describe('InstagramResearchService', () => {
         ServiceUnavailableException,
       );
       expect(datasetClient.scrapeByUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('enqueue + executeRun', () => {
+    it('enqueues username research and returns PROCESSING run', async () => {
+      prisma.instagramResearchRun.findFirst.mockResolvedValue(null);
+      prisma.instagramResearchRun.create.mockResolvedValue({
+        id: 'run-u1',
+        status: InstagramResearchStatus.PROCESSING,
+        mode: InstagramResearchMode.USERNAME,
+        handleNormalized: 'belu.deltoro',
+      });
+
+      const run = await service.enqueueByUsername('belu.deltoro');
+
+      expect(run.id).toBe('run-u1');
+      expect(queue.add).toHaveBeenCalledWith(
+        'research-by-username',
+        { runId: 'run-u1' },
+        expect.objectContaining({ jobId: 'ig-research-run-u1' }),
+      );
+    });
+
+    it('returns existing PROCESSING username run without re-enqueue', async () => {
+      prisma.instagramResearchRun.findFirst.mockResolvedValue({
+        id: 'busy',
+        status: InstagramResearchStatus.PROCESSING,
+        mode: InstagramResearchMode.USERNAME,
+        handleNormalized: 'belu.deltoro',
+      });
+
+      const run = await service.enqueueByUsername('belu.deltoro');
+
+      expect(run.id).toBe('busy');
+      expect(queue.add).not.toHaveBeenCalled();
+      expect(prisma.instagramResearchRun.create).not.toHaveBeenCalled();
+    });
+
+    it('returns existing PROCESSING influencer run without re-enqueue', async () => {
+      prisma.instagramResearchRun.findFirst.mockResolvedValue({
+        id: 'busy-inf',
+        status: InstagramResearchStatus.PROCESSING,
+        mode: InstagramResearchMode.INFLUENCER,
+        influencerId: 'inf-1',
+      });
+
+      const run = await service.enqueueByInfluencerId('inf-1');
+
+      expect(run.id).toBe('busy-inf');
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it('executeRun marks COMPLETED with username result', async () => {
+      prisma.instagramResearchRun.findUnique.mockResolvedValue({
+        id: 'run-u2',
+        status: InstagramResearchStatus.PROCESSING,
+        mode: InstagramResearchMode.USERNAME,
+        username: 'belu.deltoro',
+        handleNormalized: 'belu.deltoro',
+        influencerId: null,
+      });
+      datasetClient.scrapeByUrl.mockResolvedValue({
+        ok: true,
+        row: {
+          account: 'belu.deltoro',
+          followers: 10,
+          is_private: false,
+        },
+      });
+      prisma.instagramResearchRun.update.mockResolvedValue({});
+
+      await service.executeRun('run-u2');
+
+      expect(prisma.instagramResearchRun.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'run-u2' },
+          data: expect.objectContaining({
+            status: InstagramResearchStatus.COMPLETED,
+          }),
+        }),
+      );
+    });
+
+    it('executeRun marks FAILED with error code on provider timeout', async () => {
+      prisma.instagramResearchRun.findUnique.mockResolvedValue({
+        id: 'run-u3',
+        status: InstagramResearchStatus.PROCESSING,
+        mode: InstagramResearchMode.USERNAME,
+        username: 'anyone',
+        handleNormalized: 'anyone',
+        influencerId: null,
+      });
+      datasetClient.scrapeByUrl.mockResolvedValue({
+        ok: false,
+        errorCode: 'timeout',
+      });
+      prisma.instagramResearchRun.update.mockResolvedValue({});
+
+      await service.executeRun('run-u3');
+
+      expect(prisma.instagramResearchRun.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'run-u3' },
+          data: expect.objectContaining({
+            status: InstagramResearchStatus.FAILED,
+            errorCode: 'PROVIDER_TIMEOUT',
+          }),
+        }),
+      );
+    });
+
+    it('getRun returns run or 404', async () => {
+      prisma.instagramResearchRun.findUnique.mockResolvedValue({
+        id: 'run-x',
+        status: InstagramResearchStatus.COMPLETED,
+      });
+      await expect(service.getRun('run-x')).resolves.toEqual(
+        expect.objectContaining({ id: 'run-x' }),
+      );
+
+      prisma.instagramResearchRun.findUnique.mockResolvedValue(null);
+      await expect(service.getRun('missing')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 });

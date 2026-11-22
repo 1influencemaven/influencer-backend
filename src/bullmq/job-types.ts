@@ -12,6 +12,12 @@ export const CONTACT_DISCOVERY_JOBS = {
   DISCOVER_BUSINESS_CONTACTS: 'discover-business-contacts',
 } as const;
 
+/** Jobs for QUEUES.INSTAGRAM_RESEARCH (Bright Data Instagram Profiles). */
+export const INSTAGRAM_RESEARCH_JOBS = {
+  RESEARCH_BY_USERNAME: 'research-by-username',
+  RESEARCH_BY_INFLUENCER: 'research-by-influencer',
+} as const;
+
 export const OUTREACH_JOBS = {
   SEND_EMAIL: 'send-email',
 } as const;

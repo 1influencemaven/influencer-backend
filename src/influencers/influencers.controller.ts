@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -10,20 +12,19 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiAcceptedResponse,
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
-  ApiGatewayTimeoutResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse,
-  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -224,124 +225,84 @@ export class InfluencersController {
   }
 
   @ApiOperation({
-    summary: 'Investigar Instagram por username (consulta, sin persistir)',
+    summary: 'Encolar investigación Instagram por username',
     description:
-      'Valida/normaliza el username, consulta Bright Data Instagram Profiles y ' +
-      'devuelve campos del proveedor + vista normalizada. No crea ni actualiza influencers. ' +
-      'Fase 1 HU-TM-003 (sin Mastra).',
+      'Valida/normaliza el username, crea un run PROCESSING y encola Bright Data en BullMQ. ' +
+      'No crea ni actualiza influencers. Polling: GET /influencers/instagram-research/runs/:runId.',
   })
   @ApiBody({ type: ResearchInstagramUsernameDto })
-  @ApiOkResponse({
-    description: 'Perfil encontrado o privado (sin escritura en DB)',
-    schema: {
-      type: 'object',
-      properties: {
-        research: {
-          type: 'object',
-          properties: {
-            outcome: {
-              type: 'string',
-              enum: [
-                'FOUND',
-                'PROFILE_PRIVATE',
-                'PROFILE_NOT_FOUND',
-                'INCOMPLETE_RESPONSE',
-              ],
-            },
-            queriedUsername: { type: 'string' },
-            handleNormalized: { type: 'string' },
-            profileUrl: { type: 'string' },
-            source: { type: 'string' },
-            fetchedAt: { type: 'string', format: 'date-time' },
-            persisted: { type: 'boolean', example: false },
-          },
-        },
-        normalized: { type: 'object', additionalProperties: true },
-        provider: { type: 'object', additionalProperties: true },
-      },
-    },
+  @ApiAcceptedResponse({
+    description: 'Job encolado (run PROCESSING)',
   })
   @ApiBadRequestResponse({ description: 'Username inválido' })
-  @ApiNotFoundResponse({ description: 'Perfil Instagram no encontrado' })
-  @ApiUnprocessableEntityResponse({
-    description: 'Respuesta incompleta del proveedor',
-  })
-  @ApiGatewayTimeoutResponse({ description: 'Timeout Bright Data' })
   @ApiServiceUnavailableResponse({
-    description: 'Bright Data no configurado o error de proveedor',
+    description: 'Bright Data no configurado',
   })
   @ApiUnauthorizedResponse({
     description: 'Token de acceso inválido o ausente',
   })
   @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
+  @HttpCode(HttpStatus.ACCEPTED)
   @Post('instagram-research')
   researchInstagramByUsername(@Body() dto: ResearchInstagramUsernameDto) {
-    return this.instagramResearchService.researchByUsername(dto.username);
+    return this.instagramResearchService.enqueueByUsername(dto.username);
   }
 
   @ApiOperation({
-    summary: 'Investigar perfil de Instagram de un talento existente',
+    summary: 'Obtener estado de un run de Instagram research',
     description:
-      'Normaliza el handle del talento, consulta Bright Data Instagram Profiles desde Nest, ' +
-      'mapea campos disponibles y aplica merge EXTERNAL sin sobrescribir MANUAL. ' +
-      'No llama Bright Data desde el frontend.',
+      'Polling del run durable. COMPLETED incluye `result` (payload username o by-id).',
   })
-  @ApiOkResponse({
+  @ApiOkResponse({ description: 'Run encontrado' })
+  @ApiNotFoundResponse({ description: 'Run no encontrado' })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
+  @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
+  @Get('instagram-research/runs/:runId')
+  getInstagramResearchRun(@Param('runId') runId: string) {
+    return this.instagramResearchService.getRun(runId);
+  }
+
+  @ApiOperation({
+    summary: 'Encolar investigación Instagram de un talento existente',
     description:
-      'Investigación completada (UPDATED / NO_CHANGES / PROFILE_PRIVATE)',
-    schema: {
-      type: 'object',
-      properties: {
-        influencer: influencerResponseSchema,
-        research: {
-          type: 'object',
-          properties: {
-            outcome: {
-              type: 'string',
-              enum: [
-                'UPDATED',
-                'NO_CHANGES',
-                'PROFILE_PRIVATE',
-                'PROFILE_NOT_FOUND',
-                'INCOMPLETE_RESPONSE',
-                'PROVIDER_ERROR',
-                'PROVIDER_TIMEOUT',
-                'NOT_CONFIGURED',
-              ],
-            },
-            handle: { type: 'string' },
-            profileUrl: { type: 'string' },
-            source: { type: 'string' },
-            fetchedAt: { type: 'string', format: 'date-time' },
-            updatedFields: { type: 'array', items: { type: 'string' } },
-            skippedManualFields: { type: 'array', items: { type: 'string' } },
-            message: { type: 'string' },
-          },
-        },
-      },
-    },
+      'Crea un run PROCESSING y encola Bright Data. El worker aplica merge EXTERNAL sin sobrescribir MANUAL. ' +
+      'Polling: GET /influencers/instagram-research/runs/:runId.',
+  })
+  @ApiAcceptedResponse({
+    description:
+      'Job encolado (run PROCESSING). Si ya había uno activo, se devuelve ese run (idempotente).',
   })
   @ApiBadRequestResponse({ description: 'Handle Instagram inválido o ausente' })
-  @ApiNotFoundResponse({
-    description: 'Talento o perfil Instagram no encontrado',
-  })
-  @ApiConflictResponse({
-    description: 'Handle del proveedor choca con otro talento',
-  })
-  @ApiUnprocessableEntityResponse({
-    description: 'Respuesta incompleta del proveedor',
-  })
-  @ApiGatewayTimeoutResponse({ description: 'Timeout Bright Data' })
+  @ApiNotFoundResponse({ description: 'Talento no encontrado' })
   @ApiServiceUnavailableResponse({
-    description: 'Bright Data no configurado o error de proveedor',
+    description: 'Bright Data no configurado',
   })
   @ApiUnauthorizedResponse({
     description: 'Token de acceso inválido o ausente',
   })
   @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
+  @HttpCode(HttpStatus.ACCEPTED)
   @Post(':id/instagram-research')
   researchInstagram(@Param('id') id: string) {
-    return this.instagramResearchService.researchByInfluencerId(id);
+    return this.instagramResearchService.enqueueByInfluencerId(id);
+  }
+
+  @ApiOperation({
+    summary: 'Run Instagram research activo de un talento',
+    description:
+      'Devuelve el run PROCESSING más reciente (si existe) para reanudar polling en UI.',
+  })
+  @ApiOkResponse({ description: 'Run PROCESSING o null' })
+  @ApiNotFoundResponse({ description: 'Talento no encontrado' })
+  @ApiUnauthorizedResponse({
+    description: 'Token de acceso inválido o ausente',
+  })
+  @ApiForbiddenResponse({ description: 'Permisos insuficientes' })
+  @Get(':id/instagram-research/active')
+  getActiveInstagramResearch(@Param('id') id: string) {
+    return this.instagramResearchService.getActiveRunForInfluencer(id);
   }
 
   @ApiOperation({
