@@ -2,21 +2,34 @@ import {
   BadRequestException,
   ConflictException,
   GatewayTimeoutException,
+  HttpException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import type { Prisma } from '../generated/prisma/client';
-import { InfluencerDataOrigin } from '../generated/prisma/enums';
+import {
+  InstagramResearchMode,
+  InstagramResearchStatus,
+} from '../generated/prisma/enums';
 
+import { INSTAGRAM_RESEARCH_JOBS } from '../bullmq/job-types';
+import { QUEUES } from '../bullmq/queue.constants';
 import { BrightDataDatasetClient } from '../integrations/brightdata/brightdata-dataset.client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   influencerDetailSelect,
   InfluencersService,
 } from './influencers.service';
+import {
+  instagramResearchJobId,
+  type InstagramResearchJobData,
+} from './interfaces/instagram-research-job.interface';
 import {
   INFLUENCER_FIELD_KEYS,
   type InfluencerFieldKey,
@@ -36,6 +49,24 @@ import {
 } from './utils/normalize-instagram';
 
 export const DEFAULT_INSTAGRAM_PROFILE_DATASET_ID = 'gd_l1vikfch901nx3by4';
+
+export const instagramResearchRunSelect = {
+  id: true,
+  status: true,
+  mode: true,
+  username: true,
+  handleNormalized: true,
+  influencerId: true,
+  result: true,
+  errorCode: true,
+  errorMessage: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+export type InstagramResearchRunRecord = Prisma.InstagramResearchRunGetPayload<{
+  select: typeof instagramResearchRunSelect;
+}>;
 
 export type InstagramResearchOutcomeCode =
   | 'UPDATED'
@@ -63,7 +94,7 @@ export type InstagramResearchResponse = {
   };
 };
 
-/** Read-only username lookup (HU-TM-003 phase 1). Never persists. */
+/** Read-only username lookup (HU-TM-003 phase 1). Never persists Influencer. */
 export type InstagramUsernameResearchResponse = {
   research: {
     outcome:
@@ -76,7 +107,7 @@ export type InstagramUsernameResearchResponse = {
     profileUrl: string;
     source: string;
     fetchedAt: string;
-    /** Always false in phase 1 — lookup does not write PostgreSQL. */
+    /** Always false in phase 1 — lookup does not write Influencer. */
     persisted: false;
   };
   normalized: InstagramUsernameLookupNormalized;
@@ -85,16 +116,218 @@ export type InstagramUsernameResearchResponse = {
 
 @Injectable()
 export class InstagramResearchService {
+  private readonly logger = new Logger(InstagramResearchService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly datasetClient: BrightDataDatasetClient,
     private readonly influencersService: InfluencersService,
+    @InjectQueue(QUEUES.INSTAGRAM_RESEARCH)
+    private readonly instagramResearchQueue: Queue,
   ) {}
 
+  async enqueueByUsername(usernameInput: string) {
+    const handleNormalized = this.resolveUsernameInput(usernameInput);
+    this.assertProviderConfigured();
+
+    const processing = await this.prisma.instagramResearchRun.findFirst({
+      where: {
+        mode: InstagramResearchMode.USERNAME,
+        handleNormalized,
+        status: InstagramResearchStatus.PROCESSING,
+      },
+      select: instagramResearchRunSelect,
+      orderBy: { createdAt: 'desc' },
+    });
+    // Idempotent: keep FE polling the active run instead of 409.
+    if (processing) {
+      return processing;
+    }
+
+    const run = await this.prisma.instagramResearchRun.create({
+      data: {
+        status: InstagramResearchStatus.PROCESSING,
+        mode: InstagramResearchMode.USERNAME,
+        username: usernameInput.trim(),
+        handleNormalized,
+      },
+      select: instagramResearchRunSelect,
+    });
+
+    await this.enqueueJob(
+      run.id,
+      INSTAGRAM_RESEARCH_JOBS.RESEARCH_BY_USERNAME,
+    );
+
+    return run;
+  }
+
+  async enqueueByInfluencerId(influencerId: string) {
+    const current = await this.influencersService.findOne(influencerId);
+    const handleNormalized = this.resolveResearchHandle(current);
+    this.assertProviderConfigured();
+
+    const processing = await this.prisma.instagramResearchRun.findFirst({
+      where: {
+        mode: InstagramResearchMode.INFLUENCER,
+        influencerId,
+        status: InstagramResearchStatus.PROCESSING,
+      },
+      select: instagramResearchRunSelect,
+      orderBy: { createdAt: 'desc' },
+    });
+    // Idempotent: keep FE polling the active run instead of 409.
+    if (processing) {
+      return processing;
+    }
+
+    const run = await this.prisma.instagramResearchRun.create({
+      data: {
+        status: InstagramResearchStatus.PROCESSING,
+        mode: InstagramResearchMode.INFLUENCER,
+        username: current.instagram,
+        handleNormalized,
+        influencerId,
+      },
+      select: instagramResearchRunSelect,
+    });
+
+    await this.enqueueJob(
+      run.id,
+      INSTAGRAM_RESEARCH_JOBS.RESEARCH_BY_INFLUENCER,
+    );
+
+    return run;
+  }
+
+  async getRun(runId: string): Promise<InstagramResearchRunRecord> {
+    const run = await this.prisma.instagramResearchRun.findUnique({
+      where: { id: runId },
+      select: instagramResearchRunSelect,
+    });
+    if (!run) {
+      throw new NotFoundException('Instagram research run not found');
+    }
+    return run;
+  }
+
+  /** Active PROCESSING run for a talent, if any (resume UI after reload). */
+  async getActiveRunForInfluencer(
+    influencerId: string,
+  ): Promise<InstagramResearchRunRecord | null> {
+    await this.influencersService.findOne(influencerId);
+    return this.prisma.instagramResearchRun.findFirst({
+      where: {
+        mode: InstagramResearchMode.INFLUENCER,
+        influencerId,
+        status: InstagramResearchStatus.PROCESSING,
+      },
+      select: instagramResearchRunSelect,
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   /**
-   * Phase 1: research Instagram by username without creating/updating influencers.
-   * Reuses BrightDataDatasetClient; does not touch Prisma writes.
+   * Worker entry: scrape + persist COMPLETED/FAILED on the run.
+   * Business failures are written as FAILED and do not rethrow (no BullMQ retry).
+   */
+  async executeRun(runId: string): Promise<void> {
+    const run = await this.prisma.instagramResearchRun.findUnique({
+      where: { id: runId },
+      select: {
+        id: true,
+        status: true,
+        mode: true,
+        username: true,
+        handleNormalized: true,
+        influencerId: true,
+      },
+    });
+
+    if (!run) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'instagram_research_run_missing',
+          runId,
+        }),
+      );
+      return;
+    }
+
+    if (run.status !== InstagramResearchStatus.PROCESSING) {
+      this.logger.log(
+        JSON.stringify({
+          event: 'instagram_research_run_skip_terminal',
+          runId,
+          status: run.status,
+        }),
+      );
+      return;
+    }
+
+    try {
+      if (run.mode === InstagramResearchMode.USERNAME) {
+        const username = run.username ?? run.handleNormalized;
+        if (!username) {
+          throw new BadRequestException({
+            code: 'INVALID_INSTAGRAM',
+            message: 'Instagram username is missing on research run',
+          });
+        }
+        const result = await this.researchByUsername(username);
+        await this.prisma.instagramResearchRun.update({
+          where: { id: runId },
+          data: {
+            status: InstagramResearchStatus.COMPLETED,
+            result: result as unknown as Prisma.InputJsonValue,
+            errorCode: null,
+            errorMessage: null,
+          },
+        });
+        return;
+      }
+
+      if (!run.influencerId) {
+        throw new BadRequestException({
+          code: 'INVALID_INSTAGRAM',
+          message: 'Influencer id is missing on research run',
+        });
+      }
+
+      const result = await this.researchByInfluencerId(run.influencerId);
+      await this.prisma.instagramResearchRun.update({
+        where: { id: runId },
+        data: {
+          status: InstagramResearchStatus.COMPLETED,
+          result: result as unknown as Prisma.InputJsonValue,
+          errorCode: null,
+          errorMessage: null,
+        },
+      });
+    } catch (error) {
+      const { code, message } = this.extractFailure(error);
+      this.logger.warn(
+        JSON.stringify({
+          event: 'instagram_research_run_failed',
+          runId,
+          errorCode: code,
+          errorMessage: message,
+        }),
+      );
+      await this.prisma.instagramResearchRun.update({
+        where: { id: runId },
+        data: {
+          status: InstagramResearchStatus.FAILED,
+          errorCode: code,
+          errorMessage: message,
+        },
+      });
+    }
+  }
+
+  /**
+   * Phase 1 scrape by username (no Influencer write). Used by the worker.
    */
   async researchByUsername(
     usernameInput: string,
@@ -275,6 +508,64 @@ export class InstagramResearchService {
     };
   }
 
+  private async enqueueJob(
+    runId: string,
+    jobName: (typeof INSTAGRAM_RESEARCH_JOBS)[keyof typeof INSTAGRAM_RESEARCH_JOBS],
+  ) {
+    try {
+      await this.instagramResearchQueue.add(
+        jobName,
+        { runId } satisfies InstagramResearchJobData,
+        {
+          jobId: instagramResearchJobId(runId),
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: 100,
+          removeOnFail: 200,
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        JSON.stringify({
+          event: 'instagram_research_enqueue_failed',
+          runId,
+          jobName,
+          errorMessage: message,
+        }),
+      );
+      await this.prisma.instagramResearchRun.update({
+        where: { id: runId },
+        data: {
+          status: InstagramResearchStatus.FAILED,
+          errorCode: 'ENQUEUE_FAILED',
+          errorMessage: message,
+        },
+      });
+      throw new ConflictException(
+        `Failed to enqueue Instagram research job for run ${runId}`,
+      );
+    }
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'instagram_research_enqueued',
+        runId,
+        queue: QUEUES.INSTAGRAM_RESEARCH,
+        job: jobName,
+      }),
+    );
+  }
+
+  private assertProviderConfigured() {
+    if (!this.datasetClient.isConfigured()) {
+      throw new ServiceUnavailableException({
+        code: 'NOT_CONFIGURED' satisfies InstagramResearchOutcomeCode,
+        message: 'Bright Data is not configured for Instagram research',
+      });
+    }
+  }
+
   private resolveUsernameInput(usernameInput: string): string {
     const normalized = normalizeInstagramHandle(usernameInput ?? '');
     if (!isValidNormalizedInstagramHandle(normalized)) {
@@ -367,6 +658,34 @@ export class InstagramResearchService {
       code: 'PROVIDER_ERROR' satisfies InstagramResearchOutcomeCode,
       message: error ?? 'Bright Data Instagram research failed',
     });
+  }
+
+  private extractFailure(error: unknown): {
+    code: string;
+    message: string;
+  } {
+    if (error instanceof HttpException) {
+      const response = error.getResponse();
+      if (typeof response === 'object' && response !== null) {
+        const body = response as Record<string, unknown>;
+        const code =
+          typeof body.code === 'string' ? body.code : 'PROVIDER_ERROR';
+        const message =
+          typeof body.message === 'string'
+            ? body.message
+            : Array.isArray(body.message)
+              ? body.message.map(String).join(', ')
+              : error.message;
+        return { code, message };
+      }
+      return { code: 'PROVIDER_ERROR', message: error.message };
+    }
+
+    if (error instanceof Error) {
+      return { code: 'PROVIDER_ERROR', message: error.message };
+    }
+
+    return { code: 'PROVIDER_ERROR', message: String(error) };
   }
 
   private buildSoftResponse(
