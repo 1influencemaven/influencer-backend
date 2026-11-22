@@ -51,6 +51,19 @@ enum LeadDiscoveryStatus {
   FAILED
 }
 
+/// Operational status for Instagram research BullMQ runs (Talent Manager).
+enum InstagramResearchStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+/// Username lookup (create form) vs research of an existing Influencer.
+enum InstagramResearchMode {
+  USERNAME
+  INFLUENCER
+}
+
 enum LeadStatus {
   UNDER_REVIEW
   APPROVED
@@ -195,11 +208,37 @@ model Influencer {
   influencerAgencies        InfluencerAgency[]
   quarterAssignments        InfluencerQuarterAssignment[]
   fieldProvenances          InfluencerFieldProvenance[]
+  instagramResearchRuns     InstagramResearchRun[]
 
   @@index([country])
   @@index([niche])
   @@index([createdAt])
   @@index([managerId])
+}
+
+/// Durable job status for Instagram Bright Data research (async via BullMQ).
+/// Operational only — username lookup still does not write Influencer until create.
+model InstagramResearchRun {
+  id               String                  @id @default(uuid())
+  status           InstagramResearchStatus @default(PROCESSING)
+  mode             InstagramResearchMode
+  /// Raw username input (USERNAME mode).
+  username         String?
+  handleNormalized String?
+  influencerId     String?
+  influencer       Influencer?             @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  /// Success payload (username lookup or by-id research response).
+  result           Json?
+  errorCode        String?
+  errorMessage     String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([status])
+  @@index([mode])
+  @@index([handleNormalized])
+  @@index([influencerId])
+  @@index([createdAt])
 }
 
 /// Historical quarter assignments for a talent. Multiple years/quarters allowed; never overwrite prior rows.
