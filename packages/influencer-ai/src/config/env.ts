@@ -16,7 +16,7 @@ export type InfluencerAiEnv = {
   /** Output token cap; stops runaway generations when the model loses the format. */
   ollamaNumPredict: number;
   ollamaKeepAlive?: string;
-  /** Parallel ai.execution jobs (AI_WORKER_CONCURRENCY, default 4). */
+  /** Parallel ai.execution jobs (AI_WORKER_CONCURRENCY, default 8). */
   workerConcurrency: number;
   anthropicApiKey?: string;
   anthropicModel: string;
@@ -65,7 +65,7 @@ export function loadInfluencerAiEnv(): InfluencerAiEnv {
     ollamaKeepAlive: process.env.OLLAMA_KEEP_ALIVE?.trim() || undefined,
     workerConcurrency: Math.max(
       1,
-      Number(process.env.AI_WORKER_CONCURRENCY ?? '4') || 4,
+      Number(process.env.AI_WORKER_CONCURRENCY ?? '8') || 8,
     ),
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || undefined,
     anthropicModel:

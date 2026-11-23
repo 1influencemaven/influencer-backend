@@ -68,3 +68,10 @@ export const CONTACT_DISCOVERY_LOCK_DURATION_BREAKDOWN_MS = {
   headroom: CONTACT_DISCOVERY_LOCK_HEADROOM_MS,
   total: CONTACT_DISCOVERY_LOCK_DURATION_MS,
 } as const;
+
+/**
+ * Brands processed in parallel by the CONTACT_DISCOVERY worker. Default BullMQ
+ * concurrency (1) ran every brand of a multi-brand search back to back
+ * (4 brands ≈ 25 min). Work is Bright Data I/O; 3 keeps SERP/Unlocker load moderate.
+ */
+export const CONTACT_DISCOVERY_CONCURRENCY = 3;

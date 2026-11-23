@@ -18,6 +18,7 @@ import {
 import { AGENCY_DISCOVERY_DEFAULT_MAX_SERP_QUERIES } from '../agency-discovery/utils/build-agency-search-queries';
 import {
   CONTACT_DISCOVERY_LOCK_DURATION_BREAKDOWN_MS,
+  CONTACT_DISCOVERY_CONCURRENCY,
   CONTACT_DISCOVERY_LOCK_DURATION_MS,
 } from './contact-discovery-worker.options';
 import {
@@ -77,6 +78,7 @@ describe('CONTACT_DISCOVERY worker lock options (2C.4.6.1)', () => {
     const workerOpts = workerOptionsOf(ContactDiscoveryProcessor);
     expect(workerOpts).toEqual({
       lockDuration: CONTACT_DISCOVERY_LOCK_DURATION_MS,
+      concurrency: CONTACT_DISCOVERY_CONCURRENCY,
     });
     // Renewal stays on BullMQ defaults — we must not set lockRenewTime: 0.
     expect(workerOpts).not.toHaveProperty('lockRenewTime');
