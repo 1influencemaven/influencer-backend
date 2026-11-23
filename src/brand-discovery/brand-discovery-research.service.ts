@@ -193,8 +193,10 @@ export class BrandDiscoveryResearchService {
     let agentFailed = false;
     let failureWarning: string | undefined;
     try {
+      const timeoutMs = this.resolveResearchTimeoutMs();
       const { executionId } =
         await this.publisher.publishBrandDiscoveryResearch({
+          timeoutMs,
           runId: context.runId,
           userId: context.userId,
           influencerId: context.influencerId,
@@ -216,7 +218,6 @@ export class BrandDiscoveryResearchService {
           promptInstructions: context.promptInstructions,
         });
 
-      const timeoutMs = this.resolveResearchTimeoutMs();
       const result = await this.resultWait.waitForAiExecutionResult(
         executionId,
         timeoutMs,

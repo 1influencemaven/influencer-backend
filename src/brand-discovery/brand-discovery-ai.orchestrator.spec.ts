@@ -324,6 +324,7 @@ describe('BrandDiscoveryAiOrchestrator', () => {
       language: null,
       ibp: {
         ...ibp,
+        targetSectors: [...ibp.targetSectors, 'maternity'],
         markets: ['LATAM', 'United States'],
       },
     });

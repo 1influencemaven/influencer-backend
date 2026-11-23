@@ -109,6 +109,9 @@ export const envValidationSchema = Joi.object({
     .max(5)
     .default(2),
 
+  /** Concurrent Bright Data SERP calls per Brand Discovery run (1 = sequential). */
+  BRAND_DISCOVERY_SERP_CONCURRENCY: Joi.number().integer().min(1).max(8).default(4),
+
   /** Min validated SERP queries before the plan is topped up from the IBP taxonomy (0 = off). */
   BRAND_DISCOVERY_MIN_QUERIES: Joi.number().integer().min(0).max(12).default(6),
   /** Max SERP queries after the top-up. */

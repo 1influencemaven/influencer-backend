@@ -34,9 +34,43 @@ export function resolveMastraModel(env: InfluencerAiEnv): string | object {
   const baseURL = base.endsWith('/api') ? base : `${base}/api`;
   const ollama = createOllama({
     baseURL,
-    fetch: createOllamaFetch(env.ollamaRequestTimeoutMs),
+    fetch: withOllamaDefaults(
+      env,
+      createOllamaFetch(env.ollamaRequestTimeoutMs),
+    ),
   });
   return ollama(env.ollamaModel) as object;
+}
+
+/**
+ * Injects num_ctx / num_predict / keep_alive into every Ollama request so all
+ * agents share them; per-call options still win.
+ */
+export function withOllamaDefaults(
+  env: Pick<
+    InfluencerAiEnv,
+    'ollamaNumCtx' | 'ollamaNumPredict' | 'ollamaKeepAlive'
+  >,
+  baseFetch: typeof fetch = fetch,
+): typeof fetch {
+  return async (input, init) => {
+    if (typeof init?.body !== 'string') return baseFetch(input, init);
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(init.body) as Record<string, unknown>;
+    } catch {
+      return baseFetch(input, init);
+    }
+    body.options = {
+      num_ctx: env.ollamaNumCtx,
+      num_predict: env.ollamaNumPredict,
+      ...((body.options as Record<string, unknown> | undefined) ?? {}),
+    };
+    if (env.ollamaKeepAlive && body.keep_alive === undefined) {
+      body.keep_alive = env.ollamaKeepAlive;
+    }
+    return baseFetch(input, { ...init, body: JSON.stringify(body) });
+  };
 }
 
 export function resolveProviderMeta(env: InfluencerAiEnv): {

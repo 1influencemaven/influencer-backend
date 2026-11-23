@@ -131,13 +131,10 @@ const TAXONOMY: readonly TaxonomyGroup[] = [
   {
     key: 'lifestyle',
     match: /\b(lifestyle)\b/i,
-    subcategories: [
-      'planners and stationery',
-      'water bottles',
-      'tote bags',
-      'home fragrance',
-      'self care gifts',
-    ],
+    // Kept as a niche key (Brand Knowledge Base) but not expanded: generic
+    // lifestyle subcategories (stationery, water bottles, tote bags…) produced
+    // off-niche brands. Other IBP sectors drive the SERP top-up instead.
+    subcategories: [],
   },
 ];
 
@@ -159,6 +156,12 @@ const ABSTRACT_ONLY = new Set([
   'ceo',
   'finanzas',
   'finance',
+  // Channel words, not product categories ("retail brand official site").
+  'retail',
+  'retailer',
+  'retailers',
+  'ecommerce',
+  'e-commerce',
 ]);
 
 function normalizeTerm(term: string): string {

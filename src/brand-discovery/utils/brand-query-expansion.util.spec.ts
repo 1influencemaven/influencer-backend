@@ -134,3 +134,25 @@ describe('marketLabel', () => {
     expect(marketLabel(null)).toBeNull();
   });
 });
+
+describe('generic sectors do not top up the plan', () => {
+  it('does not turn "Retail" into a query', () => {
+    const queries = buildExpandedBrandQueries({
+      sectors: ['Fashion', 'Beauty', 'Retail'],
+      markets: ['US'],
+      max: 8,
+    });
+    expect(queries.length).toBeGreaterThan(0);
+    expect(queries.some((q) => /\bretail\b/i.test(q))).toBe(false);
+  });
+
+  it('does not expand lifestyle into stationery / water bottles / tote bags', () => {
+    const queries = buildExpandedBrandQueries({
+      sectors: ['beauty', 'lifestyle'],
+      max: 8,
+    });
+    expect(
+      queries.some((q) => /stationery|water bottles|tote bags/i.test(q)),
+    ).toBe(false);
+  });
+});

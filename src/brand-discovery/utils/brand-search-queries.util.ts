@@ -1,3 +1,5 @@
+import { resolveNicheKeys } from './brand-sector-taxonomy.util';
+
 const DEFAULT_MIN_LENGTH = 10;
 const DEFAULT_MAX_LENGTH = 200;
 
@@ -166,7 +168,8 @@ export type BrandSearchQueryDiscardReason =
   | 'mode_led'
   | 'mode_quota'
   | 'sector_generic'
-  | 'near_duplicate_category';
+  | 'near_duplicate_category'
+  | 'off_ibp_sector';
 
 export type BrandSearchQueryDiscard = {
   query: string;
@@ -187,6 +190,13 @@ export type ValidateBrandSearchQueriesOptions = {
   minLength?: number;
   maxLength?: number;
   excludedSectors?: string[];
+  /**
+   * IBP target sectors. When they map to taxonomy niches, a query whose own
+   * niche(s) are all outside them (e.g. "pet products" for a fashion/beauty IBP,
+   * coming from the talent's personal niches) is discarded as `off_ibp_sector`.
+   * Queries that map to no niche are kept.
+   */
+  targetSectors?: string[];
   /** Override collaboration-mode quota (default 1). */
   maxCollaborationModeQueries?: number;
   /** Override near-dup Jaccard (default 0.72). */
@@ -351,6 +361,21 @@ function emptyDiagnostics(
 }
 
 /**
+ * True when the query names only niches the IBP does not target. An IBP that
+ * maps to no niche, or a query that maps to none, never triggers it.
+ */
+export function isOffIbpSectorQuery(
+  query: string,
+  ibpNicheKeys: ReadonlySet<string>,
+): boolean {
+  if (ibpNicheKeys.size === 0) return false;
+  const queryKeys = resolveNicheKeys([query]).nicheKeys;
+  return (
+    queryKeys.length > 0 && !queryKeys.some((key) => ibpNicheKeys.has(key))
+  );
+}
+
+/**
  * Deterministic post-LLM cleanup with observability:
  * trim, length, dedupe, listicle, excluded sectors, collaboration-mode quota,
  * sector-generic rejection, category near-dup rejection, then cap at maxQueries.
@@ -370,6 +395,10 @@ export function validateBrandSearchQueriesWithDiagnostics(
   const excluded = (options.excludedSectors ?? [])
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+
+  const ibpNicheKeys = new Set(
+    resolveNicheKeys(options.targetSectors ?? []).nicheKeys,
+  );
 
   const discarded: BrandSearchQueryDiscard[] = [];
   const seen = new Set<string>();
@@ -403,6 +432,11 @@ export function validateBrandSearchQueriesWithDiagnostics(
 
     if (excluded.some((sector) => lower.includes(sector))) {
       discarded.push({ query: trimmed, reason: 'excluded_sector' });
+      continue;
+    }
+
+    if (isOffIbpSectorQuery(trimmed, ibpNicheKeys)) {
+      discarded.push({ query: trimmed, reason: 'off_ibp_sector' });
       continue;
     }
 

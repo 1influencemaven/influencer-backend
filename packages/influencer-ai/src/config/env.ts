@@ -11,6 +11,11 @@ export type InfluencerAiEnv = {
    * take minutes to answer a non-streaming request; undici's default is 300 s.
    */
   ollamaRequestTimeoutMs: number;
+  /** Ollama silently truncates prompts beyond the context window (default 4096). */
+  ollamaNumCtx: number;
+  /** Output token cap; stops runaway generations when the model loses the format. */
+  ollamaNumPredict: number;
+  ollamaKeepAlive?: string;
   anthropicApiKey?: string;
   anthropicModel: string;
   /** Bright Data — Contact Research (FIND_BRAND_* / FIND_AGENCY_EMAILS). */
@@ -53,6 +58,9 @@ export function loadInfluencerAiEnv(): InfluencerAiEnv {
     ollamaRequestTimeoutMs: Number(
       process.env.OLLAMA_REQUEST_TIMEOUT_MS ?? '1200000',
     ),
+    ollamaNumCtx: Number(process.env.OLLAMA_NUM_CTX ?? '8192'),
+    ollamaNumPredict: Number(process.env.OLLAMA_NUM_PREDICT ?? '3072'),
+    ollamaKeepAlive: process.env.OLLAMA_KEEP_ALIVE?.trim() || undefined,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || undefined,
     anthropicModel:
       process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-20250514',

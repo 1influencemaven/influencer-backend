@@ -3,6 +3,7 @@ import {
   categorySignature,
   enforceCollaborationModeQueryQuota,
   isCollaborationModeLedQuery,
+  isOffIbpSectorQuery,
   isSectorGenericQuery,
   validateBrandSearchQueries,
   validateBrandSearchQueriesWithDiagnostics,
@@ -191,5 +192,50 @@ describe('enforceCollaborationModeQueryQuota', () => {
       'baby products brands United States',
       'entrepreneurship education services LATAM UGC',
     ]);
+  });
+});
+
+describe('off_ibp_sector', () => {
+  const katyPlan = [
+    'fashion brands selling in US',
+    'pet products DTC US',
+    'travel services startups US',
+    'skincare DTC brand ambassador program United States',
+    'activewear brand official site United States',
+  ];
+
+  it('drops queries whose niches the IBP does not target (talent personal niches)', () => {
+    const result = validateBrandSearchQueriesWithDiagnostics(katyPlan, {
+      maxQueries: 8,
+      maxCollaborationModeQueries: 4,
+      targetSectors: ['Fashion', 'Beauty', 'Retail'],
+    });
+    expect(result.queries).toEqual([
+      'fashion brands selling in US',
+      'skincare DTC brand ambassador program United States',
+      'activewear brand official site United States',
+    ]);
+    expect(
+      result.diagnostics.discarded
+        .filter((d) => d.reason === 'off_ibp_sector')
+        .map((d) => d.query),
+    ).toEqual(['pet products DTC US', 'travel services startups US']);
+  });
+
+  it('keeps a query that also names a targeted niche', () => {
+    expect(
+      isOffIbpSectorQuery('skincare travel kits brand US', new Set(['beauty'])),
+    ).toBe(false);
+  });
+
+  it('is inactive when the IBP sectors map to no niche', () => {
+    const result = validateBrandSearchQueriesWithDiagnostics(katyPlan, {
+      maxQueries: 8,
+      maxCollaborationModeQueries: 4,
+      targetSectors: ['Retail'],
+    });
+    expect(
+      result.diagnostics.discarded.some((d) => d.reason === 'off_ibp_sector'),
+    ).toBe(false);
   });
 });

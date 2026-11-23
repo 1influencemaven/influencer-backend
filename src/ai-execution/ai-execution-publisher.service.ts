@@ -31,6 +31,8 @@ export type PublishIbpExecutionParams = {
 };
 
 type BrandDiscoveryPublishContext = {
+  /** Nest wait budget; the worker aborts the LLM call once it elapses. */
+  timeoutMs?: number;
   runId: string;
   userId: string;
   influencerId: string;
@@ -247,6 +249,7 @@ export class AiExecutionPublisherService {
       },
       instructions: { business, businessHash },
       configuration: this.resolveLlmConfiguration(),
+      ...this.timeoutLimits(params.timeoutMs),
       input: {
         operation: 'PLAN_SEARCH',
         ...this.brandDiscoveryInfluencerInput(params),
@@ -287,6 +290,7 @@ export class AiExecutionPublisherService {
       },
       instructions: { business, businessHash },
       configuration: this.resolveLlmConfiguration(),
+      ...this.timeoutLimits(params.timeoutMs),
       input: {
         operation: 'SCORE_CANDIDATES',
         ...this.brandDiscoveryInfluencerInput(params),
@@ -332,7 +336,10 @@ export class AiExecutionPublisherService {
       },
       instructions: { business, businessHash },
       configuration: this.resolveLlmConfiguration(),
-      limits: { maxPages },
+      limits: {
+        maxPages,
+        ...(params.timeoutMs ? { timeoutMs: params.timeoutMs } : {}),
+      },
       input: {
         operation: 'RESEARCH_BRAND',
         ...this.brandDiscoveryInfluencerInput(params),
@@ -567,6 +574,12 @@ export class AiExecutionPublisherService {
 
     await this.enqueueRequest(request, executionId);
     return { executionId, correlationId };
+  }
+
+  private timeoutLimits(
+    timeoutMs: number | undefined,
+  ): { limits?: { timeoutMs: number } } {
+    return timeoutMs ? { limits: { timeoutMs } } : {};
   }
 
   private brandDiscoveryInfluencerInput(params: BrandDiscoveryPublishContext): {

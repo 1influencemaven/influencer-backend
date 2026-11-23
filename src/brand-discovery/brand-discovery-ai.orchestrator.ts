@@ -31,6 +31,7 @@ import {
   type SerpHitFilterDiagnostics,
 } from './utils/brand-serp-hit-filter.util';
 import { normalizeDomain } from './utils/brand-domain.util';
+import { mapPool } from './utils/map-pool.util';
 import { buildExpandedBrandQueries } from './utils/brand-query-expansion.util';
 import {
   buildSerpLenses,
@@ -52,19 +53,23 @@ export const BRAND_DISCOVERY_SCORE_TIMEOUT_MS = 300_000;
 export const BRAND_DISCOVERY_SERP_MAX_RESULTS_PER_QUERY = 10;
 /** Below this many validated queries, the plan is topped up from the IBP taxonomy. */
 export const BRAND_DISCOVERY_MIN_QUERIES_DEFAULT = 6;
-/** Cap on queries after top-up (serial SERP + inter-query delay). */
+/** Cap on queries after top-up. */
 export const BRAND_DISCOVERY_MAX_QUERIES_DEFAULT = 8;
 /** Max filtered SERP hits sent to SCORE (bounds local-LLM scoring time). */
 export const BRAND_DISCOVERY_MAX_SCORE_HITS_DEFAULT = 30;
 /**
  * Hits per SCORE_CANDIDATES call. A local CPU model answers a non-streaming
  * request only when the whole completion is done, so one 30-hit prompt could
- * exceed every timeout and lose the run; small batches finish sooner and a
- * failed batch no longer fails the run.
+ * exceed every timeout and lose the run; batches finish sooner and a failed
+ * batch no longer fails the run. Each batch re-reads the full instructions, so
+ * 15 (two batches for 30 hits) halves that fixed cost vs 10; it fits the 8192
+ * context the worker sets via OLLAMA_NUM_CTX.
  */
-export const BRAND_DISCOVERY_SCORE_BATCH_SIZE_DEFAULT = 10;
-/** Pause between sequential SERP queries to reduce Bright Data empty_body bans. */
+export const BRAND_DISCOVERY_SCORE_BATCH_SIZE_DEFAULT = 15;
+/** Pause before a simplified SERP retry and between legacy-mode queries (empty_body bans). */
 export const BRAND_DISCOVERY_SERP_INTER_QUERY_DELAY_MS = 3_000;
+/** Concurrent SERP calls per run (replaces sequential calls + fixed pause). */
+export const BRAND_DISCOVERY_SERP_CONCURRENCY_DEFAULT = 4;
 export const BRAND_DISCOVERY_MAX_SERP_CALLS_DEFAULT = 12;
 
 export type BrandDiscoveryAiSeedBrand = {
@@ -404,17 +409,20 @@ export class BrandDiscoveryAiOrchestrator {
     const rawHits: WebSearchHit[] = [];
     let serpQueryFallbackUsed = false;
 
-    for (let i = 0; i < planned.executed.length; i += 1) {
-      if (i > 0) {
-        await this.serpPause();
-      }
-      const item = planned.executed[i];
-      const geo = { gl: item.lens.gl, hl: item.lens.hl };
-      const outcome = await this.searchQueryWithOptionalSimplify(
-        item.query,
-        params,
-        geo,
-      );
+    // Bounded parallelism instead of sequential calls + fixed pause; results
+    // are consumed in plan order so diagnostics stay aligned with `queries`.
+    const outcomes = await mapPool(
+      planned.executed,
+      this.resolveSerpConcurrency(),
+      (item) =>
+        this.searchQueryWithOptionalSimplify(item.query, params, {
+          gl: item.lens.gl,
+          hl: item.lens.hl,
+        }),
+    );
+
+    for (const [i, item] of planned.executed.entries()) {
+      const outcome = outcomes[i];
       if (outcome.usedSimplified) {
         serpQueryFallbackUsed = true;
       }
@@ -620,6 +628,7 @@ export class BrandDiscoveryAiOrchestrator {
       {
         maxQueries: maxTotal,
         excludedSectors: params.ibp.excludedSectors,
+        targetSectors: params.ibp.targetSectors,
         // Expanded queries deliberately mix homepage / creator-program shapes.
         maxCollaborationModeQueries: 4,
       },
@@ -684,6 +693,7 @@ export class BrandDiscoveryAiOrchestrator {
       const validated = validateBrandSearchQueriesWithDiagnostics(raw, {
         maxQueries: BRAND_SEARCH_MAX_QUERIES,
         excludedSectors: params.ibp.excludedSectors,
+        targetSectors: params.ibp.targetSectors,
       });
       return {
         queries: validated.queries,
@@ -701,6 +711,7 @@ export class BrandDiscoveryAiOrchestrator {
 
     const { executionId: planExecutionId } =
       await this.publisher.publishBrandDiscoveryPlan({
+        timeoutMs: BRAND_DISCOVERY_PLAN_TIMEOUT_MS,
         runId: params.runId,
         userId: params.userId,
         influencerId: params.influencerId,
@@ -730,6 +741,7 @@ export class BrandDiscoveryAiOrchestrator {
             {
               maxQueries: BRAND_SEARCH_MAX_QUERIES,
               excludedSectors: params.ibp.excludedSectors,
+              targetSectors: params.ibp.targetSectors,
             },
           );
           return {
@@ -776,6 +788,7 @@ export class BrandDiscoveryAiOrchestrator {
         {
           maxQueries: BRAND_SEARCH_MAX_QUERIES,
           excludedSectors: params.ibp.excludedSectors,
+          targetSectors: params.ibp.targetSectors,
         },
       );
 
@@ -801,6 +814,7 @@ export class BrandDiscoveryAiOrchestrator {
           {
             maxQueries: BRAND_SEARCH_MAX_QUERIES,
             excludedSectors: params.ibp.excludedSectors,
+            targetSectors: params.ibp.targetSectors,
           },
         );
         return {
@@ -866,6 +880,12 @@ export class BrandDiscoveryAiOrchestrator {
     }
     if (chunks.length === 0) chunks.push([]);
 
+    const timeoutMs = this.readIntConfig(
+      'BRAND_DISCOVERY_SCORE_TIMEOUT_MS',
+      BRAND_DISCOVERY_SCORE_TIMEOUT_MS,
+      30_000,
+      1_800_000,
+    );
     const byDomain = new Map<string, ScoredBrand>();
     let firstExecutionId: string | null = null;
     let failed = 0;
@@ -874,6 +894,7 @@ export class BrandDiscoveryAiOrchestrator {
     for (const [index, chunk] of chunks.entries()) {
       try {
         const { executionId } = await this.publisher.publishBrandDiscoveryScore({
+          timeoutMs,
           runId: params.runId,
           userId: params.userId,
           influencerId: params.influencerId,
@@ -887,7 +908,7 @@ export class BrandDiscoveryAiOrchestrator {
           locale: params.locale,
         });
         firstExecutionId ??= executionId;
-        const brands = await this.waitForScoreBrands(executionId);
+        const brands = await this.waitForScoreBrands(executionId, timeoutMs);
         for (const brand of brands) {
           const key = normalizeDomain(brand.website) || brand.website;
           const previous = byDomain.get(key);
@@ -934,16 +955,12 @@ export class BrandDiscoveryAiOrchestrator {
 
   private async waitForScoreBrands(
     scoreExecutionId: string,
+    timeoutMs: number,
   ): Promise<ScoredBrand[]> {
     try {
       const result = await this.resultWait.waitForAiExecutionResult(
         scoreExecutionId,
-        this.readIntConfig(
-          'BRAND_DISCOVERY_SCORE_TIMEOUT_MS',
-          BRAND_DISCOVERY_SCORE_TIMEOUT_MS,
-          30_000,
-          1_800_000,
-        ),
+        timeoutMs,
       );
 
       if (result.status === 'FAILED') {
@@ -1004,6 +1021,16 @@ export class BrandDiscoveryAiOrchestrator {
       followers: params.followers,
       engagement: params.engagement,
     };
+  }
+
+  /** Concurrent Bright Data SERP calls per run (1 = previous sequential behaviour). */
+  private resolveSerpConcurrency(): number {
+    return this.readIntConfig(
+      'BRAND_DISCOVERY_SERP_CONCURRENCY',
+      BRAND_DISCOVERY_SERP_CONCURRENCY_DEFAULT,
+      1,
+      8,
+    );
   }
 
   /** Skips real waits in Jest so empty-SERP paths stay fast. */

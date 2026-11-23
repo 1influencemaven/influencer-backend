@@ -14,6 +14,7 @@ import {
   buildBrandDiscoveryResearchUserPrompt,
 } from '../prompts/brand-discovery-research.prompt';
 import { normalizeResearchLlmObject } from './normalize-research-llm-object';
+import { executionDeadlineSignal } from './execution-deadline';
 
 export type RunBrandDiscoveryResearchSuccess = {
   ok: true;
@@ -175,11 +176,13 @@ export async function runBrandDiscoveryResearchBrand(
   });
 
   let llmCallCount = 0;
+  const abortSignal = executionDeadlineSignal(request);
 
   const attempt = async (prompt: string): Promise<AttemptResult> => {
     llmCallCount += 1;
     try {
       const generated = await agent.generate(prompt, {
+        abortSignal,
         structuredOutput: {
           // Lenient capture — strict Zod after normalizeResearchLlmObject.
           schema: researchLlmCaptureSchema as z.ZodType,
