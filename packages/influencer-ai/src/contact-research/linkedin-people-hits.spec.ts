@@ -109,3 +109,26 @@ describe('pre-scrape company rejection', () => {
     ]);
   });
 });
+
+describe('LinkedIn URL dedupe', () => {
+  it('treats slugs that differ only in case/subdomain as one profile', () => {
+    const selected = selectLinkedInPeopleHits(
+      [
+        {
+          url: 'https://qa.linkedin.com/in/Daniella-magee',
+          title: 'Daniella Magee - Paper Source | LinkedIn',
+          snippet: '',
+        },
+        {
+          url: 'https://tr.linkedin.com/in/daniella-magee',
+          title: 'Daniella Magee - Paper Source | LinkedIn',
+          snippet: '',
+        },
+      ],
+      { brandName: 'Paper Source', domain: 'papersource.com', limit: 5 },
+    );
+    expect(selected.map((s) => s.url)).toEqual([
+      'https://www.linkedin.com/in/daniella-magee',
+    ]);
+  });
+});

@@ -27,7 +27,13 @@ import {
   htmlFromPeeSnapshot,
   indexUsablePeeSnapshots,
 } from './pee-snapshot-reuse';
-import { buildPersonQueryLadder } from './person-query-ladder';
+import {
+  buildLinkedInPeopleQueries,
+  fetchZoomInfoLeaders,
+  findLeaderLinkedInHit,
+  isClearlyUselessRole,
+  isUsefulRole,
+} from './people-sources';
 
 export type RunFindBrandPeopleSuccess = {
   ok: true;
@@ -157,7 +163,7 @@ export async function runContactResearchFindBrandPeople(
     };
   }
 
-  const queries = buildPersonQueryLadder({
+  const queries = buildLinkedInPeopleQueries({
     brandName: input.brandName,
     priorityRoles: input.priorityRoles,
     maxQueries: maxSerpQueries,
@@ -171,10 +177,14 @@ export async function runContactResearchFindBrandPeople(
   let lastError: string | undefined;
 
   try {
-    for (const query of queries) {
+    // SERP queries and the ZoomInfo leadership lookup are independent.
+    const leadersPromise = fetchZoomInfoLeaders(client, input.domain);
+    const serps = await Promise.all(
+      queries.map((query) => client.searchWeb(query, 10)),
+    );
+    for (const [index, serp] of serps.entries()) {
       serpCalls += 1;
-      executedQueries.push(query);
-      const serp = await client.searchWeb(query, 10);
+      executedQueries.push(queries[index]!);
       if (!serp.ok) {
         serpFailures += 1;
         lastError = serp.brdError ?? serp.brdErrorCode ?? 'serp_failed';
@@ -183,17 +193,43 @@ export async function runContactResearchFindBrandPeople(
       organics.push(...serp.organics);
     }
 
+    // ZoomInfo leaders are confirmed employees: resolve their LinkedIn profile
+    // and rank them ahead of SERP-only matches.
+    const { leaders, error: leadersError } = await leadersPromise;
+    const leaderHits = (
+      await Promise.all(
+        leaders.map((leader) =>
+          findLeaderLinkedInHit(client, leader, input.brandName),
+        ),
+      )
+    ).filter((hit): hit is BrightDataOrganicHit => Boolean(hit));
+    serpCalls += leaders.length;
+
     // Only profiles whose Google title/snippet names the brand; role keywords rank first.
     const brandKeys = brandMatchKeys(input.brandName, input.domain);
-    const linkedinHits = selectLinkedInPeopleHits(organics, {
+    const serpPeople = selectLinkedInPeopleHits(organics, {
       brandName: input.brandName,
       domain: input.domain,
       limit: maxProfilesToScrape * 3,
+    });
+    const leaderPeople = selectLinkedInPeopleHits(leaderHits, {
+      brandName: input.brandName,
+      domain: input.domain,
+      limit: leaderHits.length,
+    }).map((hit) => ({ ...hit, roleScore: hit.roleScore + 100 }));
+    const seenUrls = new Set<string>();
+    const linkedinHits = [...leaderPeople, ...serpPeople].filter((hit) => {
+      const key = hit.url.toLowerCase();
+      if (seenUrls.has(key)) return false;
+      seenUrls.add(key);
+      // Skip store-floor / back-office roles before paying for a scrape.
+      return !isClearlyUselessRole(roleFromSerpTitle(hit.serpTitle));
     });
     consideredUrls.push(...linkedinHits.map((h) => h.url));
 
     const toScrape = linkedinHits.slice(0, maxProfilesToScrape);
     let profilesRejectedOtherCompany = 0;
+    let profilesRejectedRole = 0;
     const people: ContactResearchPerson[] = [];
     let profilesScraped = 0;
 
@@ -212,6 +248,14 @@ export async function runContactResearchFindBrandPeople(
       profilesScraped += 1;
       if (!profileBelongsToBrand(scraped, brandKeys)) {
         profilesRejectedOtherCompany += 1;
+        continue;
+      }
+      const role =
+        scraped.title ??
+        roleFromRow(scraped.raw) ??
+        roleFromSerpTitle(hit.serpTitle);
+      if (!isUsefulRole(role)) {
+        profilesRejectedRole += 1;
         continue;
       }
 
@@ -240,10 +284,7 @@ export async function runContactResearchFindBrandPeople(
 
       people.push({
         name: scraped.name,
-        title:
-          scraped.title ??
-          roleFromRow(scraped.raw) ??
-          roleFromSerpTitle(hit.serpTitle),
+        title: role,
         linkedinUrl: normalizeOutputLinkedIn(scraped.url, profileUrl),
         emails,
       });
@@ -348,6 +389,10 @@ export async function runContactResearchFindBrandPeople(
         linkedinUrlsConsidered: consideredUrls,
         profilesScraped,
         profilesRejectedOtherCompany,
+        profilesRejectedRole,
+        zoomInfoLeaders: leaders.length,
+        zoomInfoLeadersMatched: leaderPeople.length,
+        ...(leadersError ? { zoomInfoError: leadersError.slice(0, 300) } : {}),
         serpCalls,
         brandPagesFetched,
         ocrAttempts,
