@@ -239,3 +239,9 @@ describe('off_ibp_sector', () => {
     ).toBe(false);
   });
 });
+
+describe('channel words', () => {
+  it('treats "retail DTC US" as sector_generic', () => {
+    expect(isSectorGenericQuery('retail DTC US')).toBe(true);
+  });
+});

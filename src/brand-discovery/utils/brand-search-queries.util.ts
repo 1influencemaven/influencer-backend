@@ -81,6 +81,11 @@ const ABSTRACT_SECTOR_TOKENS = new Set([
   'woman',
   'family',
   'families',
+  // Channel words: "retail DTC US" names no product category.
+  'retail',
+  'retailer',
+  'retailers',
+  'ecommerce',
 ]);
 
 /** Markets / geo / size / filler stripped before category signature. */
