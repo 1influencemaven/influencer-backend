@@ -7,6 +7,7 @@ import {
 } from '@influence-maven/ai-contracts';
 
 import { BrightDataToolsClient } from '../brightdata/client';
+import type { BrightDataOrganicHit } from '../brightdata/types';
 import {
   evidenceSnippetAroundEmail,
   extractEmailsFromHtml,
@@ -14,7 +15,13 @@ import {
 import { normalizeUrlKey } from '../brightdata/normalize-url-key';
 import type { InfluencerAiEnv } from '../config/env';
 import { buildBrandPeeCandidateUrls } from './brand-pee-pages';
-import { collectLinkedInPeopleUrls } from './linkedin-profile-url';
+import {
+  brandMatchKeys,
+  profileBelongsToBrand,
+  roleFromRow,
+  roleFromSerpTitle,
+  selectLinkedInPeopleHits,
+} from './linkedin-people-hits';
 import {
   emptyPeeReuseTrace,
   htmlFromPeeSnapshot,
@@ -158,7 +165,7 @@ export async function runContactResearchFindBrandPeople(
 
   const executedQueries: string[] = [];
   const consideredUrls: string[] = [];
-  const organicUrls: string[] = [];
+  const organics: BrightDataOrganicHit[] = [];
   let serpCalls = 0;
   let serpFailures = 0;
   let lastError: string | undefined;
@@ -173,28 +180,35 @@ export async function runContactResearchFindBrandPeople(
         lastError = serp.brdError ?? serp.brdErrorCode ?? 'serp_failed';
         continue;
       }
-      for (const hit of serp.organics) {
-        organicUrls.push(hit.url);
-      }
+      organics.push(...serp.organics);
     }
 
-    const linkedinUrls = collectLinkedInPeopleUrls(
-      organicUrls,
-      maxProfilesToScrape * 3,
-    );
-    consideredUrls.push(...linkedinUrls);
+    // Only profiles whose Google title/snippet names the brand; role keywords rank first.
+    const brandKeys = brandMatchKeys(input.brandName, input.domain);
+    const linkedinHits = selectLinkedInPeopleHits(organics, {
+      brandName: input.brandName,
+      domain: input.domain,
+      limit: maxProfilesToScrape * 3,
+    });
+    consideredUrls.push(...linkedinHits.map((h) => h.url));
 
-    const toScrape = linkedinUrls.slice(0, maxProfilesToScrape);
+    const toScrape = linkedinHits.slice(0, maxProfilesToScrape);
+    let profilesRejectedOtherCompany = 0;
     const people: ContactResearchPerson[] = [];
     let profilesScraped = 0;
 
-    for (const profileUrl of toScrape) {
+    for (const hit of toScrape) {
+      const profileUrl = hit.url;
       const scraped = await client.scrapeLinkedInProfile(profileUrl);
       if (!scraped.ok || !scraped.name) {
         lastError = scraped.error ?? lastError ?? 'scrape_failed';
         continue;
       }
       profilesScraped += 1;
+      if (!profileBelongsToBrand(scraped, brandKeys)) {
+        profilesRejectedOtherCompany += 1;
+        continue;
+      }
 
       const emails: ContactResearchPersonEmail[] = [];
       // Fase A — LinkedIn dataset + about/text.
@@ -221,7 +235,10 @@ export async function runContactResearchFindBrandPeople(
 
       people.push({
         name: scraped.name,
-        title: scraped.title,
+        title:
+          scraped.title ??
+          roleFromRow(scraped.raw) ??
+          roleFromSerpTitle(hit.serpTitle),
         linkedinUrl: normalizeOutputLinkedIn(scraped.url, profileUrl),
         emails,
       });
@@ -325,6 +342,7 @@ export async function runContactResearchFindBrandPeople(
         queries: executedQueries,
         linkedinUrlsConsidered: consideredUrls,
         profilesScraped,
+        profilesRejectedOtherCompany,
         serpCalls,
         brandPagesFetched,
         ocrAttempts,

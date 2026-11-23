@@ -8,6 +8,7 @@ import {
 } from '@influence-maven/ai-contracts';
 
 import { BrightDataToolsClient } from '../brightdata/client';
+import type { BrightDataOrganicHit } from '../brightdata/types';
 import {
   evidenceSnippetAroundEmail,
   extractEmailsFromHtml,
@@ -15,7 +16,13 @@ import {
 import { normalizeUrlKey } from '../brightdata/normalize-url-key';
 import type { InfluencerAiEnv } from '../config/env';
 import { buildAgencyPeeCandidateUrls } from './agency-pee-pages';
-import { collectLinkedInPeopleUrls } from './linkedin-profile-url';
+import {
+  brandMatchKeys,
+  profileBelongsToBrand,
+  roleFromRow,
+  roleFromSerpTitle,
+  selectLinkedInPeopleHits,
+} from './linkedin-people-hits';
 import {
   emptyAgencyPeeReuseTrace,
   htmlFromPeeSnapshot,
@@ -184,7 +191,7 @@ export async function runContactResearchFindAgencyPeople(
 
   const executedQueries: string[] = [];
   const consideredUrls: string[] = [];
-  const organicUrls: string[] = [];
+  const organics: BrightDataOrganicHit[] = [];
   let serpCalls = 0;
   let serpFailures = 0;
   let lastError: string | undefined;
@@ -199,28 +206,31 @@ export async function runContactResearchFindAgencyPeople(
         lastError = serp.brdError ?? serp.brdErrorCode ?? 'serp_failed';
         continue;
       }
-      for (const hit of serp.organics) {
-        organicUrls.push(hit.url);
-      }
+      organics.push(...serp.organics);
     }
 
-    const linkedinUrls = collectLinkedInPeopleUrls(
-      organicUrls,
-      maxProfilesToScrape * 3,
-    );
-    consideredUrls.push(...linkedinUrls);
+    // Same rule as Track 2B: only profiles whose SERP title/snippet names the agency.
+    const agencyKeys = brandMatchKeys(input.agencyName, input.domain);
+    const linkedinHits = selectLinkedInPeopleHits(organics, {
+      brandName: input.agencyName,
+      domain: input.domain,
+      limit: maxProfilesToScrape * 3,
+    });
+    consideredUrls.push(...linkedinHits.map((h) => h.url));
 
-    const toScrape = linkedinUrls.slice(0, maxProfilesToScrape);
+    const toScrape = linkedinHits.slice(0, maxProfilesToScrape);
     const people: AgencyContactPerson[] = [];
     let profilesScraped = 0;
 
-    for (const profileUrl of toScrape) {
+    for (const hit of toScrape) {
+      const profileUrl = hit.url;
       const scraped = await client.scrapeLinkedInProfile(profileUrl);
       if (!scraped.ok || !scraped.name) {
         lastError = scraped.error ?? lastError ?? 'scrape_failed';
         continue;
       }
       profilesScraped += 1;
+      if (!profileBelongsToBrand(scraped, agencyKeys)) continue;
 
       const emails: AgencyContactPersonEmail[] = [];
       for (const email of scraped.emailFields) {
@@ -249,7 +259,10 @@ export async function runContactResearchFindAgencyPeople(
 
       people.push({
         name: scraped.name,
-        title: scraped.title,
+        title:
+          scraped.title ??
+          roleFromRow(scraped.raw) ??
+          roleFromSerpTitle(hit.serpTitle),
         linkedinUrl: normalizeOutputLinkedIn(scraped.url, profileUrl),
         emails,
       });
@@ -358,10 +371,7 @@ export async function runContactResearchFindAgencyPeople(
     };
 
     const contract = contactResearchOutputSchema.safeParse(candidate);
-    if (
-      !contract.success ||
-      contract.data.operation !== 'FIND_AGENCY_PEOPLE'
-    ) {
+    if (!contract.success || contract.data.operation !== 'FIND_AGENCY_PEOPLE') {
       return {
         ok: false,
         code: 'AI_INVALID_OUTPUT',

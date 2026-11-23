@@ -43,10 +43,7 @@ import {
   MASTRA_FIND_BRAND_PEOPLE_PROVIDER_ID,
 } from '../constants';
 import type { BbcDiscoveryResult } from './bbc-discovery.types';
-import type {
-  BbcRunOutcome,
-  BbcSearchMetadataV2,
-} from './bbc-search-metadata';
+import type { BbcRunOutcome, BbcSearchMetadataV2 } from './bbc-search-metadata';
 import {
   decideTrack2BExecution,
   type Track2BDecision,
@@ -206,10 +203,22 @@ export class ContactEmailMastraOrchestrator {
       this.configService.get<boolean>('CONTACT_OCR_ENABLED') === true;
 
     const domain =
-      input.domain.trim().toLowerCase().replace(/^www\./, '') ||
-      this.domainFromWebsite(input.website);
+      input.domain
+        .trim()
+        .toLowerCase()
+        .replace(/^www\./, '') || this.domainFromWebsite(input.website);
     const brandName = input.brandName?.trim() || domain;
     const userId = input.userId ?? 'system:contact-email-mastra';
+
+    // 2C.3: always attempt Agency Discovery once (soft-isolated). It does not
+    // depend on 2A, so it starts first and overlaps 2A + 2B instead of waiting
+    // for 2A. Hard-fail 2A still awaits it before a single failRun.
+    const phase2CPromise = this.runTrack2C({
+      influencerId: input.influencerId,
+      nicheFallback: input.niche,
+      runId: input.runId,
+      userId,
+    });
 
     // --- Track 2A ---
     const phase2A = await this.runTrack2A({
@@ -220,17 +229,7 @@ export class ContactEmailMastraOrchestrator {
       maxSerpQueries,
       maxPages,
     });
-    const contactsPersisted =
-      phase2A.contactsCreated + phase2A.contactsUpdated;
-
-    // 2C.3: always attempt Agency Discovery once (soft-isolated).
-    // Started before RF-03 so hard-fail 2A still runs 2C, then a single failRun.
-    const phase2CPromise = this.runTrack2C({
-      influencerId: input.influencerId,
-      nicheFallback: input.niche,
-      runId: input.runId,
-      userId,
-    });
+    const contactsPersisted = phase2A.contactsCreated + phase2A.contactsUpdated;
 
     // Case F: hard 2A → skip RF-03 entirely (do not invent track2BDecision),
     // await 2C, then persist FAILED once with final metadata.
@@ -956,8 +955,10 @@ export class ContactEmailMastraOrchestrator {
     const { input, person } = params;
     const profileUrl = person.linkedinUrl.trim();
     const domain =
-      input.domain.trim().toLowerCase().replace(/^www\./, '') ||
-      this.domainFromWebsite(input.website);
+      input.domain
+        .trim()
+        .toLowerCase()
+        .replace(/^www\./, '') || this.domainFromWebsite(input.website);
     const corroboratedDomains = buildCorroboratedBrandDomains({
       brandDomain: domain,
       website: input.website,
@@ -1315,9 +1316,7 @@ export class ContactEmailMastraOrchestrator {
     }
   }
 
-  private toTrack2CMetadata(
-    phase: Track2CPhaseResult,
-  ): Track2CResultMetadata {
+  private toTrack2CMetadata(phase: Track2CPhaseResult): Track2CResultMetadata {
     if (!phase.executed) {
       return { executed: false };
     }
@@ -1327,9 +1326,7 @@ export class ContactEmailMastraOrchestrator {
       error: phase.error ?? null,
       candidatesCount: phase.candidatesCount,
       persistedCount: phase.persistedCount,
-      ...(phase.searchMetadata
-        ? { searchMetadata: phase.searchMetadata }
-        : {}),
+      ...(phase.searchMetadata ? { searchMetadata: phase.searchMetadata } : {}),
       ...(phase.emailsPass ? { emailsPass: phase.emailsPass } : {}),
       ...(phase.peoplePass ? { peoplePass: phase.peoplePass } : {}),
     };
@@ -1355,8 +1352,7 @@ export class ContactEmailMastraOrchestrator {
       : true; // skipped 2B does not count as a successful track
 
     const twoCFailed =
-      params.phase2C.executed &&
-      params.phase2C.outcome === 'PROVIDER_FAILURE';
+      params.phase2C.executed && params.phase2C.outcome === 'PROVIDER_FAILURE';
 
     // Require 2C to have run and failed; otherwise keep legacy 2A+2B rule.
     return twoBFailed && twoCFailed;

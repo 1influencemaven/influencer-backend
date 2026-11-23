@@ -68,9 +68,13 @@ describe('runContactResearchFindAgencyPeople (2C.4.6)', () => {
   });
 
   it('PROVIDER_FAILURE when Bright Data not configured', async () => {
-    const result = await runContactResearchFindAgencyPeople(baseEnv, request(), {
-      client: { isConfigured: () => false } as never,
-    });
+    const result = await runContactResearchFindAgencyPeople(
+      baseEnv,
+      request(),
+      {
+        client: { isConfigured: () => false } as never,
+      },
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe('AI_PROVIDER_ERROR');
@@ -84,7 +88,7 @@ describe('runContactResearchFindAgencyPeople (2C.4.6)', () => {
         organics: [
           {
             url: 'https://www.linkedin.com/in/alex-partner',
-            title: 'Alex',
+            title: 'Alex - Partnerships - Creator Partners | LinkedIn',
             snippet: '',
           },
         ],
@@ -123,9 +127,9 @@ describe('runContactResearchFindAgencyPeople (2C.4.6)', () => {
     expect(result.output.outcome).toBe('RESULTS_FOUND');
     expect(result.output.people[0]?.name).toBe('Alex Partner');
     expect(result.output.people[0]?.emails[0]?.sourceKind).toBe('linkedin');
-    expect(result.output.people[0]?.emails[0]?.provenance?.verificationStatus).toBe(
-      'UNVERIFIED',
-    );
+    expect(
+      result.output.people[0]?.emails[0]?.provenance?.verificationStatus,
+    ).toBe('UNVERIFIED');
   });
 
   it('reuses RF-04 snapshots (agency_web) and rejects off-domain snaps', async () => {
@@ -137,7 +141,7 @@ describe('runContactResearchFindAgencyPeople (2C.4.6)', () => {
         organics: [
           {
             url: 'https://www.linkedin.com/in/sam-talent',
-            title: 'Sam',
+            title: 'Sam - Partnerships - Creator Partners | LinkedIn',
             snippet: '',
           },
         ],
@@ -200,9 +204,9 @@ describe('runContactResearchFindAgencyPeople (2C.4.6)', () => {
     expect(result.output.trace?.peeReuse?.peePagesRejected).toBe(1);
     expect(result.output.trace?.peeReuse?.peePagesFetchedUnlocker).toBe(0);
     const person = result.output.people[0];
-    expect(
-      person?.emails.some((e) => e.sourceKind === 'agency_web'),
-    ).toBe(true);
+    expect(person?.emails.some((e) => e.sourceKind === 'agency_web')).toBe(
+      true,
+    );
   });
 
   it('falls back to Unlocker when no eligible snapshot exists', async () => {
@@ -221,7 +225,7 @@ describe('runContactResearchFindAgencyPeople (2C.4.6)', () => {
         organics: [
           {
             url: 'https://www.linkedin.com/in/sam-talent',
-            title: 'Sam',
+            title: 'Sam - Partnerships - Creator Partners | LinkedIn',
             snippet: '',
           },
         ],
@@ -252,7 +256,9 @@ describe('runContactResearchFindAgencyPeople (2C.4.6)', () => {
     expect(openPage).toHaveBeenCalled();
     expect(result.output.trace?.agencyPagesFetched).toBeGreaterThan(0);
     expect(
-      result.output.people[0]?.emails.some((e) => e.sourceKind === 'agency_web'),
+      result.output.people[0]?.emails.some(
+        (e) => e.sourceKind === 'agency_web',
+      ),
     ).toBe(true);
   });
 
@@ -264,7 +270,7 @@ describe('runContactResearchFindAgencyPeople (2C.4.6)', () => {
         organics: [
           {
             url: 'https://www.linkedin.com/in/pat-partner',
-            title: 'Pat',
+            title: 'Pat - Partnerships - Creator Partners | LinkedIn',
             snippet: '',
           },
         ],

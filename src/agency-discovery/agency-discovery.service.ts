@@ -9,12 +9,15 @@ import {
 
 import { BrightDataSerpProviderError } from '../integrations/brightdata';
 import { BrightDataWebSearchProvider } from '../brand-discovery/providers/brightdata-web-search.provider';
+import { mapPool } from '../brand-discovery/utils/map-pool.util';
 import { AgencyPersistenceService } from './agency-persistence.service';
 import { buildAgencySearchQueries } from './utils/build-agency-search-queries';
 import { classifyAgencySerpHits } from './utils/classify-agency-hit';
 import { dedupeAgencySerpHits } from './utils/dedupe-agency-hits';
 
 export const AGENCY_DISCOVERY_PROVIDER_ID = 'nest-agency-discovery-2c';
+/** Concurrent agency SERP queries per run. */
+export const AGENCY_SERP_CONCURRENCY = 4;
 
 export type AgencyDiscoveryExecuteResult = {
   output: AgencyDiscoveryOutput;
@@ -55,34 +58,39 @@ export class AgencyDiscoveryService {
 
     if (!input.searchHits?.length) {
       const maxPerQuery = input.maxResultsPerQuery ?? 6;
-      for (const query of queries) {
-        serpCalls += 1;
-        try {
-          const hits = await this.webSearch.search(query, {
-            maxResults: maxPerQuery,
-          });
-          for (const hit of hits) {
-            rawHits.push({
+      // Queries are independent: bounded parallelism, hits merged in query order.
+      const perQuery = await mapPool(
+        queries,
+        AGENCY_SERP_CONCURRENCY,
+        async (query) => {
+          serpCalls += 1;
+          try {
+            const hits = await this.webSearch.search(query, {
+              maxResults: maxPerQuery,
+            });
+            return hits.map((hit) => ({
               title: hit.title,
               url: hit.url,
               content: hit.content,
-            });
+            }));
+          } catch (error) {
+            if (error instanceof BrightDataSerpProviderError) {
+              providerErrors.push(
+                `${query}: ${error.details.resultCategory ?? error.message}`.slice(
+                  0,
+                  500,
+                ),
+              );
+            } else {
+              const message =
+                error instanceof Error ? error.message : String(error);
+              providerErrors.push(`${query}: ${message}`.slice(0, 500));
+            }
+            return [];
           }
-        } catch (error) {
-          if (error instanceof BrightDataSerpProviderError) {
-            providerErrors.push(
-              `${query}: ${error.details.resultCategory ?? error.message}`.slice(
-                0,
-                500,
-              ),
-            );
-          } else {
-            const message =
-              error instanceof Error ? error.message : String(error);
-            providerErrors.push(`${query}: ${message}`.slice(0, 500));
-          }
-        }
-      }
+        },
+      );
+      for (const hits of perQuery) rawHits.push(...hits);
     }
 
     const { unique, duplicateCount, droppedInvalid } =
@@ -107,10 +115,16 @@ export class AgencyDiscoveryService {
       fetchedAt: new Date().toISOString(),
     });
 
+    // DISCARDED hits are listicles, directories and social/publisher pages, not
+    // organizations: persisting them filled the global Agency table with rows like
+    // "Top Fashion Influencer Marketing Agencies…" or reddit.com. They stay
+    // visible in the run output (`candidates`) for audit.
+    const toPersist = candidates.filter(
+      (c) => c.association.relevanceStatus !== 'DISCARDED',
+    );
     let persistedCount = 0;
     if (persist) {
-      for (const candidate of candidates) {
-        // Persist all classified rows (including DISCARDED) so review UI can show why.
+      for (const candidate of toPersist) {
         try {
           await this.persistence.upsertCandidate({
             influencerId: input.influencerId,
@@ -170,7 +184,7 @@ export class AgencyDiscoveryService {
         persistedCount,
         providerId: AGENCY_DISCOVERY_PROVIDER_ID,
         ...(providerErrors.length ? { providerErrors } : {}),
-        notes: `duplicatesSkipped=${duplicateCount};invalidDropped=${droppedInvalid}`,
+        notes: `duplicatesSkipped=${duplicateCount};invalidDropped=${droppedInvalid};discardedNotPersisted=${candidates.length - toPersist.length}`,
       },
     });
 
