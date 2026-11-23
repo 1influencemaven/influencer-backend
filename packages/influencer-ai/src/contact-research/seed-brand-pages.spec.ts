@@ -141,6 +141,36 @@ describe('seedBrandPagesForEmailDiscovery (RF-02)', () => {
     );
   });
 
+  it('follows real commercial links from the homepage before guessed paths', async () => {
+    const home = 'https://acme.test/';
+    const collab = 'https://acme.test/pages/collaborate';
+    const session = new ContactResearchToolSession({
+      brandName: 'Acme',
+      website: home,
+      domain: 'acme.test',
+      maxSerpQueries: 1,
+      maxPages: 5,
+    });
+    const client = mockClient({
+      [home]: {
+        ok: true,
+        html: '<footer><a href="/pages/collaborate">Collaborate with us</a></footer>',
+      },
+      [collab]: { ok: true, html: '<p>partners@acme.test</p>' },
+    });
+
+    const seed = await seedBrandPagesForEmailDiscovery({
+      client,
+      session,
+      maxSeedPages: 2,
+    });
+
+    expect(seed.attemptedUrls).toEqual([home, collab]);
+    expect(session.listEmails().map((e) => e.email)).toEqual([
+      'partners@acme.test',
+    ]);
+  });
+
   it('records failures without inventing emails', async () => {
     const home = 'https://acme.test/';
     const session = new ContactResearchToolSession({

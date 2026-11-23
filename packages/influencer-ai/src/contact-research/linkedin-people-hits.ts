@@ -47,6 +47,36 @@ export function textMentionsBrand(
 const ROLE_WORDS =
   /\b(influencer|creator|partnership|partnerships|affiliate|ambassador|social|pr|public relations|brand marketing|marketing|community|cmo)\b/gi;
 
+/** "Jane Doe - Role - Company | LinkedIn" → "Company" (only with 3+ segments). */
+export function companyFromSerpTitle(serpTitle: string): string | undefined {
+  const withoutSuffix = serpTitle.replace(/\s*[|·]\s*linkedin.*$/i, '').trim();
+  const parts = withoutSuffix.split(/\s+[-–—]\s+/).map((p) => p.trim());
+  return parts.length >= 3 ? parts[parts.length - 1] : undefined;
+}
+
+/** "Experience: Gorjana · Education: …" → "Gorjana". */
+function experienceFromSnippet(snippet: string): string | undefined {
+  const match = snippet.match(/experience:\s*([^·|\n]+)/i);
+  return match?.[1]?.trim() || undefined;
+}
+
+/**
+ * Pre-scrape rejection (saves a ~60 s LinkedIn scrape): Google already says the
+ * person works elsewhere — the title's company segment, or the snippet's
+ * "Experience:", names another company and neither names the brand.
+ */
+function serpNamesOtherCompany(
+  hit: BrightDataOrganicHit,
+  keys: readonly string[],
+): boolean {
+  const declared = [
+    companyFromSerpTitle(hit.title),
+    experienceFromSnippet(hit.snippet),
+  ].filter((c): c is string => Boolean(c));
+  if (declared.length === 0) return false;
+  return !declared.some((company) => textMentionsBrand(company, keys));
+}
+
 export function selectLinkedInPeopleHits(
   organics: readonly BrightDataOrganicHit[],
   params: { brandName: string; domain: string; limit: number },
@@ -60,6 +90,7 @@ export function selectLinkedInPeopleHits(
     if (byUrl.has(key)) continue;
     const blob = `${hit.title}\n${hit.snippet}`;
     if (!textMentionsBrand(blob, keys)) continue;
+    if (serpNamesOtherCompany(hit, keys)) continue;
     byUrl.set(key, {
       url,
       serpTitle: hit.title,

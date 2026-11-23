@@ -5,6 +5,7 @@ import {
 } from '../brightdata/extract-emails';
 import { normalizeUrlKey } from '../brightdata/normalize-url-key';
 import type { ContactResearchToolSession } from '../brightdata/session';
+import { extractCommercialLinks } from './commercial-links';
 
 export { normalizeUrlKey } from '../brightdata/normalize-url-key';
 
@@ -132,6 +133,32 @@ export function buildSeedCandidateUrls(
   return out;
 }
 
+/** Moves the site homepage right after the preferred URLs (its nav links feed the queue). */
+function homepageAfterPreferred(
+  candidates: string[],
+  website: string,
+  preferredKeys: ReadonlySet<string>,
+): string[] {
+  const home = toCandidateUrl(website);
+  if (!home) return candidates;
+  let origin: string;
+  try {
+    origin = new URL(home).origin;
+  } catch {
+    return candidates;
+  }
+  const homeKey = normalizeUrlKey(`${origin}/`);
+  const index = candidates.findIndex((u) => normalizeUrlKey(u) === homeKey);
+  if (index < 0) return candidates;
+  const [homepage] = candidates.splice(index, 1);
+  const firstNonPreferred = candidates.findIndex(
+    (u) => !preferredKeys.has(normalizeUrlKey(u)),
+  );
+  const at = firstNonPreferred < 0 ? candidates.length : firstNonPreferred;
+  candidates.splice(at, 0, homepage);
+  return candidates;
+}
+
 /**
  * Deterministic Unlocker open + literal email extract before the LLM loop.
  * Mutates `session`. Continues after single-page failures (RF-02).
@@ -176,14 +203,21 @@ export async function seedBrandPagesForEmailDiscovery(params: {
       .map((u) => normalizeUrlKey(u)),
   );
 
-  const candidates = buildSeedCandidateUrls(
-    session,
-    preferredUrls,
-    params.seedPaths ?? COMMERCIAL_SEED_PATHS,
-  ).slice(0, maxSeedPages);
+  // Queue: preferred URLs → homepage → guessed commercial paths. Commercial
+  // links found on an opened page (nav/footer) jump ahead of the guesses.
+  const queue = homepageAfterPreferred(
+    buildSeedCandidateUrls(
+      session,
+      preferredUrls,
+      params.seedPaths ?? COMMERCIAL_SEED_PATHS,
+    ),
+    session.website,
+    preferredKeys,
+  );
 
-  for (const url of candidates) {
+  while (queue.length > 0 && attemptedUrls.length < maxSeedPages) {
     if (session.pageCalls >= session.maxPages) break;
+    const url = queue.shift()!;
 
     attemptedUrls.push(url);
     if (preferredKeys.has(normalizeUrlKey(url))) {
@@ -219,6 +253,16 @@ export async function seedBrandPagesForEmailDiscovery(params: {
         });
       }
     }
+
+    // Real links beat guesses: move them (or add them) to the front of the queue.
+    const attemptedKeys = new Set(attemptedUrls.map((u) => normalizeUrlKey(u)));
+    const discovered = extractCommercialLinks(page.html, url).filter(
+      (link) =>
+        session.isAllowedUrl(link) && !attemptedKeys.has(normalizeUrlKey(link)),
+    );
+    const discoveredKeys = new Set(discovered.map((u) => normalizeUrlKey(u)));
+    const rest = queue.filter((u) => !discoveredKeys.has(normalizeUrlKey(u)));
+    queue.splice(0, queue.length, ...discovered, ...rest);
   }
 
   return {

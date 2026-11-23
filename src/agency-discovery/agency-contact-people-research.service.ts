@@ -136,7 +136,7 @@ export class AgencyContactPeopleResearchService {
     const maxSerpQueries =
       this.configService.get<number>('AI_PEOPLE_MAX_SERP_QUERIES') ?? 4;
     const maxProfiles =
-      this.configService.get<number>('AI_PEOPLE_MAX_PROFILES') ?? 5;
+      this.configService.get<number>('AI_PEOPLE_MAX_PROFILES') ?? 3;
     const maxAgencyPages =
       this.configService.get<number>('AI_PEOPLE_MAX_BRAND_PAGES') ?? 6;
     const ocrEnabled =

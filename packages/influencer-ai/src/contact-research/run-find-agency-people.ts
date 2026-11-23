@@ -222,9 +222,14 @@ export async function runContactResearchFindAgencyPeople(
     const people: AgencyContactPerson[] = [];
     let profilesScraped = 0;
 
-    for (const hit of toScrape) {
+    // Scrapes are independent dataset snapshots: run them together (each one
+    // polls for ~30–60 s), then process in ranking order.
+    const scrapes = await Promise.all(
+      toScrape.map((hit) => client.scrapeLinkedInProfile(hit.url)),
+    );
+    for (const [index, hit] of toScrape.entries()) {
       const profileUrl = hit.url;
-      const scraped = await client.scrapeLinkedInProfile(profileUrl);
+      const scraped = scrapes[index]!;
       if (!scraped.ok || !scraped.name) {
         lastError = scraped.error ?? lastError ?? 'scrape_failed';
         continue;

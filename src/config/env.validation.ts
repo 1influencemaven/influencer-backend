@@ -180,7 +180,7 @@ export const envValidationSchema = Joi.object({
     .min(1)
     .max(12)
     .default(4),
-  AI_PEOPLE_MAX_PROFILES: Joi.number().integer().min(1).max(15).default(5),
+  AI_PEOPLE_MAX_PROFILES: Joi.number().integer().min(1).max(15).default(3),
   AI_PEOPLE_MAX_BRAND_PAGES: Joi.number().integer().min(1).max(12).default(6),
   /** When true, Nest asks worker to attempt OCR after LinkedIn+PEE (Phase 2). */
   CONTACT_OCR_ENABLED: Joi.boolean().default(false),

@@ -81,3 +81,31 @@ describe('roleFromSerpTitle', () => {
     expect(roleFromSerpTitle('Ana Ruiz | LinkedIn')).toBeUndefined();
   });
 });
+
+describe('pre-scrape company rejection', () => {
+  it('skips profiles whose SERP title or snippet names another company', () => {
+    const selected = selectLinkedInPeopleHits(
+      [
+        {
+          url: 'https://www.linkedin.com/in/a',
+          title: 'Ann Lee - Buyer - Nordstrom | LinkedIn',
+          snippet: 'Worked on gorjana and other jewelry brands.',
+        },
+        {
+          url: 'https://www.linkedin.com/in/b',
+          title: 'Bea Cruz | LinkedIn',
+          snippet: 'Experience: Mejuri · Former gorjana intern',
+        },
+        {
+          url: 'https://www.linkedin.com/in/c',
+          title: 'Cam Ho - PR Manager - gorjana | LinkedIn',
+          snippet: 'Experience: gorjana · Education: UCLA',
+        },
+      ],
+      { brandName: 'gorjana', domain: 'gorjana.com', limit: 5 },
+    );
+    expect(selected.map((s) => s.url)).toEqual([
+      'https://www.linkedin.com/in/c',
+    ]);
+  });
+});
