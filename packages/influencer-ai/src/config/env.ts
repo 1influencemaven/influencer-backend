@@ -16,6 +16,8 @@ export type InfluencerAiEnv = {
   /** Output token cap; stops runaway generations when the model loses the format. */
   ollamaNumPredict: number;
   ollamaKeepAlive?: string;
+  /** Parallel ai.execution jobs (AI_WORKER_CONCURRENCY, default 4). */
+  workerConcurrency: number;
   anthropicApiKey?: string;
   anthropicModel: string;
   /** Bright Data — Contact Research (FIND_BRAND_* / FIND_AGENCY_EMAILS). */
@@ -61,6 +63,10 @@ export function loadInfluencerAiEnv(): InfluencerAiEnv {
     ollamaNumCtx: Number(process.env.OLLAMA_NUM_CTX ?? '8192'),
     ollamaNumPredict: Number(process.env.OLLAMA_NUM_PREDICT ?? '3072'),
     ollamaKeepAlive: process.env.OLLAMA_KEEP_ALIVE?.trim() || undefined,
+    workerConcurrency: Math.max(
+      1,
+      Number(process.env.AI_WORKER_CONCURRENCY ?? '4') || 4,
+    ),
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || undefined,
     anthropicModel:
       process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-20250514',
