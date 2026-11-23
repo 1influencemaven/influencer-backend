@@ -13,6 +13,30 @@ export type BrightDataClientConfig = {
   scraperPollIntervalMs?: number;
 };
 
+export type SearchWebOptions = {
+  /** Google country (`gl`), default `us`. */
+  gl?: string;
+  /** Google interface language (`hl`), default `en`. */
+  hl?: string;
+  /** Extra attempts after an empty body / provider rejection (default 1). */
+  retries?: number;
+  /** Wait before retrying: Bright Data bans an identical failed query for ~15 s. */
+  cooldownMs?: number;
+};
+
+export const SERP_RETRY_COOLDOWN_MS = 15_000;
+
+function isRetryableSerp(result: BrightDataSerpResult): boolean {
+  if (result.ok) return false;
+  const code = (result.brdErrorCode ?? '').toLowerCase();
+  return (
+    result.emptyBody ||
+    result.httpStatus === 429 ||
+    code.includes('rate_limit') ||
+    code.includes('rejected')
+  );
+}
+
 export type LinkedInPeopleScrapeResult = {
   ok: boolean;
   url: string;
@@ -49,11 +73,36 @@ export class BrightDataToolsClient {
     );
   }
 
-  async searchWeb(query: string, num = 8): Promise<BrightDataSerpResult> {
+  /**
+   * SERP search with market-aware `gl`/`hl` and one cooldown retry on empty
+   * body / 429 / rejection (parity with the Nest client).
+   */
+  async searchWeb(
+    query: string,
+    num = 8,
+    options: SearchWebOptions = {},
+  ): Promise<BrightDataSerpResult> {
+    const retries = options.retries ?? 1;
+    const cooldownMs = options.cooldownMs ?? SERP_RETRY_COOLDOWN_MS;
+    let result = await this.searchWebOnce(query, num, options);
+    for (let attempt = 0; attempt < retries && isRetryableSerp(result); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, cooldownMs));
+      result = await this.searchWebOnce(query, num, options);
+    }
+    return result;
+  }
+
+  private async searchWebOnce(
+    query: string,
+    num: number,
+    options: SearchWebOptions,
+  ): Promise<BrightDataSerpResult> {
+    const hl = options.hl ?? 'en';
+    const gl = options.gl ?? 'us';
     // `brd_json=1` → Bright Data parsed organics (avoids Google consent HTML).
     const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(
       query,
-    )}&hl=en&gl=us&brd_json=1`;
+    )}&hl=${hl}&gl=${gl}&brd_json=1`;
     const started = Date.now();
 
     try {

@@ -10,6 +10,11 @@ const PATH_SCOPED_WEBSITE_HOSTS = new Set([
   'carrd.co',
 ]);
 
+/** True for link-in-bio hosts whose brand identity lives in the path (not a brand domain). */
+export function isPathScopedHost(host: string): boolean {
+  return PATH_SCOPED_WEBSITE_HOSTS.has(host.toLowerCase().replace(/^www\./, ''));
+}
+
 export function normalizeDomain(website: string): string {
   try {
     const withProtocol = /^https?:\/\//i.test(website)

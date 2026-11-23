@@ -44,10 +44,12 @@ function normalizeEvidenceRefs(refs: unknown): unknown {
     if (!ref || typeof ref !== 'object' || Array.isArray(ref)) {
       return ref;
     }
-    const row = ref as Record<string, unknown>;
+    const { note, ...row } = ref as Record<string, unknown>;
     return {
       ...row,
       value: coerceEvidenceValue(row.value),
+      // null note -> absent (strict schema: optional string, not nullable).
+      ...(typeof note === 'string' ? { note } : {}),
     };
   });
 }
@@ -71,6 +73,7 @@ function normalizeClassifiedList(items: unknown): unknown {
 /**
  * Soft-repairs common local-LLM omissions before Zod parse.
  * - Coerces evidence.value arrays/objects → scalar
+ * - Drops null evidence.note / disclaimer (LLM "omitted" as null)
  * - Injects brand_reference disclaimer when missing
  */
 export function normalizeIbpLlmObject(raw: unknown): unknown {
@@ -106,7 +109,16 @@ export function normalizeIbpLlmObject(raw: unknown): unknown {
       if (!signal || typeof signal !== 'object' || Array.isArray(signal)) {
         return signal;
       }
-      const row = signal as Record<string, unknown>;
+      const { disclaimer: rawDisclaimer, ...rest } = signal as Record<
+        string,
+        unknown
+      >;
+      const row = {
+        ...rest,
+        ...(typeof rawDisclaimer === 'string'
+          ? { disclaimer: rawDisclaimer }
+          : {}),
+      } as Record<string, unknown>;
       const withEvidence = {
         ...row,
         evidence: normalizeEvidenceRefs(row.evidence),

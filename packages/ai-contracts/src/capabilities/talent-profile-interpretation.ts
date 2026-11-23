@@ -58,7 +58,9 @@ export type EvidenceRef = z.infer<typeof evidenceRefSchema>;
 export const evidenceRefLlmCaptureSchema = z.object({
   fieldPath: z.string().min(1),
   value: z.unknown(),
-  note: z.string().max(500).optional(),
+  // Local LLMs emit `null` for omitted optional text; the worker strips it
+  // before the strict evidenceRefSchema parse.
+  note: z.string().max(500).nullish(),
 });
 
 export const profileSummarySchema = z.object({
@@ -117,7 +119,7 @@ const commercialSignalLlmCaptureSchema = z.object({
   rationale: z.string().min(1).max(1000),
   confidence: confidenceSchema,
   evidence: z.array(evidenceRefLlmCaptureSchema).min(1),
-  disclaimer: z.string().max(500).optional(),
+  disclaimer: z.string().max(500).nullish(),
 });
 
 /**

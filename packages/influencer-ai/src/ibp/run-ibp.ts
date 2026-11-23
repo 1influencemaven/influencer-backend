@@ -76,6 +76,11 @@ AND talentInterpretation { outputVersion:"1.0", insufficientEvidence, summary, n
 CRITICAL: every commercialSignals item with type "brand_reference" MUST include a non-empty "disclaimer" stating the mention is not a sponsorship.
 Do not invent metrics. Cite only fieldPaths present in the provided Instagram evidence.`;
 
+  // The agent keeps no conversation history: a retry must carry the original
+  // prompt (influencer payload + evidence), not just the correction text.
+  const retryPrompt = (detail: string) =>
+    `${userPrompt}\n\n---\n${correctionFor(detail)}`;
+
   try {
     const first = await generateOnce(userPrompt);
     if (first.object) {
@@ -84,7 +89,7 @@ Do not invent metrics. Cite only fieldPaths present in the provided Instagram ev
     }
 
     const second = await generateOnce(
-      correctionFor(first.text ?? 'structured object missing'),
+      retryPrompt(first.text ?? 'structured object missing'),
     );
     if (!second.object) {
       return {
@@ -114,7 +119,7 @@ Do not invent metrics. Cite only fieldPaths present in the provided Instagram ev
     // Mastra may throw on Zod structuredOutput before returning object — retry once.
     if (isIbpStructuredValidationError(error) && llmCallCount < 2) {
       try {
-        const retry = await generateOnce(correctionFor(message));
+        const retry = await generateOnce(retryPrompt(message));
         if (retry.object) {
           const output = parseIbpOutput(retry.object);
           return { ok: true, output, llmCallCount };

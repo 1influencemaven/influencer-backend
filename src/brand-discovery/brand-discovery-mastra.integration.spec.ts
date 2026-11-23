@@ -235,6 +235,7 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
     configGet.mockImplementation((key: string) => {
       if (key === 'BRAND_DISCOVERY_ENGINE') return 'mastra';
       if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
+      if (key === 'BRAND_DISCOVERY_MIN_QUERIES') return 0;
       if (key === 'NODE_ENV') return 'test';
       return undefined;
     });

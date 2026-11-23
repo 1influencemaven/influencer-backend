@@ -186,6 +186,7 @@ describe('BrandDiscoveryAiOrchestrator', () => {
       ((key: string) => {
         if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
         if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'legacy';
+        if (key === 'BRAND_DISCOVERY_MIN_QUERIES') return 0;
         if (key === 'NODE_ENV') return 'test';
         return undefined;
       });
@@ -302,6 +303,7 @@ describe('BrandDiscoveryAiOrchestrator', () => {
         if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'v1';
         if (key === 'BRAND_DISCOVERY_MAX_SERP_CALLS') return 12;
         if (key === 'BRAND_DISCOVERY_REGION_LATAM_COUNTRIES') return 'co,mx';
+        if (key === 'BRAND_DISCOVERY_MIN_QUERIES') return 0;
         if (key === 'NODE_ENV') return 'test';
         return undefined;
       },
@@ -678,5 +680,224 @@ describe('BrandDiscoveryAiOrchestrator', () => {
         promptInstructions: 'default instructions',
       }),
     );
+  });
+  describe('query top-up from the IBP taxonomy', () => {
+    const topUpConfig = (extra: Record<string, unknown> = {}) => (key: string) => {
+      if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
+      if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'legacy';
+      if (key === 'NODE_ENV') return 'test';
+      return extra[key];
+    };
+
+    it('tops up a heavily discarded plan with concrete subcategory queries', async () => {
+      const { orchestrator, searchWithDiagnostics } = build({
+        getConfig: topUpConfig(),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(['skincare brands selling in US']))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate({
+        ...baseParams,
+        ibp: { ...ibp, targetSectors: ['beauty', 'fashion', 'home decor'], markets: ['US'] },
+      });
+
+      // 1 LLM query kept + expanded queries, capped at the default 8.
+      expect(result.queries.length).toBeGreaterThanOrEqual(6);
+      expect(result.queries.length).toBeLessThanOrEqual(8);
+      expect(result.queries[0]).toBe('skincare brands selling in US');
+      expect(searchWithDiagnostics).toHaveBeenCalledTimes(result.queries.length);
+      expect(result.fallbackUsed).toBe(true);
+      expect(result.validatedQueriesCount).toBe(result.queries.length);
+      // Expanded queries span sectors, not only the first one.
+      const joined = result.queries.join(' | ');
+      expect(joined).toMatch(/womens clothing|activewear|swimwear|jewelry/);
+      expect(joined).toMatch(/candles|wall art|bedding/);
+      expect(joined).toContain('United States');
+    });
+
+    it('does nothing when the plan already has enough queries', async () => {
+      const { orchestrator } = build({
+        getConfig: topUpConfig({ BRAND_DISCOVERY_MIN_QUERIES: 2 }),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(validQueries))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate(baseParams);
+
+      expect(result.queries).toEqual(validQueries);
+      expect(result.fallbackUsed).toBe(false);
+    });
+
+    it('can be disabled with BRAND_DISCOVERY_MIN_QUERIES=0', async () => {
+      const { orchestrator } = build({
+        getConfig: topUpConfig({ BRAND_DISCOVERY_MIN_QUERIES: 0 }),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(['skincare brands selling in US']))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate({
+        ...baseParams,
+        ibp: { ...ibp, targetSectors: ['beauty'], markets: ['US'] },
+      });
+
+      expect(result.queries).toEqual(['skincare brands selling in US']);
+    });
+
+    it('respects the excluded sectors when expanding', async () => {
+      const { orchestrator } = build({
+        getConfig: topUpConfig(),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(['skincare brands selling in US']))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate({
+        ...baseParams,
+        ibp: {
+          ...ibp,
+          targetSectors: ['beauty', 'fashion'],
+          excludedSectors: ['swimwear', 'lingerie'],
+          markets: ['US'],
+        },
+      });
+
+      expect(result.queries.join(' ')).not.toMatch(/swimwear|lingerie/);
+    });
+
+    it('bounds the hits sent to SCORE and uses the configurable SCORE timeout', async () => {
+      const hits = Array.from({ length: 40 }, (_, i) => ({
+        title: 'Brand ' + i,
+        url: 'https://brand' + i + '.example/',
+        content: 'brand ' + i,
+      }));
+      const { orchestrator, publishScore, wait } = build({
+        search: jest.fn().mockResolvedValue(hits),
+        getConfig: topUpConfig({
+          BRAND_DISCOVERY_MIN_QUERIES: 0,
+          BRAND_DISCOVERY_MAX_SCORE_HITS: 12,
+          BRAND_DISCOVERY_SCORE_BATCH_SIZE: 12,
+          BRAND_DISCOVERY_SCORE_TIMEOUT_MS: 900000,
+        }),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(validQueries))
+          .mockResolvedValueOnce(scoreCompleted([scoredBrand])),
+      });
+
+      const result = await orchestrator.orchestrate(baseParams);
+
+      const published = publishScore.mock.calls[0][0] as { searchHits: unknown[] };
+      expect(published.searchHits).toHaveLength(12);
+      // Diagnostics keep the full filtered list.
+      expect(result.searchHitsCount).toBeGreaterThan(12);
+      expect(wait).toHaveBeenNthCalledWith(2, SCORE_EXECUTION_ID, 900000);
+    });
+
+    describe('SCORE batching', () => {
+      const makeHits = (n: number) =>
+        Array.from({ length: n }, (_, i) => ({
+          title: 'Brand ' + i,
+          url: 'https://brand' + i + '.example/',
+          content: 'brand ' + i,
+        }));
+      const brand = (domain: string, score: number) => ({
+        name: domain,
+        website: 'https://' + domain + '/',
+        score,
+        fitReason: 'fit',
+        evidenceUrls: ['https://' + domain + '/about'],
+      });
+      const batchConfig = () =>
+        topUpConfig({
+          BRAND_DISCOVERY_MIN_QUERIES: 0,
+          BRAND_DISCOVERY_MAX_SCORE_HITS: 12,
+          BRAND_DISCOVERY_SCORE_BATCH_SIZE: 5,
+        });
+
+      it('splits hits into batches and merges brands by domain (higher score wins)', async () => {
+        const { orchestrator, publishScore } = build({
+          search: jest.fn().mockResolvedValue(makeHits(40)),
+          getConfig: batchConfig(),
+          wait: jest
+            .fn()
+            .mockResolvedValueOnce(planCompleted(validQueries))
+            .mockResolvedValueOnce(scoreCompleted([brand('a.example', 50)]))
+            .mockResolvedValueOnce(
+              scoreCompleted([brand('a.example', 90), brand('b.example', 70)]),
+            )
+            .mockResolvedValueOnce(scoreCompleted([])),
+        });
+
+        const result = await orchestrator.orchestrate(baseParams);
+
+        const sizes = publishScore.mock.calls.map(
+          (call) => (call[0] as { searchHits: unknown[] }).searchHits.length,
+        );
+        expect(sizes).toEqual([5, 5, 2]);
+        expect(result.brands).toHaveLength(2);
+        expect(result.brands.find((b) => b.website.includes('a.example'))?.score).toBe(90);
+        expect(result.scoreBatches).toEqual({ total: 3, failed: 0, hitsPerBatch: 5 });
+      });
+
+      it('keeps the run alive when one batch fails', async () => {
+        const { orchestrator } = build({
+          search: jest.fn().mockResolvedValue(makeHits(40)),
+          getConfig: batchConfig(),
+          wait: jest
+            .fn()
+            .mockResolvedValueOnce(planCompleted(validQueries))
+            .mockResolvedValueOnce(scoreCompleted([brand('a.example', 80)]))
+            .mockResolvedValueOnce(scoreFailed('SCORE_FAILED', 'model timeout'))
+            .mockResolvedValueOnce(scoreCompleted([brand('c.example', 60)])),
+        });
+
+        const result = await orchestrator.orchestrate(baseParams);
+
+        expect(result.brands.map((b) => b.website).sort()).toEqual([
+          'https://a.example/',
+          'https://c.example/',
+        ]);
+        expect(result.scoreBatches).toEqual({ total: 3, failed: 1, hitsPerBatch: 5 });
+      });
+
+      it('fails the run only when every batch fails', async () => {
+        const { orchestrator } = build({
+          search: jest.fn().mockResolvedValue(makeHits(40)),
+          getConfig: batchConfig(),
+          wait: jest
+            .fn()
+            .mockResolvedValueOnce(planCompleted(validQueries))
+            .mockResolvedValue(scoreFailed('SCORE_FAILED', 'model timeout')),
+        });
+
+        await expect(orchestrator.orchestrate(baseParams)).rejects.toBeInstanceOf(
+          BrandDiscoveryAiOrchestratorError,
+        );
+      });
+
+      it('still runs SCORE once when there are zero hits', async () => {
+        const { orchestrator, publishScore } = build({
+          search: jest.fn().mockResolvedValue([]),
+          getConfig: batchConfig(),
+          wait: jest
+            .fn()
+            .mockResolvedValueOnce(planCompleted(validQueries))
+            .mockResolvedValueOnce(scoreCompleted([])),
+        });
+
+        const result = await orchestrator.orchestrate(baseParams);
+
+        expect(publishScore).toHaveBeenCalledTimes(1);
+        expect((publishScore.mock.calls[0][0] as { searchHits: unknown[] }).searchHits).toEqual([]);
+        expect(result.scoreBatches?.total).toBe(1);
+      });
+    });
   });
 });

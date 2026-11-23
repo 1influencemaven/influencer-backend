@@ -31,6 +31,7 @@ import {
   type SerpHitFilterDiagnostics,
 } from './utils/brand-serp-hit-filter.util';
 import { normalizeDomain } from './utils/brand-domain.util';
+import { buildExpandedBrandQueries } from './utils/brand-query-expansion.util';
 import {
   buildSerpLenses,
   buildSimplifiedSerpQuery,
@@ -47,7 +48,21 @@ import {
 
 export const BRAND_DISCOVERY_PLAN_TIMEOUT_MS = 120_000;
 export const BRAND_DISCOVERY_SCORE_TIMEOUT_MS = 300_000;
-export const BRAND_DISCOVERY_SERP_MAX_RESULTS_PER_QUERY = 6;
+/** Organic results requested per SERP query (more hits → more distinct brand domains). */
+export const BRAND_DISCOVERY_SERP_MAX_RESULTS_PER_QUERY = 10;
+/** Below this many validated queries, the plan is topped up from the IBP taxonomy. */
+export const BRAND_DISCOVERY_MIN_QUERIES_DEFAULT = 6;
+/** Cap on queries after top-up (serial SERP + inter-query delay). */
+export const BRAND_DISCOVERY_MAX_QUERIES_DEFAULT = 8;
+/** Max filtered SERP hits sent to SCORE (bounds local-LLM scoring time). */
+export const BRAND_DISCOVERY_MAX_SCORE_HITS_DEFAULT = 30;
+/**
+ * Hits per SCORE_CANDIDATES call. A local CPU model answers a non-streaming
+ * request only when the whole completion is done, so one 30-hit prompt could
+ * exceed every timeout and lose the run; small batches finish sooner and a
+ * failed batch no longer fails the run.
+ */
+export const BRAND_DISCOVERY_SCORE_BATCH_SIZE_DEFAULT = 10;
 /** Pause between sequential SERP queries to reduce Bright Data empty_body bans. */
 export const BRAND_DISCOVERY_SERP_INTER_QUERY_DELAY_MS = 3_000;
 export const BRAND_DISCOVERY_MAX_SERP_CALLS_DEFAULT = 12;
@@ -111,6 +126,8 @@ export type BrandDiscoveryAiOrchestrationResult = {
   serpCallsOmitted?: number;
   serpCallsMax?: number;
   hitGeoAttribution?: HitGeoAttribution[];
+  /** SCORE_CANDIDATES batching: how many calls ran and how many failed. */
+  scoreBatches?: { total: number; failed: number; hitsPerBatch: number };
 };
 
 type ResolvedQueries = {
@@ -185,26 +202,27 @@ export class BrandDiscoveryAiOrchestrator {
       params.promptInstructions?.trim() ||
       (await this.aiPromptsService.getBrandDiscoveryInstructions());
 
-    const { executionId: scoreExecutionId } =
-      await this.publisher.publishBrandDiscoveryScore({
-        runId: params.runId,
-        userId: params.userId,
-        influencerId: params.influencerId,
-        ...this.influencerPublishFields(params),
-        ibp: params.ibp,
-        limit: params.limit,
-        searchHits: searchHits.map((hit) => ({
-          title: hit.title,
-          url: hit.url,
-          content: hit.content,
-        })),
-        seedBrands: params.seedBrands,
-        promptInstructions,
-        actorRole: params.actorRole,
-        locale: params.locale,
-      });
+    const scoreHits = searchHits
+      .slice(
+        0,
+        this.readIntConfig(
+          'BRAND_DISCOVERY_MAX_SCORE_HITS',
+          BRAND_DISCOVERY_MAX_SCORE_HITS_DEFAULT,
+          1,
+          100,
+        ),
+      )
+      .map((hit) => ({
+        title: hit.title,
+        url: hit.url,
+        content: hit.content,
+      }));
 
-    const brands = await this.waitForScoreBrands(scoreExecutionId);
+    const {
+      brands,
+      scoreExecutionId,
+      batches: scoreBatches,
+    } = await this.scoreInBatches(params, scoreHits, promptInstructions);
 
     return {
       queries: resolved.queries,
@@ -213,6 +231,7 @@ export class BrandDiscoveryAiOrchestrator {
       brands,
       planExecutionId: resolved.planExecutionId,
       scoreExecutionId,
+      scoreBatches,
       strategy: resolved.strategy,
       plannedQueriesCount: resolved.plannedQueriesCount,
       validatedQueriesCount: resolved.queries.length,
@@ -551,7 +570,108 @@ export class BrandDiscoveryAiOrchestrator {
     }
   }
 
+  /**
+   * PLAN_SEARCH (or templates) followed by a deterministic top-up: validation
+   * routinely discards most LLM queries, which left a single SERP call and no
+   * brands. Topping up from the IBP's concrete subcategories keeps the query
+   * set diverse without depending on the planner model.
+   */
   private async resolveQueries(
+    params: BrandDiscoveryAiOrchestrateParams,
+  ): Promise<ResolvedQueries> {
+    const base = await this.resolveQueriesBase(params);
+    return this.topUpQueries(params, base);
+  }
+
+  private topUpQueries(
+    params: BrandDiscoveryAiOrchestrateParams,
+    base: ResolvedQueries,
+  ): ResolvedQueries {
+    const minQueries = this.readIntConfig(
+      'BRAND_DISCOVERY_MIN_QUERIES',
+      BRAND_DISCOVERY_MIN_QUERIES_DEFAULT,
+      0,
+      12,
+    );
+    if (base.queries.length >= minQueries) {
+      return base;
+    }
+    const maxTotal = this.readIntConfig(
+      'BRAND_DISCOVERY_MAX_QUERIES',
+      BRAND_DISCOVERY_MAX_QUERIES_DEFAULT,
+      1,
+      12,
+    );
+
+    const expanded = buildExpandedBrandQueries({
+      sectors: params.ibp.targetSectors ?? [],
+      niches: params.niches,
+      niche: params.niche,
+      markets: params.ibp.markets,
+      country: params.country,
+      max: maxTotal,
+    });
+    if (expanded.length === 0) {
+      return base;
+    }
+
+    const merged = validateBrandSearchQueriesWithDiagnostics(
+      [...base.queries, ...expanded],
+      {
+        maxQueries: maxTotal,
+        excludedSectors: params.ibp.excludedSectors,
+        // Expanded queries deliberately mix homepage / creator-program shapes.
+        maxCollaborationModeQueries: 4,
+      },
+    );
+    if (merged.queries.length <= base.queries.length) {
+      return base;
+    }
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'brand_discovery_query_topup',
+        runId: params.runId,
+        before: base.queries.length,
+        after: merged.queries.length,
+        added: merged.queries.filter((q) => !base.queries.includes(q)),
+      }),
+    );
+
+    const previous = base.planQueryValidation;
+    return {
+      ...base,
+      queries: merged.queries,
+      fallbackUsed: true,
+      planQueryValidation: {
+        receivedCount: (previous?.receivedCount ?? 0) + expanded.length,
+        keptCount: merged.queries.length,
+        discardedCount:
+          (previous?.discardedCount ?? 0) + merged.diagnostics.discardedCount,
+        discarded: [
+          ...(previous?.discarded ?? []),
+          ...merged.diagnostics.discarded,
+        ],
+        keptCategorySignatures: merged.diagnostics.keptCategorySignatures,
+      },
+    };
+  }
+
+  private readIntConfig(
+    key: string,
+    fallback: number,
+    min: number,
+    max: number,
+  ): number {
+    const raw = this.configService.get<string | number>(key);
+    const n = typeof raw === 'number' ? raw : Number(raw);
+    if (raw === undefined || raw === null || raw === '' || !Number.isFinite(n)) {
+      return fallback;
+    }
+    return Math.min(Math.max(Math.floor(n), min), max);
+  }
+
+  private async resolveQueriesBase(
     params: BrandDiscoveryAiOrchestrateParams,
   ): Promise<ResolvedQueries> {
     const mode =
@@ -719,13 +839,111 @@ export class BrandDiscoveryAiOrchestrator {
     }
   }
 
+  /**
+   * Scores the hits in small sequential batches. A batch that fails is logged
+   * and skipped; the run only fails when every batch fails. Brands are merged
+   * by domain, keeping the higher score.
+   */
+  private async scoreInBatches(
+    params: BrandDiscoveryAiOrchestrateParams,
+    scoreHits: Array<{ title: string; url: string; content: string }>,
+    promptInstructions: string,
+  ): Promise<{
+    brands: ScoredBrand[];
+    scoreExecutionId: string | null;
+    batches: { total: number; failed: number; hitsPerBatch: number };
+  }> {
+    const hitsPerBatch = this.readIntConfig(
+      'BRAND_DISCOVERY_SCORE_BATCH_SIZE',
+      BRAND_DISCOVERY_SCORE_BATCH_SIZE_DEFAULT,
+      1,
+      100,
+    );
+    // SCORE must still run once with zero hits (soft-empty SERP, AI-004.5).
+    const chunks: Array<typeof scoreHits> = [];
+    for (let i = 0; i < scoreHits.length; i += hitsPerBatch) {
+      chunks.push(scoreHits.slice(i, i + hitsPerBatch));
+    }
+    if (chunks.length === 0) chunks.push([]);
+
+    const byDomain = new Map<string, ScoredBrand>();
+    let firstExecutionId: string | null = null;
+    let failed = 0;
+    let lastError: unknown;
+
+    for (const [index, chunk] of chunks.entries()) {
+      try {
+        const { executionId } = await this.publisher.publishBrandDiscoveryScore({
+          runId: params.runId,
+          userId: params.userId,
+          influencerId: params.influencerId,
+          ...this.influencerPublishFields(params),
+          ibp: params.ibp,
+          limit: params.limit,
+          searchHits: chunk,
+          seedBrands: params.seedBrands,
+          promptInstructions,
+          actorRole: params.actorRole,
+          locale: params.locale,
+        });
+        firstExecutionId ??= executionId;
+        const brands = await this.waitForScoreBrands(executionId);
+        for (const brand of brands) {
+          const key = normalizeDomain(brand.website) || brand.website;
+          const previous = byDomain.get(key);
+          if (!previous || (brand.score ?? 0) > (previous.score ?? 0)) {
+            byDomain.set(key, brand);
+          }
+        }
+      } catch (error) {
+        failed += 1;
+        lastError = error;
+        this.logger.warn(
+          JSON.stringify({
+            event: 'brand_discovery_score_batch_failed',
+            runId: params.runId,
+            batch: index + 1,
+            of: chunks.length,
+            hits: chunk.length,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+
+    if (failed === chunks.length) {
+      throw lastError;
+    }
+    if (failed > 0) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'brand_discovery_score_partial',
+          runId: params.runId,
+          failedBatches: failed,
+          totalBatches: chunks.length,
+        }),
+      );
+    }
+
+    return {
+      brands: [...byDomain.values()],
+      scoreExecutionId: firstExecutionId,
+      batches: { total: chunks.length, failed, hitsPerBatch },
+    };
+  }
+
   private async waitForScoreBrands(
     scoreExecutionId: string,
   ): Promise<ScoredBrand[]> {
     try {
       const result = await this.resultWait.waitForAiExecutionResult(
         scoreExecutionId,
-        BRAND_DISCOVERY_SCORE_TIMEOUT_MS,
+        this.readIntConfig(
+          'BRAND_DISCOVERY_SCORE_TIMEOUT_MS',
+          BRAND_DISCOVERY_SCORE_TIMEOUT_MS,
+          30_000,
+          1_800_000,
+        ),
       );
 
       if (result.status === 'FAILED') {

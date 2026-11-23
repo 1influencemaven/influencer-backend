@@ -375,6 +375,7 @@ model BrandCandidate {
   @@index([discoveryRunId])
   @@index([status])
   @@index([domain])
+  @@index([influencerId, domain])
   @@index([createdAt])
 }
 
@@ -562,4 +563,67 @@ model AgencyContact {
   @@index([commercialRelevance])
   @@index([contactKind])
   @@index([discoveredAt])
+}
+
+/// Review/health state of a brand in the shared knowledge base (BKB).
+enum BrandKnowledgeStatus {
+  ACTIVE
+  STALE
+  BLOCKED
+}
+
+/// Shared (cross-manager) memory of a brand, unique per normalized domain.
+/// Fed from BrandCandidate persistence and review decisions; never owned by one influencer.
+model Brand {
+  id             String               @id @default(uuid())
+  domain         String               @unique
+  name           String
+  website        String
+  sectors        String[]             @default([])
+  markets        String[]             @default([])
+  sizeTag        String?
+  /// Latest verified evidence URLs (bounded by the service).
+  evidenceUrls   String[]             @default([])
+  status         BrandKnowledgeStatus @default(ACTIVE)
+  /// Summary of the last Contact Discovery outcome (counts/date), not contact PII.
+  contactYield   Json?
+  firstSeenAt    DateTime             @default(now())
+  lastSeenAt     DateTime             @default(now())
+  lastVerifiedAt DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  affinities     BrandNicheAffinity[]
+
+  @@index([status, lastVerifiedAt])
+  @@index([lastSeenAt])
+}
+
+/// Brand x niche signal: how often a brand was surfaced for a niche and how reviewers decided.
+/// Counters are aggregate only (no per-manager decisions are exposed).
+model BrandNicheAffinity {
+  id                 String    @id @default(uuid())
+  brandId            String
+  brand              Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  /// Canonical niche slug (taxonomy group key or a concrete term slug).
+  nicheKey           String
+  surfacedCount      Int       @default(0)
+  approvedCount      Int       @default(0)
+  rejectedCount      Int       @default(0)
+  postponedCount     Int       @default(0)
+  scoreSum           Float     @default(0)
+  scoredCount        Int       @default(0)
+  /// scoreSum / scoredCount, maintained atomically in SQL.
+  avgScore           Float     @default(0)
+  lastScore          Float?
+  collaborationTypes String[]  @default([])
+  lastSurfacedAt     DateTime  @default(now())
+  lastDecisionAt     DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([brandId, nicheKey])
+  @@index([nicheKey, avgScore(sort: Desc)])
+  @@index([nicheKey, approvedCount])
+  @@index([nicheKey, lastSurfacedAt])
+  @@index([brandId])
 }

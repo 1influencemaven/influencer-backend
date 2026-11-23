@@ -109,6 +109,32 @@ export const envValidationSchema = Joi.object({
     .max(5)
     .default(2),
 
+  /** Min validated SERP queries before the plan is topped up from the IBP taxonomy (0 = off). */
+  BRAND_DISCOVERY_MIN_QUERIES: Joi.number().integer().min(0).max(12).default(6),
+  /** Max SERP queries after the top-up. */
+  BRAND_DISCOVERY_MAX_QUERIES: Joi.number().integer().min(1).max(12).default(8),
+  /** Max filtered SERP hits sent to SCORE_CANDIDATES (bounds local-LLM time). */
+  BRAND_DISCOVERY_MAX_SCORE_HITS: Joi.number().integer().min(1).max(100).default(30),
+  /** Hits per SCORE_CANDIDATES call (smaller = faster calls, partial results survive a failure). */
+  BRAND_DISCOVERY_SCORE_BATCH_SIZE: Joi.number().integer().min(1).max(100).default(10),
+  /** Wait timeout for SCORE_CANDIDATES Mastra result (ms). Raise for CPU-only local models. */
+  BRAND_DISCOVERY_SCORE_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(30000)
+    .max(1800000)
+    .default(300000),
+
+  /**
+   * Multi-brand retailers (Sephora, Ulta, Nordstrom, Target...) in Brand Discovery results:
+   * demote (default) = persist after brand-owned candidates; exclude = never persist; off = no special handling.
+   */
+  BRAND_DISCOVERY_RETAILER_POLICY: Joi.string()
+    .valid('demote', 'exclude', 'off')
+    .default('demote'),
+
+  /** Deep research per brand (Unlocker + RESEARCH_BRAND). Turn off for CPU-only local models. */
+  BRAND_DISCOVERY_RESEARCH_ENABLED: Joi.boolean().default(true),
+
   /** Wait timeout for RESEARCH_BRAND Mastra result (ms). */
   BRAND_DISCOVERY_RESEARCH_TIMEOUT_MS: Joi.number()
     .integer()

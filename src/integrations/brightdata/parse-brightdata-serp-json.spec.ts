@@ -27,6 +27,41 @@ describe('parseBrightDataSerpJson', () => {
     });
   });
 
+  it('recovers the real domain from google.com/goto wrappers via display_link', () => {
+    const body = JSON.stringify({
+      organic: [
+        {
+          title: 'Jackpot Candles Brand Ambassador',
+          link: 'https://www.google.com/goto?url=CAESabc&gsessionid=x',
+          display_link:
+            'https://www.jackpotcandles.com › pages › jackpot-cand...',
+          rank: 4,
+        },
+        {
+          title: 'Ambassadors',
+          link: 'https://www.google.com/goto?url=CAESdef',
+          display_link: 'https://literiecandle.com › pages › ambassador',
+          rank: 5,
+        },
+        {
+          title: 'Wrapper without display link',
+          link: 'https://www.google.com/goto?url=CAESghi',
+          rank: 6,
+        },
+      ],
+    });
+    const result = parseBrightDataSerpJson(body);
+    if (result.kind !== 'brd_json') throw new Error('expected brd_json');
+    expect(result.items.map((i) => i.domain)).toEqual([
+      'jackpotcandles.com',
+      'literiecandle.com',
+    ]);
+    expect(result.items[0].url).toBe('https://www.jackpotcandles.com/');
+    expect(result.items[1].url).toBe(
+      'https://literiecandle.com/pages/ambassador',
+    );
+  });
+
   it('returns empty items when organic is empty array', () => {
     const result = parseBrightDataSerpJson(JSON.stringify({ organic: [] }));
     expect(result).toEqual({ kind: 'brd_json', items: [] });
