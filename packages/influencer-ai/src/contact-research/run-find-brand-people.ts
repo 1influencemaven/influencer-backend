@@ -22,6 +22,7 @@ import {
   roleFromSerpTitle,
   selectLinkedInPeopleHits,
 } from './linkedin-people-hits';
+import { normalizeLinkedInPeopleUrl } from './linkedin-profile-url';
 import {
   emptyPeeReuseTrace,
   htmlFromPeeSnapshot,
@@ -430,14 +431,14 @@ export async function runContactResearchFindBrandPeople(
   }
 }
 
+/**
+ * Canonical profile URL (www host, lower-case slug) so the same person seen via
+ * different country subdomains or slug casing persists as one lead.
+ */
 function normalizeOutputLinkedIn(scrapedUrl: string, fallback: string): string {
-  try {
-    const u = new URL(scrapedUrl);
-    if (u.hostname.includes('linkedin.com') && u.pathname.includes('/in/')) {
-      return scrapedUrl.split('?')[0] ?? scrapedUrl;
-    }
-  } catch {
-    /* fall through */
-  }
-  return fallback;
+  return (
+    normalizeLinkedInPeopleUrl(scrapedUrl) ??
+    normalizeLinkedInPeopleUrl(fallback) ??
+    fallback
+  );
 }
