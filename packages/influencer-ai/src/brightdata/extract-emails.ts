@@ -23,6 +23,12 @@ const BLOCKED_LOCAL_PARTS = new Set([
   'postmaster',
 ]);
 
+function decodeJsUnicodeEscapes(html: string): string {
+  return html.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) =>
+    String.fromCharCode(parseInt(hex, 16)),
+  );
+}
+
 function stripTags(html: string): string {
   return html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ');
 }
@@ -39,9 +45,15 @@ function isPlausibleEmail(email: string): boolean {
 }
 
 export function extractEmailsFromHtml(html: string): string[] {
+  // Inline JSON/JS escapes (`\u003e`, `\u0040`) otherwise glue "u003e" onto the
+  // local part (`\u003ecare@brand.com` -> `u003ecare@brand.com`).
+  const decoded = decodeJsUnicodeEscapes(html);
   // Scan raw HTML (mailto: hrefs) and visible text after stripping tags.
-  const text = stripTags(html);
-  const found = [...(html.match(EMAIL_RE) ?? []), ...(text.match(EMAIL_RE) ?? [])];
+  const text = stripTags(decoded);
+  const found = [
+    ...(decoded.match(EMAIL_RE) ?? []),
+    ...(text.match(EMAIL_RE) ?? []),
+  ];
   const unique = [...new Set(found.map((e) => e.toLowerCase()))];
   return unique.filter(isPlausibleEmail);
 }

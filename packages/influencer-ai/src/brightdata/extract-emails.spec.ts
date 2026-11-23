@@ -25,3 +25,11 @@ describe('extractEmailsFromHtml', () => {
     expect(snip.toLowerCase()).toContain('partnerships@brand.com');
   });
 });
+
+describe('extractEmailsFromHtml JS escapes', () => {
+  it('does not glue "u003e" onto emails inside inline JSON', () => {
+    const html =
+      '<script>{"html":"\\u003ccontact\\u003ecustomercare@gorjana.com\\u003c/contact\\u003e"}</script>';
+    expect(extractEmailsFromHtml(html)).toEqual(['customercare@gorjana.com']);
+  });
+});
