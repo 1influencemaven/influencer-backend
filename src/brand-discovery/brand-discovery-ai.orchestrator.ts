@@ -776,9 +776,16 @@ export class BrandDiscoveryAiOrchestrator {
       params.promptInstructions?.trim() ||
       (await this.aiPromptsService.getBrandDiscoveryInstructions());
 
+    // CPU-only hosts need more than the 120 s default (BRAND_DISCOVERY_PLAN_TIMEOUT_MS).
+    const planTimeoutMs = this.readIntConfig(
+      'BRAND_DISCOVERY_PLAN_TIMEOUT_MS',
+      BRAND_DISCOVERY_PLAN_TIMEOUT_MS,
+      30_000,
+      1_800_000,
+    );
     const { executionId: planExecutionId } =
       await this.publisher.publishBrandDiscoveryPlan({
-        timeoutMs: BRAND_DISCOVERY_PLAN_TIMEOUT_MS,
+        timeoutMs: planTimeoutMs,
         runId: params.runId,
         userId: params.userId,
         influencerId: params.influencerId,
@@ -793,7 +800,7 @@ export class BrandDiscoveryAiOrchestrator {
     try {
       const result = await this.resultWait.waitForAiExecutionResult(
         planExecutionId,
-        BRAND_DISCOVERY_PLAN_TIMEOUT_MS,
+        planTimeoutMs,
       );
 
       if (result.status === 'FAILED') {

@@ -372,6 +372,35 @@ describe('BrandDiscoveryAiOrchestrator', () => {
     expect(publishScore).not.toHaveBeenCalled();
   });
 
+  it('uses BRAND_DISCOVERY_PLAN_TIMEOUT_MS for the plan publish and wait', async () => {
+    const publishPlan = jest.fn().mockResolvedValue({
+      executionId: PLAN_EXECUTION_ID,
+      correlationId: CORRELATION_ID,
+    });
+    const wait = jest
+      .fn()
+      .mockResolvedValueOnce(planCompleted(validQueries))
+      .mockResolvedValue(scoreCompleted([scoredBrand]));
+    const { orchestrator } = build({
+      publishPlan,
+      wait,
+      getConfig: (key: string) => {
+        if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
+        if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'legacy';
+        if (key === 'BRAND_DISCOVERY_MIN_QUERIES') return 0;
+        if (key === 'BRAND_DISCOVERY_PLAN_TIMEOUT_MS') return 300_000;
+        return undefined;
+      },
+    });
+
+    await orchestrator.orchestrate(baseParams);
+
+    expect(publishPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 300_000 }),
+    );
+    expect(wait).toHaveBeenNthCalledWith(1, PLAN_EXECUTION_ID, 300_000);
+  });
+
   it('propagates PLAN_SEARCH timeout without template fallback', async () => {
     const { orchestrator, publishScore } = build({
       wait: jest
