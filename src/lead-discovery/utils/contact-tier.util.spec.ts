@@ -1,6 +1,7 @@
 import {
   CommercialRelevance,
   LeadEmailConfidence,
+  LeadStatus,
 } from '../../generated/prisma/enums';
 import { businessContactTier, leadContactTier } from './contact-tier.util';
 
@@ -23,6 +24,13 @@ describe('contact tiers', () => {
     expect(
       leadContactTier(lead({ email: 'ana@b.com', profileUrl: 'https://www.linkedin.com/in/ana' })),
     ).toBe('TIER_3');
+  });
+
+  it('discarded/duplicate leads are REJECTED even with a verified email', () => {
+    const verified = { email: 'ana@b.com', emailConfidence: LeadEmailConfidence.VALID };
+    expect(leadContactTier(lead({ ...verified, status: LeadStatus.DISCARDED }))).toBe('REJECTED');
+    expect(leadContactTier(lead({ ...verified, status: LeadStatus.DUPLICATE }))).toBe('REJECTED');
+    expect(leadContactTier(lead({ ...verified, status: LeadStatus.APPROVED }))).toBe('TIER_1');
   });
 
   it('TIER_3 for LinkedIn people without a usable email', () => {

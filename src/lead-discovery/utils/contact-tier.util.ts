@@ -1,6 +1,7 @@
 import {
   CommercialRelevance,
   LeadEmailConfidence,
+  LeadStatus,
 } from '../../generated/prisma/enums';
 import { commercialCoverageTier } from './commercial-relevance.util';
 
@@ -37,7 +38,12 @@ export function leadContactTier(lead: {
   emailConfidence: LeadEmailConfidence;
   isGeneric: boolean;
   profileUrl: string | null;
+  status?: LeadStatus;
 }): ContactTier {
+  // A reviewer's discard/duplicate decision always wins over the email quality.
+  if (lead.status === LeadStatus.DISCARDED || lead.status === LeadStatus.DUPLICATE) {
+    return 'REJECTED';
+  }
   const hasEmail = Boolean(lead.email);
   if (!hasEmail || lead.emailConfidence === LeadEmailConfidence.INVALID) {
     return lead.profileUrl ? 'TIER_3' : 'REJECTED';

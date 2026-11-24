@@ -6,6 +6,7 @@ import {
   ContactChannelSource,
   ContactChannelType,
   LeadEmailConfidence,
+  LeadStatus,
 } from '../../generated/prisma/enums';
 import {
   SaleshandyClient,
@@ -382,6 +383,7 @@ export class SaleshandyEnrichmentService {
       where: {
         source: SALESHANDY_LEAD_SOURCE,
         email: { not: null },
+        status: { notIn: [LeadStatus.DISCARDED, LeadStatus.DUPLICATE] },
         emailConfidence: { in: [LeadEmailConfidence.VALID, LeadEmailConfidence.PROBABLE] },
         brandCandidate: { domain: ctx.domain },
         brandCandidateId: { not: ctx.brandCandidateId },
