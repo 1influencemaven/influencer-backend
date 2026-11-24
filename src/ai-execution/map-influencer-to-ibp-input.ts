@@ -13,6 +13,8 @@ type InfluencerLike = {
   country?: string | null;
   language?: string | null;
   followers?: number | null;
+  /** Prisma Decimal / number / numeric string. */
+  engagement?: { toString(): string } | number | string | null;
   instagram?: string | null;
   tiktok?: string | null;
   youtube?: string | null;
@@ -56,12 +58,22 @@ export function mapInfluencerToIbpInput(
       platforms: platforms.length ? platforms : undefined,
       audienceSize: influencer.followers ?? undefined,
       audienceLocation: influencer.country ?? undefined,
+      audienceLanguage: influencer.language ?? undefined,
+      engagementRate: toEngagementRate(influencer.engagement),
       contentStyle: influencer.subNiche ?? influencer.niche ?? undefined,
       notes: notesParts.length ? notesParts.join('; ') : undefined,
     },
     manualNiches: manualNiches.length ? manualNiches : undefined,
     instagramResearchEvidence: evidence,
   };
+}
+
+function toEngagementRate(
+  value: { toString(): string } | number | string | null | undefined,
+): number | undefined {
+  if (value == null) return undefined;
+  const n = typeof value === 'number' ? value : Number(value.toString());
+  return Number.isFinite(n) ? n : undefined;
 }
 
 export function parseInstagramResearchEvidence(

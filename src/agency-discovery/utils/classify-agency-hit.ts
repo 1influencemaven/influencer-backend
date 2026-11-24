@@ -41,6 +41,14 @@ const LISTICLE_PATH =
 const DIRECTORY_TEXT =
   /\b(top\s+\d+|best\s+influencer\s+marketing\s+agencies|list\s+of\s+agencies|agency\s+directory|roundup|compared)\b/i;
 
+/**
+ * Listicle / guide titles: "Top Fashion Influencer Marketing Agencies for November",
+ * "The Ultimate Guide to …", "How to Choose an Influencer Marketing Agency?",
+ * "19 Brands That Work with …". An agency's own page names itself, not a plural.
+ */
+const LISTICLE_TITLE =
+  /^\s*(top|best|the\s+(ultimate|best|top)|how|why|what|which|\d+\s)\b|\b(marketing|influencer|creator|fashion|beauty|pr|talent|boutique|digital|social\s+media)\s+(agencies|platforms|companies)\b|\b(guide|looking\s+for)\b/i;
+
 const MARKETPLACE_TEXT =
   /\b(influencer\s+marketplace|creator\s+marketplace|self-?serve\s+platform|saas\s+platform\s+for\s+influencer|marketplace\s+for\s+brands\s+and\s+creators)\b/i;
 
@@ -60,16 +68,33 @@ export type ClassifyAgencyHitContext = {
   fetchedAt?: string;
 };
 
-function titleToName(title: string, domain: string): string {
+function compactName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Agency name from the SERP title, only when it actually names the site
+ * ("Cure Media: Leading Agency…" -> "Cure Media"). Descriptive titles
+ * ("Beauty & Skincare Influencer Marketing Agency") fall back to the domain label.
+ */
+export function titleToName(title: string, domain: string): string {
   const cleaned = title
-    .split(/\s+[|\-–—]\s+/)[0]
+    .split(/\s+[|\-–—·]\s+|:\s+/)[0]
     ?.replace(/\s+/g, ' ')
     .trim();
-  if (cleaned && cleaned.length >= 2 && cleaned.length <= 120) {
-    return cleaned;
-  }
   const hostLabel = domain.split('.')[0] ?? domain;
-  return hostLabel.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const label = compactName(hostLabel);
+  if (cleaned && cleaned.length >= 2 && cleaned.length <= 120) {
+    const compact = compactName(cleaned);
+    const firstWord = compactName(cleaned.split(' ')[0] ?? '');
+    const namesSite =
+      compact.includes(label) ||
+      (firstWord.length >= 3 && label.startsWith(firstWord));
+    if (namesSite) return cleaned;
+  }
+  return hostLabel
+    .replace(/[-_]/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function websiteFromDomain(domain: string): string {
@@ -103,7 +128,8 @@ export function classifyAgencySerpHit(
 
   let agencyType: AgencyType = 'OTHER';
   let relevanceStatus: AgencyRelevanceStatus = 'UNDER_REVIEW';
-  let explanation = 'Insufficient evidence to classify as an influencer marketing intermediary.';
+  let explanation =
+    'Insufficient evidence to classify as an influencer marketing intermediary.';
   let sourceKind: AgencyEvidenceRef['sourceKind'] = 'serp';
 
   const isNoiseHost =
@@ -112,7 +138,10 @@ export function classifyAgencySerpHit(
       (h) => host === h || host.endsWith(`.${h}`),
     );
   const isListicle =
-    LISTICLE_PATH.test(hit.url) || DIRECTORY_TEXT.test(blob) || isNoiseHost;
+    LISTICLE_PATH.test(hit.url) ||
+    DIRECTORY_TEXT.test(blob) ||
+    LISTICLE_TITLE.test(hit.title) ||
+    isNoiseHost;
 
   if (isListicle) {
     agencyType = 'DIRECTORY';
@@ -147,7 +176,10 @@ export function classifyAgencySerpHit(
       'Mentions agency/influencer terms but lacks explicit evidence of connecting brands with creators.';
   }
 
-  const excerpt = (hit.content ?? hit.title).replace(/\s+/g, ' ').trim().slice(0, 500);
+  const excerpt = (hit.content ?? hit.title)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);
   const evidence: AgencyEvidenceRef[] = [
     {
       url: hit.url,

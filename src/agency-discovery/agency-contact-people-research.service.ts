@@ -16,9 +16,12 @@ import { classifyCommercialRelevance } from '../lead-discovery/utils/commercial-
 import { PrismaService } from '../prisma/prisma.service';
 import type { Track2CEmailsPassMetadata } from './agency-contact-emails-research.service';
 import { AgencyContactPersistenceService } from './agency-contact-persistence.service';
+import { mapPool } from '../brand-discovery/utils/map-pool.util';
 import {
   AGENCY_CONTACT_ELIGIBLE_RELEVANCE,
+  AGENCY_RESEARCH_CONCURRENCY,
   isAgencyEligibleForContactResearch,
+  rankAgencyAssociations,
 } from './utils/agency-contact-eligibility.util';
 
 /** Per-agency Mastra wait (aligned with brand 2B). */
@@ -133,7 +136,7 @@ export class AgencyContactPeopleResearchService {
     const maxSerpQueries =
       this.configService.get<number>('AI_PEOPLE_MAX_SERP_QUERIES') ?? 4;
     const maxProfiles =
-      this.configService.get<number>('AI_PEOPLE_MAX_PROFILES') ?? 5;
+      this.configService.get<number>('AI_PEOPLE_MAX_PROFILES') ?? 3;
     const maxAgencyPages =
       this.configService.get<number>('AI_PEOPLE_MAX_BRAND_PAGES') ?? 6;
     const ocrEnabled =
@@ -147,12 +150,13 @@ export class AgencyContactPeopleResearchService {
       }
     }
 
-    const associations = await this.prisma.influencerAgency.findMany({
+    const fetched = await this.prisma.influencerAgency.findMany({
       where: {
         influencerId: input.influencerId,
         relevanceStatus: { in: [...AGENCY_CONTACT_ELIGIBLE_RELEVANCE] },
       },
-      take: Math.max(1, maxAgencies),
+      // Over-fetch, then keep RELEVANT before UNDER_REVIEW (see rankAgencyAssociations).
+      take: Math.max(1, maxAgencies) * 3,
       orderBy: [{ updatedAt: 'desc' }],
       select: {
         relevanceStatus: true,
@@ -166,6 +170,10 @@ export class AgencyContactPeopleResearchService {
         },
       },
     });
+    const associations = rankAgencyAssociations(fetched).slice(
+      0,
+      Math.max(1, maxAgencies),
+    );
 
     if (associations.length === 0) {
       return {
@@ -184,48 +192,51 @@ export class AgencyContactPeopleResearchService {
       };
     }
 
-    const agencyResults: Track2CPeoplePassAgencyResult[] = [];
+    // Agencies are independent: research up to AGENCY_RESEARCH_CONCURRENCY at once
+    // (order of results is preserved for metadata).
+    const agencyResults = await mapPool(
+      associations,
+      AGENCY_RESEARCH_CONCURRENCY,
+      async (row): Promise<Track2CPeoplePassAgencyResult> => {
+        const agency = row.agency;
+        if (!isAgencyEligibleForContactResearch(row.relevanceStatus)) {
+          return {
+            agencyId: agency.id,
+            domain: agency.domain,
+            relevanceStatus: row.relevanceStatus,
+            outcome: 'SKIPPED_INELIGIBLE',
+            peopleFound: 0,
+            peopleWithAttributedEmail: 0,
+            contactsPersistedCreated: 0,
+            contactsPersistedUpdated: 0,
+            contactsSkipped: 0,
+            contactsPersistFailed: 0,
+          };
+        }
 
-    for (const row of associations) {
-      const agency = row.agency;
-      if (!isAgencyEligibleForContactResearch(row.relevanceStatus)) {
-        agencyResults.push({
-          agencyId: agency.id,
-          domain: agency.domain,
-          relevanceStatus: row.relevanceStatus,
-          outcome: 'SKIPPED_INELIGIBLE',
-          peopleFound: 0,
-          peopleWithAttributedEmail: 0,
-          contactsPersistedCreated: 0,
-          contactsPersistedUpdated: 0,
-          contactsSkipped: 0,
-          contactsPersistFailed: 0,
-        });
-        continue;
-      }
+        const domain = agency.domain
+          .trim()
+          .toLowerCase()
+          .replace(/^www\./, '');
+        const website =
+          agency.website?.trim() || (domain ? `https://${domain}` : '');
+        if (!domain || !website) {
+          return {
+            agencyId: agency.id,
+            domain: agency.domain,
+            relevanceStatus: row.relevanceStatus,
+            outcome: 'SKIPPED_NO_WEBSITE',
+            peopleFound: 0,
+            peopleWithAttributedEmail: 0,
+            contactsPersistedCreated: 0,
+            contactsPersistedUpdated: 0,
+            contactsSkipped: 0,
+            contactsPersistFailed: 0,
+            error: 'Agency missing domain/website',
+          };
+        }
 
-      const domain = agency.domain.trim().toLowerCase().replace(/^www\./, '');
-      const website =
-        agency.website?.trim() || (domain ? `https://${domain}` : '');
-      if (!domain || !website) {
-        agencyResults.push({
-          agencyId: agency.id,
-          domain: agency.domain,
-          relevanceStatus: row.relevanceStatus,
-          outcome: 'SKIPPED_NO_WEBSITE',
-          peopleFound: 0,
-          peopleWithAttributedEmail: 0,
-          contactsPersistedCreated: 0,
-          contactsPersistedUpdated: 0,
-          contactsSkipped: 0,
-          contactsPersistFailed: 0,
-          error: 'Agency missing domain/website',
-        });
-        continue;
-      }
-
-      agencyResults.push(
-        await this.researchOneAgency({
+        return this.researchOneAgency({
           runId: input.runId,
           userId,
           influencerId: input.influencerId,
@@ -243,9 +254,9 @@ export class AgencyContactPeopleResearchService {
           maxAgencyPages,
           ocrEnabled,
           pageSnapshots: snapshotByAgency.get(agency.id),
-        }),
-      );
-    }
+        });
+      },
+    );
 
     return this.aggregate(agencyResults);
   }
@@ -418,7 +429,11 @@ export class AgencyContactPeopleResearchService {
 
     const persisted =
       base.contactsPersistedCreated + base.contactsPersistedUpdated;
-    if (base.contactsPersistFailed > 0 && persisted === 0 && base.peopleFound === 0) {
+    if (
+      base.contactsPersistFailed > 0 &&
+      persisted === 0 &&
+      base.peopleFound === 0
+    ) {
       base.outcome = 'PROVIDER_FAILURE';
       base.error = `PERSIST_FAILED: ${base.contactsPersistFailed} contact(s) failed`;
     } else if (base.contactsPersistFailed > 0) {

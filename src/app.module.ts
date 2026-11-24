@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -14,6 +14,7 @@ import { databaseConfig } from './config/database.config';
 import { envValidationSchema } from './config/env.validation';
 import { jwtConfig } from './config/jwt.config';
 import { throttlerConfig } from './config/throttler.config';
+import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 
 import { LoggerModule } from './common/logger/logger.module';
 import { HealthModule } from './health/health.module';
@@ -69,10 +70,10 @@ import { LeadDiscoveryModule } from './lead-discovery/lead-discovery.module';
 
   providers: [
     AppService,
-    ThrottlerGuard,
+    AppThrottlerGuard,
     {
       provide: APP_GUARD,
-      useExisting: ThrottlerGuard,
+      useExisting: AppThrottlerGuard,
     },
   ],
 })

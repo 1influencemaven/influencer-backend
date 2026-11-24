@@ -1,7 +1,23 @@
 import { decideTrack2BExecution } from './track-2b-decision.util';
 
-describe('decideTrack2BExecution (RF-03)', () => {
-  it('skips 2B when HIGH present', () => {
+describe('decideTrack2BExecution (RF-03 v2)', () => {
+  it('skips 2B only when a verified nominal email (Tier 1) exists', () => {
+    expect(
+      decideTrack2BExecution({
+        hasHigh: false,
+        hasMedium: false,
+        emailsPersistedThisRun: 0,
+        hasTier1Nominal: true,
+      }),
+    ).toEqual({
+      shouldRun: false,
+      reason: 'TIER1_NOMINAL_FOUND',
+      hasHigh: false,
+      hasMedium: false,
+    });
+  });
+
+  it('still runs 2B when only a HIGH mailbox exists (Tier 2 < Tier 1)', () => {
     expect(
       decideTrack2BExecution({
         hasHigh: true,
@@ -9,36 +25,28 @@ describe('decideTrack2BExecution (RF-03)', () => {
         emailsPersistedThisRun: 1,
       }),
     ).toEqual({
-      shouldRun: false,
-      reason: 'SUFFICIENT_COMMERCIAL_COVERAGE_HIGH',
+      shouldRun: true,
+      reason: 'MAILBOX_ONLY_HIGH',
       hasHigh: true,
       hasMedium: false,
     });
   });
 
-  it('skips 2B when MEDIUM present', () => {
+  it('still runs 2B when only MEDIUM / HIGH+MEDIUM mailboxes exist', () => {
     expect(
       decideTrack2BExecution({
         hasHigh: false,
         hasMedium: true,
         emailsPersistedThisRun: 1,
-      }),
-    ).toEqual({
-      shouldRun: false,
-      reason: 'SUFFICIENT_COMMERCIAL_COVERAGE_MEDIUM',
-      hasHigh: false,
-      hasMedium: true,
-    });
-  });
-
-  it('skips 2B when HIGH and MEDIUM present', () => {
-    expect(
-      decideTrack2BExecution({
-        hasHigh: true,
-        hasMedium: true,
-        emailsPersistedThisRun: 2,
       }).reason,
-    ).toBe('SUFFICIENT_COMMERCIAL_COVERAGE_HIGH_AND_MEDIUM');
+    ).toBe('MAILBOX_ONLY_MEDIUM');
+    const both = decideTrack2BExecution({
+      hasHigh: true,
+      hasMedium: true,
+      emailsPersistedThisRun: 2,
+    });
+    expect(both.shouldRun).toBe(true);
+    expect(both.reason).toBe('MAILBOX_ONLY_HIGH_AND_MEDIUM');
   });
 
   it('runs 2B for GENERAL/LOW/OTHER (insufficient coverage)', () => {
@@ -47,13 +55,8 @@ describe('decideTrack2BExecution (RF-03)', () => {
         hasHigh: false,
         hasMedium: false,
         emailsPersistedThisRun: 1,
-      }),
-    ).toEqual({
-      shouldRun: true,
-      reason: 'INSUFFICIENT_COMMERCIAL_COVERAGE',
-      hasHigh: false,
-      hasMedium: false,
-    });
+      }).reason,
+    ).toBe('INSUFFICIENT_COMMERCIAL_COVERAGE');
   });
 
   it('runs 2B when 2A persisted no emails', () => {

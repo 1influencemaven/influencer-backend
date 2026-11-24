@@ -1,4 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  businessContactTier,
+  type ContactTier,
+} from './utils/contact-tier.util';
 import type { Prisma } from '../generated/prisma/client';
 import {
   CommercialRelevance,
@@ -43,6 +47,8 @@ export type BrandBusinessContactResponse = {
    * Orthogonal to Prisma commercialRelevance; OTHER ≠ GENERAL.
    */
   commercialCoverageTier: 'HIGH' | 'MEDIUM' | 'GENERAL' | 'LOW' | 'OTHER';
+  /** Strategy tier: TIER_2 area mailbox, GENERIC info@/hello@ (kept as fallback). */
+  contactTier: ContactTier;
   source: ContactChannelSource;
   sourceUrl: string | null;
   evidences: BusinessContactEvidence[];
@@ -158,6 +164,7 @@ export class BrandBusinessContactService {
           row.commercialRelevance,
           row.email,
         ),
+        contactTier: businessContactTier(row),
         source: row.source,
         sourceUrl: row.sourceUrl,
         evidences: provenance.evidences,

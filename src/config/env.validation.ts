@@ -109,6 +109,39 @@ export const envValidationSchema = Joi.object({
     .max(5)
     .default(2),
 
+  /** Concurrent Bright Data SERP calls per Brand Discovery run (1 = sequential). */
+  BRAND_DISCOVERY_SERP_CONCURRENCY: Joi.number().integer().min(1).max(8).default(4),
+  /** plan_v3 2A creator-program SERP calls per run (0 disables). */
+  BRAND_DISCOVERY_PROGRAM_QUERIES: Joi.number().integer().min(0).max(4).default(2),
+  /** Known brands from the shared base fed to SCORE as seeds (0 disables). */
+  BRAND_DISCOVERY_KNOWN_BRANDS: Joi.number().integer().min(0).max(10).default(5),
+
+  /** Min validated SERP queries before the plan is topped up from the IBP taxonomy (0 = off). */
+  BRAND_DISCOVERY_MIN_QUERIES: Joi.number().integer().min(0).max(12).default(6),
+  /** Max SERP queries after the top-up. */
+  BRAND_DISCOVERY_MAX_QUERIES: Joi.number().integer().min(1).max(12).default(8),
+  /** Max filtered SERP hits sent to SCORE_CANDIDATES (bounds local-LLM time). */
+  BRAND_DISCOVERY_MAX_SCORE_HITS: Joi.number().integer().min(1).max(100).default(30),
+  /** Hits per SCORE_CANDIDATES call (smaller = faster calls, partial results survive a failure). */
+  BRAND_DISCOVERY_SCORE_BATCH_SIZE: Joi.number().integer().min(1).max(100).default(15),
+  /** Wait timeout for SCORE_CANDIDATES Mastra result (ms). Raise for CPU-only local models. */
+  BRAND_DISCOVERY_SCORE_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(30000)
+    .max(1800000)
+    .default(300000),
+
+  /**
+   * Multi-brand retailers (Sephora, Ulta, Nordstrom, Target...) in Brand Discovery results:
+   * demote (default) = persist after brand-owned candidates; exclude = never persist; off = no special handling.
+   */
+  BRAND_DISCOVERY_RETAILER_POLICY: Joi.string()
+    .valid('demote', 'exclude', 'off')
+    .default('demote'),
+
+  /** Deep research per brand (Unlocker + RESEARCH_BRAND). Turn off for CPU-only local models. */
+  BRAND_DISCOVERY_RESEARCH_ENABLED: Joi.boolean().default(true),
+
   /** Wait timeout for RESEARCH_BRAND Mastra result (ms). */
   BRAND_DISCOVERY_RESEARCH_TIMEOUT_MS: Joi.number()
     .integer()
@@ -151,8 +184,16 @@ export const envValidationSchema = Joi.object({
     .min(1)
     .max(12)
     .default(4),
-  AI_PEOPLE_MAX_PROFILES: Joi.number().integer().min(1).max(15).default(5),
+  AI_PEOPLE_MAX_PROFILES: Joi.number().integer().min(1).max(15).default(3),
   AI_PEOPLE_MAX_BRAND_PAGES: Joi.number().integer().min(1).max(12).default(6),
+  /** Saleshandy enrichment (waterfall level 1/2). Search is free; reveal spends credits. */
+  SALESHANDY_API_KEY: Joi.string().allow('').optional(),
+  SALESHANDY_ENRICHMENT_ENABLED: Joi.boolean().default(false),
+  /** Max contacts revealed per brand per run (credits). Reused contacts count. */
+  SALESHANDY_MAX_ENRICH_PER_BRAND: Joi.number().integer().min(0).max(10).default(2),
+  /** Stop spending when the account balance drops below this. */
+  SALESHANDY_MIN_CREDITS: Joi.number().integer().min(0).default(20),
+  SALESHANDY_ENRICH_TIMEOUT_MS: Joi.number().integer().min(10000).max(600000).default(150000),
   /** When true, Nest asks worker to attempt OCR after LinkedIn+PEE (Phase 2). */
   CONTACT_OCR_ENABLED: Joi.boolean().default(false),
 

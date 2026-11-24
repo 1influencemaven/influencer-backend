@@ -89,6 +89,41 @@ describe('BrandDiscoveryResearchService', () => {
     service = module.get(BrandDiscoveryResearchService);
   });
 
+  it('skips deep research entirely when BRAND_DISCOVERY_RESEARCH_ENABLED=false', async () => {
+    const disabled = await Test.createTestingModule({
+      providers: [
+        BrandDiscoveryResearchService,
+        { provide: BrightDataSearchClient, useValue: { fetchRawHtml } },
+        { provide: BrightDataWebSearchProvider, useValue: { search } },
+        {
+          provide: AiExecutionPublisherService,
+          useValue: { publishBrandDiscoveryResearch },
+        },
+        {
+          provide: AiExecutionResultWaitService,
+          useValue: { waitForAiExecutionResult },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (key: string) =>
+              key === 'BRAND_DISCOVERY_RESEARCH_ENABLED' ? false : undefined,
+          },
+        },
+      ],
+    }).compile();
+    const off = disabled.get(BrandDiscoveryResearchService);
+    const input = [candidate()];
+
+    const result = await off.enrichCandidates(input, context);
+
+    expect(result.candidates).toEqual(input);
+    expect(result.researchedCount).toBe(0);
+    expect(result.researchFailedCount).toBe(0);
+    expect(fetchRawHtml).not.toHaveBeenCalled();
+    expect(publishBrandDiscoveryResearch).not.toHaveBeenCalled();
+  });
+
   it('persists candidate with FAILED deepResearch when Unlocker returns empty', async () => {
     fetchRawHtml.mockResolvedValue({
       html: '',

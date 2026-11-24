@@ -1,4 +1,5 @@
 import { parseOrganicHits } from './parse-organics';
+import { directFetchPage } from './direct-fetch';
 import type { BrightDataPageResult, BrightDataSerpResult } from './types';
 
 const BASE_URL = 'https://api.brightdata.com';
@@ -11,6 +12,38 @@ export type BrightDataClientConfig = {
   linkedInPeopleDatasetId?: string;
   scraperPollTimeoutMs?: number;
   scraperPollIntervalMs?: number;
+  /** Plain fetch before Unlocker (ms). 0 disables. Default 8000. */
+  directFetchTimeoutMs?: number;
+};
+
+export type SearchWebOptions = {
+  /** Google country (`gl`), default `us`. */
+  gl?: string;
+  /** Google interface language (`hl`), default `en`. */
+  hl?: string;
+  /** Extra attempts after an empty body / provider rejection (default 1). */
+  retries?: number;
+  /** Wait before retrying: Bright Data bans an identical failed query for ~15 s. */
+  cooldownMs?: number;
+};
+
+export const SERP_RETRY_COOLDOWN_MS = 15_000;
+
+function isRetryableSerp(result: BrightDataSerpResult): boolean {
+  if (result.ok) return false;
+  const code = (result.brdErrorCode ?? '').toLowerCase();
+  return (
+    result.emptyBody ||
+    result.httpStatus === 429 ||
+    code.includes('rate_limit') ||
+    code.includes('rejected')
+  );
+}
+
+export type DatasetRowsResult = {
+  ok: boolean;
+  rows: Record<string, unknown>[];
+  error?: string;
 };
 
 export type LinkedInPeopleScrapeResult = {
@@ -49,11 +82,40 @@ export class BrightDataToolsClient {
     );
   }
 
-  async searchWeb(query: string, num = 8): Promise<BrightDataSerpResult> {
+  /**
+   * SERP search with market-aware `gl`/`hl` and one cooldown retry on empty
+   * body / 429 / rejection (parity with the Nest client).
+   */
+  async searchWeb(
+    query: string,
+    num = 8,
+    options: SearchWebOptions = {},
+  ): Promise<BrightDataSerpResult> {
+    const retries = options.retries ?? 1;
+    const cooldownMs = options.cooldownMs ?? SERP_RETRY_COOLDOWN_MS;
+    let result = await this.searchWebOnce(query, num, options);
+    for (
+      let attempt = 0;
+      attempt < retries && isRetryableSerp(result);
+      attempt++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, cooldownMs));
+      result = await this.searchWebOnce(query, num, options);
+    }
+    return result;
+  }
+
+  private async searchWebOnce(
+    query: string,
+    num: number,
+    options: SearchWebOptions,
+  ): Promise<BrightDataSerpResult> {
+    const hl = options.hl ?? 'en';
+    const gl = options.gl ?? 'us';
     // `brd_json=1` → Bright Data parsed organics (avoids Google consent HTML).
     const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(
       query,
-    )}&hl=en&gl=us&brd_json=1`;
+    )}&hl=${hl}&gl=${gl}&brd_json=1`;
     const started = Date.now();
 
     try {
@@ -104,7 +166,20 @@ export class BrightDataToolsClient {
     }
   }
 
+  /**
+   * Direct fetch first (free); Bright Data Unlocker only when the site blocks
+   * bots (403/429/5xx, challenge page, JS shell) or the fetch fails.
+   */
   async openPage(url: string): Promise<BrightDataPageResult> {
+    const directTimeout = this.config.directFetchTimeoutMs ?? 8_000;
+    if (directTimeout > 0) {
+      const direct = await directFetchPage(url, directTimeout);
+      if (direct) return direct;
+    }
+    return this.openPageUnlocker(url);
+  }
+
+  private async openPageUnlocker(url: string): Promise<BrightDataPageResult> {
     const started = Date.now();
     try {
       const response = await fetch(`${BASE_URL}/request`, {
@@ -143,6 +218,7 @@ export class BrightDataToolsClient {
         elapsedMs: Date.now() - started,
         html: emptyBody ? '' : html,
         emptyBody,
+        via: 'unlocker',
         ...brd,
       };
     } catch (error) {
@@ -163,7 +239,9 @@ export class BrightDataToolsClient {
    * Live-collect one LinkedIn people profile via Bright Data dataset trigger.
    * Dataset default: gd_l1viktl72bvl7bjuj0 (no email fields in typical account).
    */
-  async scrapeLinkedInProfile(url: string): Promise<LinkedInPeopleScrapeResult> {
+  async scrapeLinkedInProfile(
+    url: string,
+  ): Promise<LinkedInPeopleScrapeResult> {
     const datasetId =
       this.config.linkedInPeopleDatasetId?.trim() || 'gd_l1viktl72bvl7bjuj0';
     const pollTimeoutMs = this.config.scraperPollTimeoutMs ?? 120_000;
@@ -195,7 +273,11 @@ export class BrightDataToolsClient {
       let snapshotId: string | null = null;
       try {
         const parsed: unknown = JSON.parse(triggerText);
-        if (Array.isArray(parsed) && parsed[0] && typeof parsed[0] === 'object') {
+        if (
+          Array.isArray(parsed) &&
+          parsed[0] &&
+          typeof parsed[0] === 'object'
+        ) {
           return this.mapLinkedInRow(url, parsed[0] as Record<string, unknown>);
         }
         if (parsed && typeof parsed === 'object') {
@@ -284,13 +366,118 @@ export class BrightDataToolsClient {
           };
         }
       }
-      return { ok: false, url, error: 'snapshot poll timeout', emailFields: [] };
+      return {
+        ok: false,
+        url,
+        error: 'snapshot poll timeout',
+        emailFields: [],
+      };
     } catch (error) {
       return {
         ok: false,
         url,
         error: error instanceof Error ? error.message : String(error),
         emailFields: [],
+      };
+    }
+  }
+
+  /**
+   * Query a pre-collected marketplace dataset with the Filter API
+   * (POST /datasets/filter → poll /datasets/snapshots/{id} → download).
+   * Used for ZoomInfo company leadership; a filter with no match returns ok+[].
+   */
+  async filterDatasetRows(
+    datasetId: string,
+    filter: Record<string, unknown>,
+    recordsLimit: number,
+  ): Promise<DatasetRowsResult> {
+    const pollTimeoutMs = this.config.scraperPollTimeoutMs ?? 120_000;
+    const pollIntervalMs = this.config.scraperPollIntervalMs ?? 3_000;
+    const auth = { Authorization: `Bearer ${this.config.apiKey}` };
+    try {
+      const created = await fetch(`${BASE_URL}/datasets/filter`, {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dataset_id: datasetId,
+          records_limit: recordsLimit,
+          filter,
+        }),
+        signal: AbortSignal.timeout(this.config.timeoutMs),
+      });
+      const createdText = await created.text();
+      if (!created.ok) {
+        return {
+          ok: false,
+          rows: [],
+          error: `filter ${created.status}: ${createdText.slice(0, 200)}`,
+        };
+      }
+      const snapshotId = (JSON.parse(createdText) as { snapshot_id?: string })
+        .snapshot_id;
+      if (!snapshotId) {
+        return {
+          ok: false,
+          rows: [],
+          error: 'filter response missing snapshot_id',
+        };
+      }
+
+      const deadline = Date.now() + pollTimeoutMs;
+      while (Date.now() < deadline) {
+        await sleep(pollIntervalMs);
+        const meta = await fetch(
+          `${BASE_URL}/datasets/snapshots/${encodeURIComponent(snapshotId)}`,
+          { headers: auth, signal: AbortSignal.timeout(this.config.timeoutMs) },
+        );
+        if (!meta.ok)
+          return { ok: false, rows: [], error: `snapshot meta ${meta.status}` };
+        const info = (await meta.json()) as {
+          status?: string;
+          warning_code?: string;
+        };
+        const status = String(info.status ?? '').toLowerCase();
+        if (status === 'failed') {
+          // "no_records_found" is a valid empty answer, not a provider failure.
+          return info.warning_code === 'no_records_found'
+            ? { ok: true, rows: [] }
+            : {
+                ok: false,
+                rows: [],
+                error: `snapshot failed${info.warning_code ? `: ${info.warning_code}` : ''}`,
+              };
+        }
+        if (status === 'ready') {
+          const download = await fetch(
+            `${BASE_URL}/datasets/snapshots/${encodeURIComponent(snapshotId)}/download?format=json`,
+            {
+              headers: auth,
+              signal: AbortSignal.timeout(this.config.timeoutMs),
+            },
+          );
+          const text = await download.text();
+          if (!download.ok) {
+            return {
+              ok: false,
+              rows: [],
+              error: `download ${download.status}: ${text.slice(0, 200)}`,
+            };
+          }
+          const parsed: unknown = JSON.parse(text);
+          const rows = (Array.isArray(parsed) ? parsed : [parsed]).filter(
+            (r): r is Record<string, unknown> =>
+              Boolean(r) && typeof r === 'object',
+          );
+          return { ok: true, rows };
+        }
+      }
+      return { ok: false, rows: [], error: 'filter snapshot poll timeout' };
+    } catch (error) {
+      return {
+        ok: false,
+        rows: [],
+        error: error instanceof Error ? error.message : String(error),
       };
     }
   }
@@ -307,9 +494,7 @@ export class BrightDataToolsClient {
         .trim() ||
       undefined;
     const title =
-      stringField(row, 'position') ||
-      stringField(row, 'headline') ||
-      undefined;
+      stringField(row, 'position') || stringField(row, 'headline') || undefined;
     const about = stringField(row, 'about') || undefined;
     const profileUrl = stringField(row, 'url') || inputUrl;
     const emailFields: string[] = [];
@@ -331,7 +516,10 @@ export class BrightDataToolsClient {
   }
 }
 
-function stringField(row: Record<string, unknown>, key: string): string | undefined {
+function stringField(
+  row: Record<string, unknown>,
+  key: string,
+): string | undefined {
   const v = row[key];
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }

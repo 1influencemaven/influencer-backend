@@ -8,6 +8,7 @@ import type { Agent } from '@mastra/core/agent';
 import { MastraError } from '@mastra/core/error';
 import { z } from 'zod';
 
+import { executionDeadlineSignal } from './execution-deadline';
 import {
   buildBrandDiscoveryScoreCorrectionPrompt,
   buildBrandDiscoveryScoreUserPrompt,
@@ -183,11 +184,13 @@ export async function runBrandDiscoveryScoreCandidates(
   });
 
   let llmCallCount = 0;
+  const abortSignal = executionDeadlineSignal(request);
 
   const attempt = async (prompt: string): Promise<AttemptResult> => {
     llmCallCount += 1;
     try {
       const generated = await agent.generate(prompt, {
+        abortSignal,
         structuredOutput: {
           schema: llmSchema,
           jsonPromptInjection: 'auto',

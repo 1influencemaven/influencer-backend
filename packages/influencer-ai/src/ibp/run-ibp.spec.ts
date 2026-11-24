@@ -89,6 +89,34 @@ describe('runIbpGeneration', () => {
     expect(agent.generate).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps the influencer payload in the retry prompt (agent has no history)', async () => {
+    const output = withTalentInterpretation({
+      targetSectors: ['wellness'],
+      excludedSectors: [],
+      brandSize: ['startup'],
+      markets: ['LATAM'],
+      collaborationTypes: ['ambassador'],
+      summary: 'Wellness startups.',
+      alertSignals: [],
+      desirableCriteria: [],
+    });
+    const agent = {
+      generate: jest
+        .fn()
+        .mockResolvedValueOnce({ object: undefined, text: 'not-json' })
+        .mockResolvedValueOnce({ object: output, text: '' }),
+    };
+
+    await runIbpGeneration(agent as never, request);
+
+    const first = String(agent.generate.mock.calls[0]?.[0] ?? '');
+    const retry = String(agent.generate.mock.calls[1]?.[0] ?? '');
+    expect(retry).toContain('"name": "Ada Creator"');
+    expect(retry).toContain('Produce a valid IBP JSON object.');
+    expect(retry).toContain('Your previous response was invalid');
+    expect(retry.startsWith(first)).toBe(true);
+  });
+
   it('maps provider errors', async () => {
     const agent = {
       generate: jest.fn().mockRejectedValue(new Error('fetch failed ECONNREFUSED')),

@@ -85,6 +85,23 @@ export class BrandDiscoveryResearchService {
     researchConcurrency: number;
   }> {
     const concurrency = this.resolveConcurrency();
+    if (!this.isResearchEnabled()) {
+      this.logger.log(
+        JSON.stringify({
+          event: 'brand_discovery_research_skipped',
+          runId: context.runId,
+          reason: 'BRAND_DISCOVERY_RESEARCH_ENABLED=false',
+          candidates: candidates.length,
+        }),
+      );
+      return {
+        candidates,
+        researchedCount: 0,
+        researchFailedCount: 0,
+        researchPartialCount: 0,
+        researchConcurrency: concurrency,
+      };
+    }
     const results = await mapPool(candidates, concurrency, async (candidate) => {
       try {
         return await this.researchOne(candidate, context);
@@ -176,8 +193,10 @@ export class BrandDiscoveryResearchService {
     let agentFailed = false;
     let failureWarning: string | undefined;
     try {
+      const timeoutMs = this.resolveResearchTimeoutMs();
       const { executionId } =
         await this.publisher.publishBrandDiscoveryResearch({
+          timeoutMs,
           runId: context.runId,
           userId: context.userId,
           influencerId: context.influencerId,
@@ -199,7 +218,6 @@ export class BrandDiscoveryResearchService {
           promptInstructions: context.promptInstructions,
         });
 
-      const timeoutMs = this.resolveResearchTimeoutMs();
       const result = await this.resultWait.waitForAiExecutionResult(
         executionId,
         timeoutMs,
@@ -358,6 +376,14 @@ export class BrandDiscoveryResearchService {
       return BRAND_DISCOVERY_RESEARCH_DEFAULT_CONCURRENCY;
     }
     return Math.max(1, Math.min(5, Math.floor(raw)));
+  }
+
+  /** Deep research (Unlocker + RESEARCH_BRAND) is optional; default on. */
+  private isResearchEnabled(): boolean {
+    const raw = this.configService.get<boolean | string>(
+      'BRAND_DISCOVERY_RESEARCH_ENABLED',
+    );
+    return !(raw === false || String(raw).toLowerCase() === 'false');
   }
 
   private resolveResearchTimeoutMs(): number {

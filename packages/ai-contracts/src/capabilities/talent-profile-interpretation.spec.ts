@@ -1,4 +1,6 @@
 import {
+  evidenceRefLlmCaptureSchema,
+  evidenceRefSchema,
   instagramResearchEvidenceSchema,
   talentInterpretationOutputSchema,
 } from './talent-profile-interpretation';
@@ -26,6 +28,34 @@ const sampleEvidence = {
     postHashtags: ['dancehall'],
   },
 };
+
+describe('LLM capture schema tolerates null optional text', () => {
+  it('accepts null note and null disclaimer (stripped later by the worker)', () => {
+    expect(
+      evidenceRefLlmCaptureSchema.safeParse({
+        fieldPath: 'normalized.biography',
+        value: 'x',
+        note: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      evidenceRefLlmCaptureSchema.safeParse({
+        fieldPath: 'normalized.biography',
+        value: 'x',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('the strict schema still rejects a null note', () => {
+    expect(
+      evidenceRefSchema.safeParse({
+        fieldPath: 'normalized.biography',
+        value: 'x',
+        note: null,
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe('talent-profile-interpretation contracts', () => {
   it('accepts sanitized Instagram research evidence', () => {

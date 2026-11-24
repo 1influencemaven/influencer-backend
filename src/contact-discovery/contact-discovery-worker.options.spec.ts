@@ -18,6 +18,7 @@ import {
 import { AGENCY_DISCOVERY_DEFAULT_MAX_SERP_QUERIES } from '../agency-discovery/utils/build-agency-search-queries';
 import {
   CONTACT_DISCOVERY_LOCK_DURATION_BREAKDOWN_MS,
+  CONTACT_DISCOVERY_CONCURRENCY,
   CONTACT_DISCOVERY_LOCK_DURATION_MS,
 } from './contact-discovery-worker.options';
 import {
@@ -38,7 +39,7 @@ function workerOptionsOf(target: object): Record<string, unknown> {
 }
 
 describe('CONTACT_DISCOVERY worker lock options (2C.4.6.1)', () => {
-  it('budget equals known wait ceilings + people-pass + headroom (4140s)', () => {
+  it('budget equals known wait ceilings + people-pass + saleshandy + headroom (4440s)', () => {
     const b = CONTACT_DISCOVERY_LOCK_DURATION_BREAKDOWN_MS;
     expect(b.track2A).toBe(CONTACT_EMAIL_MASTRA_TIMEOUT_MS);
     expect(b.track2B).toBe(CONTACT_PEOPLE_MASTRA_TIMEOUT_MS);
@@ -53,15 +54,17 @@ describe('CONTACT_DISCOVERY worker lock options (2C.4.6.1)', () => {
       AGENCY_CONTACT_PEOPLE_TIMEOUT_MS *
         AGENCY_CONTACT_PEOPLE_MAX_AGENCIES_PER_RUN,
     );
+    expect(b.saleshandy).toBe(300_000);
     expect(b.headroom).toBe(300_000);
-    expect(b.total).toBe(4_140_000);
-    expect(CONTACT_DISCOVERY_LOCK_DURATION_MS).toBe(4_140_000);
+    expect(b.total).toBe(4_440_000);
+    expect(CONTACT_DISCOVERY_LOCK_DURATION_MS).toBe(4_440_000);
     expect(
       b.track2A +
         b.track2B +
         b.agencyDiscoverySerpWorst +
         b.agencyEmailsPass +
         b.agencyPeoplePass +
+        b.saleshandy +
         b.headroom,
     ).toBe(CONTACT_DISCOVERY_LOCK_DURATION_MS);
   });
@@ -77,6 +80,7 @@ describe('CONTACT_DISCOVERY worker lock options (2C.4.6.1)', () => {
     const workerOpts = workerOptionsOf(ContactDiscoveryProcessor);
     expect(workerOpts).toEqual({
       lockDuration: CONTACT_DISCOVERY_LOCK_DURATION_MS,
+      concurrency: CONTACT_DISCOVERY_CONCURRENCY,
     });
     // Renewal stays on BullMQ defaults — we must not set lockRenewTime: 0.
     expect(workerOpts).not.toHaveProperty('lockRenewTime');
@@ -87,7 +91,7 @@ describe('CONTACT_DISCOVERY worker lock options (2C.4.6.1)', () => {
     const workerOpts = workerOptionsOf(ContactDiscoveryProcessor);
     // lockRenewTime omitted → Worker defaults to lockDuration/2 (> 0) → LockManager starts.
     expect(workerOpts.lockRenewTime).toBeUndefined();
-    expect(CONTACT_DISCOVERY_LOCK_DURATION_MS / 2).toBe(2_070_000);
+    expect(CONTACT_DISCOVERY_LOCK_DURATION_MS / 2).toBe(2_220_000);
   });
 
   it('other processors stay without CONTACT_DISCOVERY lockDuration (source isolation)', () => {

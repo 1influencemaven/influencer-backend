@@ -7,7 +7,10 @@ import { QUEUES } from '../../bullmq/queue.constants';
 import { LeadDiscoveryStatus } from '../../generated/prisma/enums';
 import { PrismaService } from '../../prisma/prisma.service';
 import { sanitizeContactResearchSeedUrls } from '../../lead-discovery/utils/contact-research-seed-urls.util';
-import { CONTACT_DISCOVERY_LOCK_DURATION_MS } from '../contact-discovery-worker.options';
+import {
+  CONTACT_DISCOVERY_CONCURRENCY,
+  CONTACT_DISCOVERY_LOCK_DURATION_MS,
+} from '../contact-discovery-worker.options';
 import { ContactEmailMastraOrchestrator } from '../orchestrator/contact-email-mastra.orchestrator';
 import type { DiscoverBusinessContactsJobData } from '../interfaces/discover-business-contacts-job.interface';
 import { interpretBbcDiscoveryResult } from '../utils/bbc-job-result.util';
@@ -22,6 +25,7 @@ import { interpretBbcDiscoveryResult } from '../utils/bbc-job-result.util';
  */
 @Processor(QUEUES.CONTACT_DISCOVERY, {
   lockDuration: CONTACT_DISCOVERY_LOCK_DURATION_MS,
+  concurrency: CONTACT_DISCOVERY_CONCURRENCY,
 })
 export class ContactDiscoveryProcessor extends WorkerHost {
   private readonly logger = new Logger(ContactDiscoveryProcessor.name);

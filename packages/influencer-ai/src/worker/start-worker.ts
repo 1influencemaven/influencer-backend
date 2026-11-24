@@ -59,7 +59,9 @@ export async function startInfluencerAiWorker(): Promise<StartedWorker> {
     },
     {
       connection,
-      concurrency: 2,
+      // Contact research jobs are Bright Data I/O (no LLM) and Track 2A/2B/2C now
+      // publish several at once; LLM jobs still queue at Ollama itself.
+      concurrency: env.workerConcurrency,
     },
   );
 

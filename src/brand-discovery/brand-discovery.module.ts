@@ -8,6 +8,7 @@ import { AiExecutionModule } from '../ai-execution/ai-execution.module';
 import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { AuthModule } from '../auth/auth.module';
 import { QUEUES } from '../bullmq/queue.constants';
+import { BrandKnowledgeModule } from '../brand-knowledge/brand-knowledge.module';
 import { BrightDataModule } from '../integrations/brightdata';
 import { BrandDiscoveryAiOrchestrator } from './brand-discovery-ai.orchestrator';
 import { BrandDiscoveryController } from './brand-discovery.controller';
@@ -31,6 +32,7 @@ import { MockBrandSource } from './providers/mock.brand-source';
     AiExecutionModule,
     AiPromptsModule,
     BrightDataModule,
+    BrandKnowledgeModule,
     ConfigModule,
     BullModule.registerQueue({ name: QUEUES.PROSPECTING }),
   ],

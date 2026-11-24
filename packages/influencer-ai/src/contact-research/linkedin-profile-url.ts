@@ -15,8 +15,10 @@ export function normalizeLinkedInPeopleUrl(raw: string): string | null {
     const slug = decodeURIComponent(match[1]).trim();
     if (!slug || slug.length < 1) return null;
 
-    // Keep slug path-safe; spaces → hyphen (LinkedIn style)
-    const safe = slug.replace(/\s+/g, '-');
+    // Keep slug path-safe; spaces → hyphen (LinkedIn style). Slugs are
+    // case-insensitive: lower-case so "Daniella-magee" and "daniella-magee"
+    // (seen via different country subdomains) dedupe to one lead.
+    const safe = slug.replace(/\s+/g, '-').toLowerCase();
     return `https://www.linkedin.com/in/${safe}`;
   } catch {
     return null;

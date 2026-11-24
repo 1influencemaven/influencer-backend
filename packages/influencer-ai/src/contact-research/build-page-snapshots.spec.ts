@@ -1,3 +1,5 @@
+import { contactResearchPageSnapshotSchema } from '@influence-maven/ai-contracts';
+
 import { ContactResearchToolSession } from '../brightdata/session';
 import { normalizeUrlKey } from '../brightdata/normalize-url-key';
 import {
@@ -100,5 +102,20 @@ describe('buildContactResearchPageSnapshots (RF-04.3)', () => {
         '<a href="mailto:A@Acme.Test">a</a><a href="mailto:a@acme.test?subject=x">b</a><a href="mailto:not-an-email">c</a>',
       ),
     ).toEqual(['a@acme.test']);
+  });
+
+  it('extractMailtoEmailsFromHtml only keeps addresses the snapshot contract accepts', () => {
+    const html = [
+      '<a href="mailto:care@brand.com%3E">x</a>', // decodes to care@brand.com>
+      '<a href="mailto:hello@brand.com.">x</a>', // trailing dot
+      '<a href="mailto:press@brand..com">x</a>', // double dot
+      '<a href="mailto:partnerships@brand.com">x</a>',
+    ].join('');
+    const emails = extractMailtoEmailsFromHtml(html);
+    expect(emails).toEqual(['partnerships@brand.com']);
+    expect(
+      contactResearchPageSnapshotSchema.shape.mailtoEmails.safeParse(emails)
+        .success,
+    ).toBe(true);
   });
 });

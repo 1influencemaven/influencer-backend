@@ -37,6 +37,9 @@ export const CONTACT_DISCOVERY_BUDGET_AGENCY_EMAILS_MS = 1_500_000;
 /** 2C.4.6 FIND_AGENCY_PEOPLE sequential waits (5 × 300s). */
 export const CONTACT_DISCOVERY_BUDGET_AGENCY_PEOPLE_MS = 1_500_000;
 
+/** Saleshandy reveal waits: domain pass + LinkedIn pass (2 × 150s default). */
+export const CONTACT_DISCOVERY_BUDGET_SALESHANDY_MS = 300_000;
+
 /**
  * Nest publish/persist/logging headroom (not a product operation timeout).
  */
@@ -49,7 +52,7 @@ export const CONTACT_DISCOVERY_LOCK_HEADROOM_MS = 300_000;
  * (defaults to lockDuration / 2). Raising lockDuration does not disable renewal;
  * it widens the grace window if a renewal is delayed or fails once.
  *
- * Total: 300+300+240+1500+1500+300 = 4140s.
+ * Total: 300+300+240+1500+1500+300+300 = 4440s.
  */
 export const CONTACT_DISCOVERY_LOCK_DURATION_MS =
   CONTACT_DISCOVERY_BUDGET_2A_MS +
@@ -57,6 +60,7 @@ export const CONTACT_DISCOVERY_LOCK_DURATION_MS =
   CONTACT_DISCOVERY_BUDGET_AGENCY_DISCOVERY_MS +
   CONTACT_DISCOVERY_BUDGET_AGENCY_EMAILS_MS +
   CONTACT_DISCOVERY_BUDGET_AGENCY_PEOPLE_MS +
+  CONTACT_DISCOVERY_BUDGET_SALESHANDY_MS +
   CONTACT_DISCOVERY_LOCK_HEADROOM_MS;
 
 export const CONTACT_DISCOVERY_LOCK_DURATION_BREAKDOWN_MS = {
@@ -65,6 +69,14 @@ export const CONTACT_DISCOVERY_LOCK_DURATION_BREAKDOWN_MS = {
   agencyDiscoverySerpWorst: CONTACT_DISCOVERY_BUDGET_AGENCY_DISCOVERY_MS,
   agencyEmailsPass: CONTACT_DISCOVERY_BUDGET_AGENCY_EMAILS_MS,
   agencyPeoplePass: CONTACT_DISCOVERY_BUDGET_AGENCY_PEOPLE_MS,
+  saleshandy: CONTACT_DISCOVERY_BUDGET_SALESHANDY_MS,
   headroom: CONTACT_DISCOVERY_LOCK_HEADROOM_MS,
   total: CONTACT_DISCOVERY_LOCK_DURATION_MS,
 } as const;
+
+/**
+ * Brands processed in parallel by the CONTACT_DISCOVERY worker. Default BullMQ
+ * concurrency (1) ran every brand of a multi-brand search back to back
+ * (4 brands ≈ 25 min). Work is Bright Data I/O; 3 keeps SERP/Unlocker load moderate.
+ */
+export const CONTACT_DISCOVERY_CONCURRENCY = 3;

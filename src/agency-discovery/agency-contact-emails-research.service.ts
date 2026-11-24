@@ -12,9 +12,12 @@ import { AiExecutionResultWaitService } from '../ai-execution/ai-execution-resul
 import { CommercialRelevance } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgencyContactPersistenceService } from './agency-contact-persistence.service';
+import { mapPool } from '../brand-discovery/utils/map-pool.util';
 import {
   AGENCY_CONTACT_ELIGIBLE_RELEVANCE,
+  AGENCY_RESEARCH_CONCURRENCY,
   isAgencyEligibleForContactResearch,
+  rankAgencyAssociations,
 } from './utils/agency-contact-eligibility.util';
 
 /** Per-agency Mastra wait (same order as brand 2A). */
@@ -112,12 +115,13 @@ export class AgencyContactEmailsResearchService {
       this.configService.get<number>('AI_RESEARCH_MAX_PAGES') ?? 5;
     const userId = input.userId ?? 'system:agency-contact-emails';
 
-    const associations = await this.prisma.influencerAgency.findMany({
+    const fetched = await this.prisma.influencerAgency.findMany({
       where: {
         influencerId: input.influencerId,
         relevanceStatus: { in: [...AGENCY_CONTACT_ELIGIBLE_RELEVANCE] },
       },
-      take: Math.max(1, maxAgencies),
+      // Over-fetch, then keep RELEVANT before UNDER_REVIEW (see rankAgencyAssociations).
+      take: Math.max(1, maxAgencies) * 3,
       orderBy: [{ updatedAt: 'desc' }],
       select: {
         relevanceStatus: true,
@@ -132,6 +136,10 @@ export class AgencyContactEmailsResearchService {
         },
       },
     });
+    const associations = rankAgencyAssociations(fetched).slice(
+      0,
+      Math.max(1, maxAgencies),
+    );
 
     if (associations.length === 0) {
       return {
@@ -149,46 +157,49 @@ export class AgencyContactEmailsResearchService {
       };
     }
 
-    const agencyResults: Track2CEmailsPassAgencyResult[] = [];
+    // Agencies are independent: research up to AGENCY_RESEARCH_CONCURRENCY at once
+    // (order of results is preserved for metadata).
+    const agencyResults = await mapPool(
+      associations,
+      AGENCY_RESEARCH_CONCURRENCY,
+      async (row): Promise<Track2CEmailsPassAgencyResult> => {
+        const agency = row.agency;
+        if (!isAgencyEligibleForContactResearch(row.relevanceStatus)) {
+          return {
+            agencyId: agency.id,
+            domain: agency.domain,
+            relevanceStatus: row.relevanceStatus,
+            outcome: 'SKIPPED_INELIGIBLE',
+            emailsFound: 0,
+            emailsPersistedCreated: 0,
+            emailsPersistedUpdated: 0,
+            emailsSkipped: 0,
+            emailsPersistFailed: 0,
+          };
+        }
 
-    for (const row of associations) {
-      const agency = row.agency;
-      if (!isAgencyEligibleForContactResearch(row.relevanceStatus)) {
-        agencyResults.push({
-          agencyId: agency.id,
-          domain: agency.domain,
-          relevanceStatus: row.relevanceStatus,
-          outcome: 'SKIPPED_INELIGIBLE',
-          emailsFound: 0,
-          emailsPersistedCreated: 0,
-          emailsPersistedUpdated: 0,
-          emailsSkipped: 0,
-          emailsPersistFailed: 0,
-        });
-        continue;
-      }
+        const domain = agency.domain
+          .trim()
+          .toLowerCase()
+          .replace(/^www\./, '');
+        const website =
+          agency.website?.trim() || (domain ? `https://${domain}` : '');
+        if (!domain || !website) {
+          return {
+            agencyId: agency.id,
+            domain: agency.domain,
+            relevanceStatus: row.relevanceStatus,
+            outcome: 'SKIPPED_NO_WEBSITE',
+            emailsFound: 0,
+            emailsPersistedCreated: 0,
+            emailsPersistedUpdated: 0,
+            emailsSkipped: 0,
+            emailsPersistFailed: 0,
+            error: 'Agency missing domain/website',
+          };
+        }
 
-      const domain = agency.domain.trim().toLowerCase().replace(/^www\./, '');
-      const website =
-        agency.website?.trim() || (domain ? `https://${domain}` : '');
-      if (!domain || !website) {
-        agencyResults.push({
-          agencyId: agency.id,
-          domain: agency.domain,
-          relevanceStatus: row.relevanceStatus,
-          outcome: 'SKIPPED_NO_WEBSITE',
-          emailsFound: 0,
-          emailsPersistedCreated: 0,
-          emailsPersistedUpdated: 0,
-          emailsSkipped: 0,
-          emailsPersistFailed: 0,
-          error: 'Agency missing domain/website',
-        });
-        continue;
-      }
-
-      agencyResults.push(
-        await this.researchOneAgency({
+        return this.researchOneAgency({
           runId: input.runId,
           userId,
           influencerId: input.influencerId,
@@ -204,9 +215,9 @@ export class AgencyContactEmailsResearchService {
           markets: input.markets,
           maxSerpQueries,
           maxPages,
-        }),
-      );
-    }
+        });
+      },
+    );
 
     return this.aggregate(agencyResults);
   }
@@ -370,14 +381,18 @@ export class AgencyContactEmailsResearchService {
       else base.emailsSkipped += 1;
     }
 
-    const persisted =
-      base.emailsPersistedCreated + base.emailsPersistedUpdated;
-    if (base.emailsPersistFailed > 0 && persisted === 0 && base.emailsFound === 0) {
+    const persisted = base.emailsPersistedCreated + base.emailsPersistedUpdated;
+    if (
+      base.emailsPersistFailed > 0 &&
+      persisted === 0 &&
+      base.emailsFound === 0
+    ) {
       base.outcome = 'PROVIDER_FAILURE';
       base.error = `PERSIST_FAILED: ${base.emailsPersistFailed} email(s) failed`;
     } else if (base.emailsPersistFailed > 0) {
       // Aggregate marks PARTIAL when some agencies/emails fail but others succeed.
-      base.outcome = base.emailsFound > 0 || persisted > 0 ? 'RESULTS_FOUND' : 'NO_MATCHES';
+      base.outcome =
+        base.emailsFound > 0 || persisted > 0 ? 'RESULTS_FOUND' : 'NO_MATCHES';
       base.error = `PARTIAL_PERSIST: ${base.emailsPersistFailed} email(s) failed`;
     } else if (base.emailsFound > 0 || persisted > 0) {
       base.outcome = 'RESULTS_FOUND';
@@ -515,7 +530,10 @@ export class AgencyContactEmailsResearchService {
       outcome = 'PROVIDER_FAILURE';
     } else if (failed.length > 0 && succeeded.length > 0) {
       outcome = 'PARTIAL';
-    } else if (withResults.length > 0 || emailsPersistedCreated + emailsPersistedUpdated > 0) {
+    } else if (
+      withResults.length > 0 ||
+      emailsPersistedCreated + emailsPersistedUpdated > 0
+    ) {
       outcome = 'RESULTS_FOUND';
     } else {
       outcome = 'NO_MATCHES';
@@ -523,7 +541,9 @@ export class AgencyContactEmailsResearchService {
 
     const firstError =
       agencies.find((a) => a.error)?.error ??
-      (outcome === 'PROVIDER_FAILURE' ? 'All agency email investigations failed' : null);
+      (outcome === 'PROVIDER_FAILURE'
+        ? 'All agency email investigations failed'
+        : null);
 
     return {
       executed: true,

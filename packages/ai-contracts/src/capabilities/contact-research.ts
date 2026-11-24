@@ -295,6 +295,14 @@ const contactResearchFindBrandPeopleOutputSchema = z.object({
       queries: z.array(z.string()),
       linkedinUrlsConsidered: z.array(z.string()),
       profilesScraped: z.number().int().nonnegative(),
+      /** Scraped profiles dropped because their current company is not the brand. */
+      profilesRejectedOtherCompany: z.number().int().nonnegative().optional(),
+      /** Scraped (or SERP-titled) profiles dropped for a non-decision role. */
+      profilesRejectedRole: z.number().int().nonnegative().optional(),
+      /** ZoomInfo leadership rows with a useful role, and how many resolved to LinkedIn. */
+      zoomInfoLeaders: z.number().int().nonnegative().optional(),
+      zoomInfoLeadersMatched: z.number().int().nonnegative().optional(),
+      zoomInfoError: z.string().optional(),
       serpCalls: z.number().int().nonnegative(),
       brandPagesFetched: z.number().int().nonnegative(),
       ocrAttempts: z.number().int().nonnegative().optional(),

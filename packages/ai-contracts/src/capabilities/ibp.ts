@@ -14,6 +14,10 @@ export const ibpGenerationInputSchema = z.object({
     platforms: z.array(z.string()).optional(),
     audienceSize: z.number().nullable().optional(),
     audienceLocation: z.string().nullable().optional(),
+    /** Primary audience language (explicit field; also kept in notes for older runs). */
+    audienceLanguage: z.string().nullable().optional(),
+    /** Engagement rate in percent when known. */
+    engagementRate: z.number().nullable().optional(),
     contentStyle: z.string().nullable().optional(),
     notes: z.string().nullable().optional(),
   }),

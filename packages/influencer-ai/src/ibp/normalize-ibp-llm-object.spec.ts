@@ -64,6 +64,67 @@ describe('normalizeIbpLlmObject', () => {
     ).toBe('Custom disclaimer');
   });
 
+  it('drops null evidence.note and null disclaimer instead of failing validation', () => {
+    const raw = {
+      targetSectors: ['skincare'],
+      excludedSectors: [],
+      brandSize: ['smb'],
+      markets: ['US'],
+      collaborationTypes: ['UGC'],
+      summary: 'Skincare brands.',
+      alertSignals: [],
+      desirableCriteria: [],
+      talentInterpretation: {
+        outputVersion: '1.0',
+        insufficientEvidence: false,
+        summary: {
+          text: 'Skincare creator.',
+          confidence: 'medium',
+          evidence: [{ fieldPath: 'normalized.biography', value: 'bio', note: null }],
+        },
+        niches: [
+          {
+            label: 'Skincare',
+            rationale: 'hashtags',
+            confidence: 'high',
+            evidence: [{ fieldPath: 'normalized.postHashtags[0]', value: 'Skincare', note: null }],
+          },
+        ],
+        contentCategories: [],
+        commercialSignals: [
+          {
+            type: 'business_contact',
+            label: 'Public email',
+            rationale: 'bio has email',
+            confidence: 'high',
+            evidence: [{ fieldPath: 'normalized.emailAddress', value: 'a@b.com', note: 'kept' }],
+            disclaimer: null,
+          },
+          {
+            type: 'brand_reference',
+            label: 'Brand mention',
+            rationale: 'mentions a brand',
+            confidence: 'low',
+            evidence: [{ fieldPath: 'normalized.biography', value: 'x', note: null }],
+            disclaimer: null,
+          },
+        ],
+        limitations: [],
+      },
+    };
+
+    const normalized = normalizeIbpLlmObject(raw) as typeof raw;
+    const ti = normalized.talentInterpretation;
+
+    expect('note' in ti.summary.evidence[0]).toBe(false);
+    expect('note' in ti.niches[0].evidence[0]).toBe(false);
+    expect(ti.commercialSignals[0].evidence[0].note).toBe('kept');
+    expect('disclaimer' in ti.commercialSignals[0]).toBe(false);
+    expect(ti.commercialSignals[1].disclaimer).toBe(
+      BRAND_REFERENCE_DEFAULT_DISCLAIMER,
+    );
+  });
+
   it('coerces array/object evidence.value to scalars (PIXEL-style LLM failure)', () => {
     const raw = {
       targetSectors: ['entertainment'],

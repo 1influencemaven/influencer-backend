@@ -3,6 +3,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  CONTACT_TIER_ORDER,
+  leadContactTier,
+} from './utils/contact-tier.util';
 import type { Prisma } from '../generated/prisma/client';
 import { LeadStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -167,7 +171,14 @@ export class LeadDiscoveryService {
       take: 200,
     });
 
-    return this.withSelectedForOutreach(leads);
+    const rows = await this.withSelectedForOutreach(leads);
+    // Tier 1 first, then newest (strategy §3 priority for the 20/day quota).
+    return rows
+      .map((lead) => ({ ...lead, contactTier: leadContactTier(lead) }))
+      .sort(
+        (a, b) =>
+          CONTACT_TIER_ORDER[a.contactTier] - CONTACT_TIER_ORDER[b.contactTier],
+      );
   }
 
   async getLeadById(id: string) {
@@ -213,6 +224,7 @@ export class LeadDiscoveryService {
       profileUrl: lead.profileUrl,
       emailConfidence: lead.emailConfidence,
       isGeneric: lead.isGeneric,
+      contactTier: leadContactTier(lead),
       providerId: lead.providerId,
       sourceOptionId: lead.sourceOptionId,
       fitReason: lead.fitReason,

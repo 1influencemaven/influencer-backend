@@ -2,12 +2,23 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { Prisma } from '../generated/prisma/client';
+import { isIbpCompatibleMarket } from './utils/ibp-market.util';
+import {
+  parseRetailerPolicy,
+  selectForPersistence,
+} from './utils/brand-retailer.util';
+import {
+  BrandKnowledgeService,
+  type BrandDecisionStatus,
+} from '../brand-knowledge/brand-knowledge.service';
 
 import { AiPromptsService } from '../ai-prompts/ai-prompts.service';
 import { PROSPECTING_JOBS } from '../bullmq/job-types';
@@ -85,6 +96,8 @@ export const brandCandidateSelect = {
 
 @Injectable()
 export class BrandDiscoveryService {
+  private readonly logger = new Logger(BrandDiscoveryService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
@@ -94,6 +107,9 @@ export class BrandDiscoveryService {
     private readonly brandDiscoveryResearchService: BrandDiscoveryResearchService,
     @InjectQueue(QUEUES.PROSPECTING)
     private readonly prospectingQueue: Queue,
+    /** Shared brand memory (BKB). Optional: absent in lightweight test modules. */
+    @Optional()
+    private readonly brandKnowledge?: BrandKnowledgeService,
   ) {}
 
   async search(dto: SearchBrandsDto) {
@@ -236,18 +252,100 @@ export class BrandDiscoveryService {
   async updateCandidateStatus(id: string, dto: UpdateBrandCandidateStatusDto) {
     const existing = await this.prisma.brandCandidate.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, status: true },
     });
 
     if (!existing) {
       throw new NotFoundException('Brand candidate not found');
     }
 
-    return this.prisma.brandCandidate.update({
+    const updated = await this.prisma.brandCandidate.update({
       where: { id },
       data: { status: dto.status },
       select: brandCandidateSelect,
     });
+
+    await this.feedBrandKnowledgeDecision(updated, existing.status);
+    return updated;
+  }
+
+  /** Best-effort: never fails the review action. */
+  /** Seeds from the shared base; BRAND_DISCOVERY_KNOWN_BRANDS=0 disables. */
+  private async knownBrandSeeds(
+    influencerId: string,
+    influencer: {
+      niche?: string | null;
+      subNiche?: string | null;
+      niches?: string[] | null;
+    },
+  ) {
+    if (!this.brandKnowledge) return [];
+    const raw = this.configService.get<string | number>('BRAND_DISCOVERY_KNOWN_BRANDS');
+    const limit = raw === undefined || raw === '' ? 5 : Number(raw);
+    if (!Number.isFinite(limit) || limit <= 0) return [];
+    return this.brandKnowledge.suggestSeedBrands({
+      influencerId,
+      influencerTerms: [
+        ...(influencer.niches ?? []),
+        influencer.niche,
+        influencer.subNiche,
+      ],
+      limit: Math.min(Math.floor(limit), 10),
+    });
+  }
+
+  private async feedBrandKnowledgeDecision(
+    candidate: {
+      influencerId: string;
+      name: string;
+      website: string;
+      domain: string;
+      sector: string | null;
+      market: string | null;
+      brandSize: string | null;
+      score: number | null;
+      evidenceUrls: string[];
+      evidenceStatus: string;
+      source: string;
+      status: string;
+      metadata?: unknown;
+    },
+    previousStatus: string,
+  ): Promise<void> {
+    if (!this.brandKnowledge) return;
+    try {
+      const meta = (candidate.metadata ?? {}) as Record<string, unknown>;
+      await this.brandKnowledge.recordDecision({
+        candidate: {
+          ...candidate,
+          groundingSource:
+            typeof meta.groundingSource === 'string'
+              ? meta.groundingSource
+              : null,
+        },
+        influencerTerms: await this.influencerNicheTerms(
+          candidate.influencerId,
+        ),
+        from: previousStatus as BrandDecisionStatus,
+        to: candidate.status as BrandDecisionStatus,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `BKB decision feed failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async influencerNicheTerms(
+    influencerId: string,
+  ): Promise<Array<string | null>> {
+    const influencer = await this.prisma.influencer.findUnique({
+      where: { id: influencerId },
+      select: { niche: true, subNiche: true, niches: true },
+    });
+    return influencer
+      ? [influencer.niche, influencer.subNiche, ...influencer.niches]
+      : [];
   }
 
   async removeCandidate(id: string): Promise<void> {
@@ -313,6 +411,9 @@ export class BrandDiscoveryService {
       let searchMetadata: BrandSearchMetadata | Record<string, unknown>;
 
       if (engine === 'mastra') {
+        // BKB read path: brands with a good track record for these niches are
+        // scored again for this influencer (SEED_EVIDENCE, IBP still decides).
+        const seedBrands = await this.knownBrandSeeds(influencerId, influencer);
         const orchestrated =
           await this.brandDiscoveryAiOrchestrator.orchestrate({
             runId,
@@ -332,6 +433,18 @@ export class BrandDiscoveryService {
             ibp,
             limit: fetchLimit,
             promptInstructions: instructions,
+            ...(seedBrands.length > 0
+              ? {
+                  seedBrands: seedBrands.map((seed) => ({
+                    name: seed.name,
+                    website: seed.website,
+                    sector: seed.sector,
+                    market: seed.market,
+                    brandSize: seed.brandSize,
+                    evidenceUrls: seed.evidenceUrls,
+                  })),
+                }
+              : {}),
           });
 
         const commercial = filterBrandsByCommercialEligibility(
@@ -339,6 +452,7 @@ export class BrandDiscoveryService {
         );
         const evidence = filterScoredBrandsByEvidence(commercial.eligible, {
           searchHits: orchestrated.searchHits,
+          seedBrands,
         });
 
         const reasonCounts: Record<string, number> = {};
@@ -347,6 +461,7 @@ export class BrandDiscoveryService {
             (reasonCounts[discarded.reason] ?? 0) + 1;
         }
 
+        const programDomains = new Set(orchestrated.creatorProgramDomains ?? []);
         const mapScored = (
           brand: (typeof evidence.verified)[number],
           evidenceStatus: 'VERIFIED' | 'UNVERIFIED',
@@ -357,7 +472,7 @@ export class BrandDiscoveryService {
             brand,
             evidenceStatus,
             searchHits: orchestrated.searchHits,
-            seedBrands: undefined,
+            seedBrands,
             ibp,
             website,
             domain,
@@ -375,7 +490,15 @@ export class BrandDiscoveryService {
             evidenceUrls: grounded.evidenceUrls,
             evidenceStatus: grounded.evidenceStatus,
             groundingSource: grounded.groundingSource,
-            metadata: grounded.metadata,
+            metadata:
+              domain && programDomains.has(domain)
+                ? {
+                    ...((grounded.metadata as Record<string, unknown> | null) ??
+                      {}),
+                    // plan_v3 2A budget signal: active creator/ambassador program.
+                    creatorProgram: true,
+                  }
+                : grounded.metadata,
           };
         };
 
@@ -386,7 +509,11 @@ export class BrandDiscoveryService {
           ...evidence.unverified.map((b) => mapScored(b, 'UNVERIFIED')),
         ];
 
-        const filtered = this.applyHardFilters(rawCandidates, ibp);
+        const hardFilter = this.applyHardFiltersWithDiagnostics(
+          rawCandidates,
+          ibp,
+        );
+        const filtered = hardFilter.kept;
         const unique = dedupeByDomain(filtered) as typeof filtered;
         const novel = excludeExistingDomains(unique, existingDomains);
         // Prefer VERIFIED, then grounded UNVERIFIED (SEED). Never persist inventados
@@ -401,9 +528,18 @@ export class BrandDiscoveryService {
         );
         const skippedModelPriorCount =
           orderedNovel.length - withoutModelPrior.length;
-        let toPersist = skippedPersistNoSerp
-          ? []
-          : withoutModelPrior.slice(0, run.limit);
+        // Multi-brand retailers are demoted (or excluded) BEFORE the limit so they
+        // cannot displace brand-owned candidates; whatever the limit cuts is
+        // recorded in searchMetadata instead of vanishing.
+        const retailerPolicy = parseRetailerPolicy(
+          this.configService.get<string>('BRAND_DISCOVERY_RETAILER_POLICY'),
+        );
+        const selection = selectForPersistence(
+          withoutModelPrior,
+          run.limit,
+          retailerPolicy,
+        );
+        let toPersist = skippedPersistNoSerp ? [] : selection.selected;
 
         let researchedCount = 0;
         let researchFailedCount = 0;
@@ -442,6 +578,24 @@ export class BrandDiscoveryService {
         searchMetadata = {
           engine: 'mastra',
           strategy: orchestrated.strategy,
+          ...(orchestrated.creatorProgramQueries
+            ? {
+                creatorProgram: {
+                  queries: orchestrated.creatorProgramQueries,
+                  domainsFound: orchestrated.creatorProgramDomains?.length ?? 0,
+                },
+              }
+            : {}),
+          ...(seedBrands.length > 0
+            ? {
+                knownBrandSeeds: seedBrands.map((seed) => ({
+                  website: seed.website,
+                  nicheKey: seed.nicheKey,
+                  approvedCount: seed.approvedCount,
+                  avgScore: Math.round(seed.avgScore),
+                })),
+              }
+            : {}),
           queries: orchestrated.queries,
           plannedQueriesCount: orchestrated.plannedQueriesCount,
           validatedQueriesCount: orchestrated.validatedQueriesCount,
@@ -462,6 +616,9 @@ export class BrandDiscoveryService {
             : {}),
           ...(orchestrated.serpCallsExecuted != null
             ? { serpCallsExecuted: orchestrated.serpCallsExecuted }
+            : {}),
+          ...(orchestrated.scoreBatches
+            ? { scoreBatches: orchestrated.scoreBatches }
             : {}),
           ...(orchestrated.serpCallsOmitted != null
             ? { serpCallsOmitted: orchestrated.serpCallsOmitted }
@@ -493,8 +650,25 @@ export class BrandDiscoveryService {
           evidenceRejectedCount: evidence.discarded.length,
           evidenceRejectReasonCounts: reasonCounts,
           afterHardFiltersCount: filtered.length,
+          hardFilterDiscarded: hardFilter.discarded.slice(0, 30),
+          hardFilterReasonCounts: hardFilter.discarded.reduce(
+            (acc, row) => {
+              acc[row.reason] = (acc[row.reason] ?? 0) + 1;
+              return acc;
+            },
+            {} as Record<string, number>,
+          ),
           afterDedupeCount: unique.length,
           afterExcludeExistingCount: novel.length,
+          retailerPolicy,
+          retailersSelectedCount: selection.retailersSelected.length,
+          retailersExcluded: selection.retailersExcluded
+            .slice(0, 30)
+            .map((c) => ({ name: c.name, domain: c.domain, score: c.score })),
+          cutByLimitCount: selection.cutByLimit.length,
+          cutByLimit: selection.cutByLimit
+            .slice(0, 30)
+            .map((c) => ({ name: c.name, domain: c.domain, score: c.score })),
           skippedModelPriorCount,
           persistedCount: toPersist.length,
           researchedCount,
@@ -617,12 +791,49 @@ export class BrandDiscoveryService {
         },
       });
     });
+
+    // After commit and best-effort: BKB problems must not fail the run.
+    if (this.brandKnowledge && toPersist.length > 0) {
+      try {
+        await this.brandKnowledge.recordSurfaced({
+          influencerTerms: await this.influencerNicheTerms(influencerId),
+          candidates: toPersist.map((candidate) => ({
+            ...candidate,
+            groundingSource: candidate.groundingSource ?? null,
+          })),
+        });
+      } catch (error) {
+        this.logger.warn(
+          `BKB surfaced feed failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
   }
 
   private applyHardFilters(
     candidates: RawBrandCandidate[],
     ibp: IbpCriteriaSnapshot,
   ) {
+    return this.applyHardFiltersWithDiagnostics(candidates, ibp).kept;
+  }
+
+  /**
+   * Same rules as before, but every rejection keeps its reason so a run that
+   * loses all candidates here is explainable from `searchMetadata`.
+   */
+  private applyHardFiltersWithDiagnostics(
+    candidates: RawBrandCandidate[],
+    ibp: IbpCriteriaSnapshot,
+  ): {
+    kept: RawBrandCandidate[];
+    discarded: Array<{
+      name: string;
+      domain: string;
+      reason: 'missing_fields' | 'excluded_sector' | 'market_mismatch';
+      sector?: string | null;
+      market?: string | null;
+    }>;
+  } {
     const excluded = new Set(
       ibp.excludedSectors.map((s) => s.trim().toLowerCase()).filter(Boolean),
     );
@@ -630,52 +841,52 @@ export class BrandDiscoveryService {
       ibp.markets.map((m) => m.trim().toLowerCase()).filter(Boolean),
     );
 
-    return candidates.filter((candidate) => {
+    const kept: RawBrandCandidate[] = [];
+    const discarded: Array<{
+      name: string;
+      domain: string;
+      reason: 'missing_fields' | 'excluded_sector' | 'market_mismatch';
+      sector?: string | null;
+      market?: string | null;
+    }> = [];
+    const reject = (
+      candidate: RawBrandCandidate,
+      reason: 'missing_fields' | 'excluded_sector' | 'market_mismatch',
+    ) =>
+      discarded.push({
+        name: candidate.name,
+        domain: candidate.domain,
+        reason,
+        sector: candidate.sector,
+        market: candidate.market,
+      });
+
+    for (const candidate of candidates) {
       if (!candidate.website?.trim() || !candidate.name?.trim()) {
-        return false;
+        reject(candidate, 'missing_fields');
+        continue;
       }
 
       const sector = candidate.sector?.trim().toLowerCase() ?? '';
       if (sector && [...excluded].some((ex) => sector.includes(ex))) {
-        return false;
+        reject(candidate, 'excluded_sector');
+        continue;
       }
 
       if (markets.size > 0 && candidate.market) {
         if (!isIbpCompatibleMarket(candidate.market, markets)) {
-          return false;
+          reject(candidate, 'market_mismatch');
+          continue;
         }
       }
 
-      return true;
-    });
+      kept.push(candidate);
+    }
+    return { kept, discarded };
   }
 }
 
-/** Global / worldwide brands stay eligible against regional IBP markets. */
-const GLOBAL_MARKET_TOKENS = [
-  'global',
-  'worldwide',
-  'international',
-  'multinational',
-  'multi-market',
-  'multi market',
-] as const;
-
-export function isIbpCompatibleMarket(
-  candidateMarket: string,
-  ibpMarkets: ReadonlySet<string>,
-): boolean {
-  const market = candidateMarket.trim().toLowerCase();
-  if (!market) {
-    return true;
-  }
-  if (GLOBAL_MARKET_TOKENS.some((token) => market.includes(token))) {
-    return true;
-  }
-  return [...ibpMarkets].some(
-    (allowed) => market.includes(allowed) || allowed.includes(market),
-  );
-}
+export { isIbpCompatibleMarket };
 
 export type BrandDiscoveryRunRecord = Prisma.BrandDiscoveryRunGetPayload<{
   select: typeof brandDiscoveryRunSelect;

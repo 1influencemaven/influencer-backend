@@ -1,4 +1,5 @@
 import type { ContactResearchPageSnapshot } from '@influence-maven/ai-contracts';
+import { z } from 'zod';
 
 import { normalizeUrlKey } from '../brightdata/normalize-url-key';
 import type { ContactResearchToolSession } from '../brightdata/session';
@@ -17,8 +18,15 @@ export const CONTACT_RESEARCH_PAGE_SNAPSHOT_MAX_TOTAL_BYTES = 64_000;
 
 const MAILTO_RE = /mailto:([^\s"'<>?]+)/gi;
 
+/**
+ * Same validator as the ContactResearchPageSnapshot contract (`z.string().email()`).
+ * A looser check let values like `care@brand.com>` (decoded %3E) or a trailing dot
+ * through, and the whole FIND_BRAND_EMAILS result then failed contract validation.
+ */
+const contractEmail = z.string().email();
+
 function looksLikeEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  return contractEmail.safeParse(value).success;
 }
 
 /** Extract unique mailto: addresses from raw HTML (before truncation). */
