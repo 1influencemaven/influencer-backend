@@ -125,6 +125,12 @@ export const envValidationSchema = Joi.object({
   /** Hits per SCORE_CANDIDATES call (smaller = faster calls, partial results survive a failure). */
   BRAND_DISCOVERY_SCORE_BATCH_SIZE: Joi.number().integer().min(1).max(100).default(15),
   /** Wait timeout for SCORE_CANDIDATES Mastra result (ms). Raise for CPU-only local models. */
+  /** PLAN_SEARCH wait (and worker deadline). Raise on CPU-only Ollama hosts. */
+  BRAND_DISCOVERY_PLAN_TIMEOUT_MS: Joi.number()
+    .integer()
+    .min(30000)
+    .max(1800000)
+    .default(120000),
   BRAND_DISCOVERY_SCORE_TIMEOUT_MS: Joi.number()
     .integer()
     .min(30000)
