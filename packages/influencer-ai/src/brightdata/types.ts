@@ -27,4 +27,6 @@ export type BrightDataPageResult = {
   brdError?: string;
   brdErrorCode?: string;
   emptyBody: boolean;
+  /** How the page was obtained (direct fetch is free; Unlocker is paid). */
+  via?: 'direct' | 'unlocker';
 };

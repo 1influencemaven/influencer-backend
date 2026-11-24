@@ -1,4 +1,5 @@
 import { parseOrganicHits } from './parse-organics';
+import { directFetchPage } from './direct-fetch';
 import type { BrightDataPageResult, BrightDataSerpResult } from './types';
 
 const BASE_URL = 'https://api.brightdata.com';
@@ -11,6 +12,8 @@ export type BrightDataClientConfig = {
   linkedInPeopleDatasetId?: string;
   scraperPollTimeoutMs?: number;
   scraperPollIntervalMs?: number;
+  /** Plain fetch before Unlocker (ms). 0 disables. Default 8000. */
+  directFetchTimeoutMs?: number;
 };
 
 export type SearchWebOptions = {
@@ -163,7 +166,20 @@ export class BrightDataToolsClient {
     }
   }
 
+  /**
+   * Direct fetch first (free); Bright Data Unlocker only when the site blocks
+   * bots (403/429/5xx, challenge page, JS shell) or the fetch fails.
+   */
   async openPage(url: string): Promise<BrightDataPageResult> {
+    const directTimeout = this.config.directFetchTimeoutMs ?? 8_000;
+    if (directTimeout > 0) {
+      const direct = await directFetchPage(url, directTimeout);
+      if (direct) return direct;
+    }
+    return this.openPageUnlocker(url);
+  }
+
+  private async openPageUnlocker(url: string): Promise<BrightDataPageResult> {
     const started = Date.now();
     try {
       const response = await fetch(`${BASE_URL}/request`, {
@@ -202,6 +218,7 @@ export class BrightDataToolsClient {
         elapsedMs: Date.now() - started,
         html: emptyBody ? '' : html,
         emptyBody,
+        via: 'unlocker',
         ...brd,
       };
     } catch (error) {
