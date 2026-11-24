@@ -111,6 +111,10 @@ export const envValidationSchema = Joi.object({
 
   /** Concurrent Bright Data SERP calls per Brand Discovery run (1 = sequential). */
   BRAND_DISCOVERY_SERP_CONCURRENCY: Joi.number().integer().min(1).max(8).default(4),
+  /** plan_v3 2A creator-program SERP calls per run (0 disables). */
+  BRAND_DISCOVERY_PROGRAM_QUERIES: Joi.number().integer().min(0).max(4).default(2),
+  /** Known brands from the shared base fed to SCORE as seeds (0 disables). */
+  BRAND_DISCOVERY_KNOWN_BRANDS: Joi.number().integer().min(0).max(10).default(5),
 
   /** Min validated SERP queries before the plan is topped up from the IBP taxonomy (0 = off). */
   BRAND_DISCOVERY_MIN_QUERIES: Joi.number().integer().min(0).max(12).default(6),

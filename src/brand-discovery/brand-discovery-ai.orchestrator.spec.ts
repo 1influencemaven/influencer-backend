@@ -682,6 +682,77 @@ describe('BrandDiscoveryAiOrchestrator', () => {
       }),
     );
   });
+  describe('creator program pass (plan_v3 2A)', () => {
+    const programConfig = (extra: Record<string, unknown> = {}) => (key: string) => {
+      if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
+      if (key === 'BRAND_DISCOVERY_GEO_LENSES') return 'legacy';
+      if (key === 'BRAND_DISCOVERY_MIN_QUERIES') return 0;
+      if (key === 'NODE_ENV') return 'test';
+      return extra[key];
+    };
+    const programHit = {
+      title: 'Creator Program | Glow Labs',
+      url: 'https://glowlabs.example/pages/creators',
+      content: 'Apply to our creator program',
+    };
+    const regularHit = {
+      title: 'Demo Wellness',
+      url: 'https://demo.example',
+      content: 'fitness apparel',
+    };
+    const search = jest.fn(async (query: string) =>
+      query.includes('creator program') ? [programHit] : [regularHit],
+    );
+
+    it('puts program hits first, reports program domains, sends seeds only in batch 1', async () => {
+      const publishScore = jest.fn().mockResolvedValue({
+        executionId: SCORE_EXECUTION_ID,
+        correlationId: CORRELATION_ID,
+      });
+      const { orchestrator, searchWithDiagnostics } = build({
+        search,
+        publishScore,
+        getConfig: programConfig({ BRAND_DISCOVERY_SCORE_BATCH_SIZE: 1 }),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(validQueries))
+          .mockResolvedValue(scoreCompleted([scoredBrand])),
+      });
+      const seed = { name: 'Known Co', website: 'https://known.example' };
+
+      const result = await orchestrator.orchestrate({
+        ...baseParams,
+        ibp: { ...ibp, targetSectors: ['skincare', 'beauty'] },
+        seedBrands: [seed],
+      });
+
+      expect(result.creatorProgramQueries).toHaveLength(2);
+      expect(result.creatorProgramDomains).toEqual(['glowlabs.example']);
+      expect(result.searchHits[0].url).toBe(programHit.url);
+      expect(searchWithDiagnostics).toHaveBeenCalledTimes(validQueries.length + 2);
+      const seedsPerBatch = publishScore.mock.calls.map(
+        ([arg]) => (arg as { seedBrands?: unknown[] }).seedBrands,
+      );
+      expect(seedsPerBatch[0]).toEqual([seed]);
+      expect(seedsPerBatch.slice(1).every((s) => s === undefined)).toBe(true);
+      expect(seedsPerBatch.length).toBeGreaterThan(1);
+    });
+
+    it('is disabled with BRAND_DISCOVERY_PROGRAM_QUERIES=0', async () => {
+      const { orchestrator, searchWithDiagnostics } = build({
+        search,
+        getConfig: programConfig({ BRAND_DISCOVERY_PROGRAM_QUERIES: 0 }),
+        wait: jest
+          .fn()
+          .mockResolvedValueOnce(planCompleted(validQueries))
+          .mockResolvedValue(scoreCompleted([scoredBrand])),
+      });
+      const result = await orchestrator.orchestrate({ ...baseParams });
+      expect(result.creatorProgramQueries).toBeUndefined();
+      expect(searchWithDiagnostics).toHaveBeenCalledTimes(validQueries.length);
+    });
+  });
+
   describe('query top-up from the IBP taxonomy', () => {
     const topUpConfig = (extra: Record<string, unknown> = {}) => (key: string) => {
       if (key === 'BRAND_SEARCH_STRATEGY') return 'llm';
@@ -708,7 +779,11 @@ describe('BrandDiscoveryAiOrchestrator', () => {
       expect(result.queries.length).toBeGreaterThanOrEqual(6);
       expect(result.queries.length).toBeLessThanOrEqual(8);
       expect(result.queries[0]).toBe('skincare brands selling in US');
-      expect(searchWithDiagnostics).toHaveBeenCalledTimes(result.queries.length);
+      // Planned queries + plan_v3 2A creator-program calls (default 2).
+      expect(searchWithDiagnostics).toHaveBeenCalledTimes(
+        result.queries.length + (result.creatorProgramQueries?.length ?? 0),
+      );
+      expect(result.creatorProgramQueries).toHaveLength(2);
       expect(result.fallbackUsed).toBe(true);
       expect(result.validatedQueriesCount).toBe(result.queries.length);
       // Expanded queries span sectors, not only the first one.

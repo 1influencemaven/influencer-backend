@@ -32,6 +32,10 @@ import {
 } from './utils/brand-serp-hit-filter.util';
 import { normalizeDomain } from './utils/brand-domain.util';
 import { mapPool } from './utils/map-pool.util';
+import {
+  buildCreatorProgramQueries,
+  mergeCreatorProgramHits,
+} from './utils/creator-program-queries.util';
 import { buildExpandedBrandQueries } from './utils/brand-query-expansion.util';
 import {
   buildSerpLenses,
@@ -133,6 +137,9 @@ export type BrandDiscoveryAiOrchestrationResult = {
   hitGeoAttribution?: HitGeoAttribution[];
   /** SCORE_CANDIDATES batching: how many calls ran and how many failed. */
   scoreBatches?: { total: number; failed: number; hitsPerBatch: number };
+  /** plan_v3 2A: domains found on creator/ambassador program queries. */
+  creatorProgramDomains?: string[];
+  creatorProgramQueries?: string[];
 };
 
 type ResolvedQueries = {
@@ -169,13 +176,19 @@ export class BrandDiscoveryAiOrchestrator {
     );
     const maxSerpCalls = this.resolveMaxSerpCalls();
 
-    const serpPass =
+    // Creator-program footprints run alongside the planned queries.
+    const [serpPass, program] = await Promise.all([
       geoMode === 'v1'
-        ? await this.runSerpPassV1(params, resolved.queries, maxSerpCalls)
-        : await this.runSerpPassLegacy(params, resolved.queries);
+        ? this.runSerpPassV1(params, resolved.queries, maxSerpCalls)
+        : this.runSerpPassLegacy(params, resolved.queries),
+      this.runCreatorProgramPass(params),
+    ]);
 
-    const { searchHits, serpHitFilter, serpDiagnostics, serpQueryFallbackUsed } =
-      serpPass;
+    const { serpHitFilter, serpDiagnostics, serpQueryFallbackUsed } = serpPass;
+    const { hits: searchHits, programDomains } = mergeCreatorProgramHits(
+      serpPass.searchHits,
+      program.hits,
+    );
 
     // AI-004.5: SCORE always runs after a successful SERP pass (including
     // soft zero-hit categories). Hard provider errors throw from webSearch
@@ -237,6 +250,12 @@ export class BrandDiscoveryAiOrchestrator {
       planExecutionId: resolved.planExecutionId,
       scoreExecutionId,
       scoreBatches,
+      ...(program.queries.length > 0
+        ? {
+            creatorProgramQueries: program.queries,
+            creatorProgramDomains: programDomains,
+          }
+        : {}),
       strategy: resolved.strategy,
       plannedQueriesCount: resolved.plannedQueriesCount,
       validatedQueriesCount: resolved.queries.length,
@@ -493,6 +512,54 @@ export class BrandDiscoveryAiOrchestrator {
       queryTargetMarket: omission.queryTargetMarket,
       omitReason: omission.reason,
     };
+  }
+
+  /**
+   * plan_v3 Paso 2A — BRAND_DISCOVERY_PROGRAM_QUERIES (default 2, 0 disables)
+   * calls on the primary geo. Soft: any failure yields no program hits.
+   */
+  private async runCreatorProgramPass(
+    params: BrandDiscoveryAiOrchestrateParams,
+  ): Promise<{ hits: WebSearchHit[]; queries: string[] }> {
+    const max = this.readIntConfig('BRAND_DISCOVERY_PROGRAM_QUERIES', 2, 0, 4);
+    const queries = buildCreatorProgramQueries(
+      [
+        ...(params.ibp.targetSectors ?? []),
+        ...(params.niches ?? []),
+        params.niche,
+      ],
+      max,
+    );
+    if (queries.length === 0) return { hits: [], queries };
+    const geo = resolveSerpGeo({
+      country: params.country,
+      language: params.language,
+      markets: params.ibp.markets,
+    });
+    try {
+      const outcomes = await mapPool(queries, queries.length, (query) =>
+        this.safeSerpSearch(query, geo),
+      );
+      const raw = outcomes.flatMap((o) => o.hits);
+      const { hits } = filterBrandDiscoverySearchHitsWithDiagnostics(raw);
+      this.logger.log(
+        JSON.stringify({
+          event: 'brand_discovery_creator_program_pass',
+          runId: params.runId,
+          queries,
+          rawHits: raw.length,
+          keptHits: hits.length,
+        }),
+      );
+      return { hits, queries };
+    } catch (error) {
+      this.logger.warn(
+        `Creator program pass failed for runId=${params.runId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return { hits: [], queries };
+    }
   }
 
   private async searchQueryWithOptionalSimplify(
@@ -902,7 +969,8 @@ export class BrandDiscoveryAiOrchestrator {
           ibp: params.ibp,
           limit: params.limit,
           searchHits: chunk,
-          seedBrands: params.seedBrands,
+          // Seeds once (first batch): later batches would just re-score them.
+          seedBrands: index === 0 ? params.seedBrands : undefined,
           promptInstructions,
           actorRole: params.actorRole,
           locale: params.locale,

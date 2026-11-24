@@ -223,3 +223,72 @@ describe('BrandKnowledgeService writes', () => {
     });
   });
 });
+
+describe('BrandKnowledgeService.suggestSeedBrands (read path)', () => {
+  const brand = (domain: string) => ({
+    domain,
+    name: domain.split('.')[0],
+    website: `https://${domain}`,
+    sectors: ['beauty'],
+    markets: ['US'],
+    sizeTag: null,
+    evidenceUrls: [`https://${domain}/about`],
+  });
+  const affinity = (domain: string, approved: number, rejected: number, avg = 80) => ({
+    nicheKey: 'beauty',
+    approvedCount: approved,
+    rejectedCount: rejected,
+    avgScore: avg,
+    brand: brand(domain),
+  });
+
+  function withRows(rows: unknown[], existing: string[] = []) {
+    const { service, prisma } = build();
+    prisma.brandCandidate.findMany.mockResolvedValue(existing.map((domain) => ({ domain })));
+    const brandNicheAffinity = { findMany: jest.fn().mockResolvedValue(rows) };
+    Object.assign(prisma, { brandNicheAffinity });
+    return { service, brandNicheAffinity };
+  }
+
+  it('suggests approved brands for the niche, skipping existing and mostly-rejected ones', async () => {
+    const { service, brandNicheAffinity } = withRows(
+      [
+        affinity('pixibeauty.com', 2, 0),
+        affinity('already.com', 3, 0),
+        affinity('disliked.com', 1, 3),
+        affinity('glow.com', 0, 0, 85),
+      ],
+      ['already.com'],
+    );
+    const seeds = await service.suggestSeedBrands({
+      influencerId: 'inf-1',
+      influencerTerms: ['skincare'],
+      limit: 5,
+    });
+    expect(seeds.map((s) => s.website)).toEqual([
+      'https://pixibeauty.com',
+      'https://glow.com',
+    ]);
+    expect(seeds[0]).toMatchObject({ nicheKey: 'beauty', approvedCount: 2, sector: 'beauty' });
+    expect(brandNicheAffinity.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ nicheKey: { in: ['beauty'] } }),
+      }),
+    );
+  });
+
+  it('returns [] for unmapped niches, limit 0 or a failing query', async () => {
+    const { service } = withRows([affinity('a.com', 1, 0)]);
+    expect(
+      await service.suggestSeedBrands({ influencerId: 'i', influencerTerms: ['mindset'], limit: 5 }),
+    ).toEqual([]);
+    expect(
+      await service.suggestSeedBrands({ influencerId: 'i', influencerTerms: ['beauty'], limit: 0 }),
+    ).toEqual([]);
+    const failing = withRows([]);
+    failing.brandNicheAffinity.findMany.mockRejectedValue(new Error('db down'));
+    expect(
+      await failing.service.suggestSeedBrands({ influencerId: 'i', influencerTerms: ['beauty'], limit: 5 }),
+    ).toEqual([]);
+  });
+});

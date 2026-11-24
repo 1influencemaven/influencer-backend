@@ -54,6 +54,19 @@ export function decisionDeltas(
   };
 }
 
+/** Seed brand suggested from the shared base (shape of the SCORE seedBrands). */
+export type KnownBrandSeed = {
+  name: string;
+  website: string;
+  sector?: string;
+  market?: string;
+  brandSize?: string;
+  evidenceUrls: string[];
+  nicheKey: string;
+  approvedCount: number;
+  avgScore: number;
+};
+
 /**
  * Shared (cross-manager) brand memory. Every write is best-effort: a failure
  * here is logged and swallowed so it can never fail a discovery run or a
@@ -157,6 +170,82 @@ export class BrandKnowledgeService {
       }
     } catch (error) {
       this.logFailure('recordDecision', error);
+    }
+  }
+
+  /**
+   * Read path of the shared base: brands with a good track record for the
+   * influencer's niches (approved by reviewers, or repeatedly scored high and
+   * not mostly rejected), excluding brands this influencer already has as
+   * candidates and BLOCKED ones. They are fed to SCORE as seed brands, so the
+   * LLM still judges fit against the IBP. Best-effort: [] on any failure.
+   */
+  async suggestSeedBrands(args: {
+    influencerId: string;
+    influencerTerms: ReadonlyArray<string | null | undefined>;
+    limit: number;
+  }): Promise<KnownBrandSeed[]> {
+    if (args.limit <= 0) return [];
+    try {
+      const nicheKeys = resolveNicheKeys(args.influencerTerms).nicheKeys;
+      if (nicheKeys.length === 0) return [];
+      const existing = await this.prisma.brandCandidate.findMany({
+        where: { influencerId: args.influencerId },
+        select: { domain: true },
+      });
+      const exclude = new Set(existing.map((c) => c.domain.toLowerCase()));
+
+      const rows = await this.prisma.brandNicheAffinity.findMany({
+        where: {
+          nicheKey: { in: nicheKeys },
+          brand: { status: { not: 'BLOCKED' } },
+          OR: [
+            { approvedCount: { gte: 1 } },
+            { AND: [{ avgScore: { gte: 70 } }, { surfacedCount: { gte: 2 } }] },
+          ],
+        },
+        orderBy: [{ approvedCount: 'desc' }, { avgScore: 'desc' }],
+        take: args.limit * 6,
+        include: {
+          brand: {
+            select: {
+              domain: true,
+              name: true,
+              website: true,
+              sectors: true,
+              markets: true,
+              sizeTag: true,
+              evidenceUrls: true,
+            },
+          },
+        },
+      });
+
+      const seeds: KnownBrandSeed[] = [];
+      const seen = new Set<string>();
+      for (const row of rows) {
+        const domain = row.brand.domain;
+        if (exclude.has(domain) || seen.has(domain)) continue;
+        // Mostly rejected by reviewers for this niche → not a good suggestion.
+        if (row.rejectedCount > row.approvedCount) continue;
+        seen.add(domain);
+        seeds.push({
+          name: row.brand.name,
+          website: row.brand.website,
+          ...(row.brand.sectors[0] ? { sector: row.brand.sectors[0] } : {}),
+          ...(row.brand.markets[0] ? { market: row.brand.markets[0] } : {}),
+          ...(row.brand.sizeTag ? { brandSize: row.brand.sizeTag } : {}),
+          evidenceUrls: row.brand.evidenceUrls.slice(0, 3),
+          nicheKey: row.nicheKey,
+          approvedCount: row.approvedCount,
+          avgScore: row.avgScore,
+        });
+        if (seeds.length >= args.limit) break;
+      }
+      return seeds;
+    } catch (error) {
+      this.logFailure('suggestSeedBrands', error);
+      return [];
     }
   }
 

@@ -270,6 +270,30 @@ export class BrandDiscoveryService {
   }
 
   /** Best-effort: never fails the review action. */
+  /** Seeds from the shared base; BRAND_DISCOVERY_KNOWN_BRANDS=0 disables. */
+  private async knownBrandSeeds(
+    influencerId: string,
+    influencer: {
+      niche?: string | null;
+      subNiche?: string | null;
+      niches?: string[] | null;
+    },
+  ) {
+    if (!this.brandKnowledge) return [];
+    const raw = this.configService.get<string | number>('BRAND_DISCOVERY_KNOWN_BRANDS');
+    const limit = raw === undefined || raw === '' ? 5 : Number(raw);
+    if (!Number.isFinite(limit) || limit <= 0) return [];
+    return this.brandKnowledge.suggestSeedBrands({
+      influencerId,
+      influencerTerms: [
+        ...(influencer.niches ?? []),
+        influencer.niche,
+        influencer.subNiche,
+      ],
+      limit: Math.min(Math.floor(limit), 10),
+    });
+  }
+
   private async feedBrandKnowledgeDecision(
     candidate: {
       influencerId: string;
@@ -387,6 +411,9 @@ export class BrandDiscoveryService {
       let searchMetadata: BrandSearchMetadata | Record<string, unknown>;
 
       if (engine === 'mastra') {
+        // BKB read path: brands with a good track record for these niches are
+        // scored again for this influencer (SEED_EVIDENCE, IBP still decides).
+        const seedBrands = await this.knownBrandSeeds(influencerId, influencer);
         const orchestrated =
           await this.brandDiscoveryAiOrchestrator.orchestrate({
             runId,
@@ -406,6 +433,18 @@ export class BrandDiscoveryService {
             ibp,
             limit: fetchLimit,
             promptInstructions: instructions,
+            ...(seedBrands.length > 0
+              ? {
+                  seedBrands: seedBrands.map((seed) => ({
+                    name: seed.name,
+                    website: seed.website,
+                    sector: seed.sector,
+                    market: seed.market,
+                    brandSize: seed.brandSize,
+                    evidenceUrls: seed.evidenceUrls,
+                  })),
+                }
+              : {}),
           });
 
         const commercial = filterBrandsByCommercialEligibility(
@@ -413,6 +452,7 @@ export class BrandDiscoveryService {
         );
         const evidence = filterScoredBrandsByEvidence(commercial.eligible, {
           searchHits: orchestrated.searchHits,
+          seedBrands,
         });
 
         const reasonCounts: Record<string, number> = {};
@@ -421,6 +461,7 @@ export class BrandDiscoveryService {
             (reasonCounts[discarded.reason] ?? 0) + 1;
         }
 
+        const programDomains = new Set(orchestrated.creatorProgramDomains ?? []);
         const mapScored = (
           brand: (typeof evidence.verified)[number],
           evidenceStatus: 'VERIFIED' | 'UNVERIFIED',
@@ -431,7 +472,7 @@ export class BrandDiscoveryService {
             brand,
             evidenceStatus,
             searchHits: orchestrated.searchHits,
-            seedBrands: undefined,
+            seedBrands,
             ibp,
             website,
             domain,
@@ -449,7 +490,15 @@ export class BrandDiscoveryService {
             evidenceUrls: grounded.evidenceUrls,
             evidenceStatus: grounded.evidenceStatus,
             groundingSource: grounded.groundingSource,
-            metadata: grounded.metadata,
+            metadata:
+              domain && programDomains.has(domain)
+                ? {
+                    ...((grounded.metadata as Record<string, unknown> | null) ??
+                      {}),
+                    // plan_v3 2A budget signal: active creator/ambassador program.
+                    creatorProgram: true,
+                  }
+                : grounded.metadata,
           };
         };
 
@@ -529,6 +578,24 @@ export class BrandDiscoveryService {
         searchMetadata = {
           engine: 'mastra',
           strategy: orchestrated.strategy,
+          ...(orchestrated.creatorProgramQueries
+            ? {
+                creatorProgram: {
+                  queries: orchestrated.creatorProgramQueries,
+                  domainsFound: orchestrated.creatorProgramDomains?.length ?? 0,
+                },
+              }
+            : {}),
+          ...(seedBrands.length > 0
+            ? {
+                knownBrandSeeds: seedBrands.map((seed) => ({
+                  website: seed.website,
+                  nicheKey: seed.nicheKey,
+                  approvedCount: seed.approvedCount,
+                  avgScore: Math.round(seed.avgScore),
+                })),
+              }
+            : {}),
           queries: orchestrated.queries,
           plannedQueriesCount: orchestrated.plannedQueriesCount,
           validatedQueriesCount: orchestrated.validatedQueriesCount,
