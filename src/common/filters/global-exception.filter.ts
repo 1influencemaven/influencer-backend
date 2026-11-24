@@ -27,6 +27,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       : 'Internal server error';
 
     let message = 'Internal server error';
+    // Optional stable error code (e.g. SALESHANDY_AUTH_FAILED); additive field.
+    let code: string | undefined;
 
     if (typeof exceptionResponse === 'string') {
       message = exceptionResponse;
@@ -39,12 +41,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       message = Array.isArray(responseObject.message)
         ? String(responseObject.message[0])
         : String(responseObject.message);
+      if (typeof responseObject.code === 'string') {
+        code = responseObject.code;
+      }
     }
 
     response.status(statusCode).json({
       success: false,
       statusCode,
       message,
+      ...(code ? { code } : {}),
       timestamp: new Date().toISOString(),
       path: request.url,
     });

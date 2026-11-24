@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-const BASE_URL = 'https://open-api.saleshandy.com/v1';
+import { SaleshandyHttpService } from './saleshandy-http.service';
 
 /** Saleshandy verification of a revealed email (`bad` is never outreach-ready). */
 export type SaleshandyEmailStatus = 'valid' | 'risky' | 'bad' | 'unknown';
@@ -54,7 +54,10 @@ function toStatus(value: unknown): SaleshandyEmailStatus {
 export class SaleshandyClient {
   private readonly logger = new Logger(SaleshandyClient.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly http: SaleshandyHttpService,
+  ) {}
 
   private get apiKey(): string {
     return this.config.get<string>('SALESHANDY_API_KEY')?.trim() ?? '';
@@ -72,24 +75,11 @@ export class SaleshandyClient {
     path: string,
     body?: unknown,
   ): Promise<{ status: number; json: Json | null }> {
-    const response = await fetch(`${BASE_URL}${path}`, {
-      method,
-      headers: {
-        'x-api-key': this.apiKey,
-        Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(30_000),
+    const { status, json } = await this.http.raw(method, path, {
+      body,
+      timeoutMs: 30_000,
     });
-    const text = await response.text();
-    let json: Json | null = null;
-    try {
-      json = text ? (JSON.parse(text) as Json) : null;
-    } catch {
-      json = null;
-    }
-    return { status: response.status, json };
+    return { status, json };
   }
 
   private static errorOf(json: Json | null, status: number): string {

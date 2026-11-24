@@ -27,6 +27,7 @@ import { AiPromptsModule } from './ai-prompts/ai-prompts.module';
 import { BrandDiscoveryModule } from './brand-discovery/brand-discovery.module';
 import { ContactDiscoveryModule } from './contact-discovery/contact-discovery.module';
 import { LeadDiscoveryModule } from './lead-discovery/lead-discovery.module';
+import { EmailAccountsModule } from './email-accounts/email-accounts.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { LeadDiscoveryModule } from './lead-discovery/lead-discovery.module';
     AiPromptsModule,
     BrandDiscoveryModule,
     ContactDiscoveryModule,
+    EmailAccountsModule,
     LeadDiscoveryModule,
     LoggerModule,
     HealthModule,
