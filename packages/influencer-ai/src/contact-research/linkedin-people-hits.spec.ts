@@ -3,6 +3,7 @@ import {
   profileBelongsToBrand,
   roleFromSerpTitle,
   selectLinkedInPeopleHits,
+  textMentionsBrand,
 } from './linkedin-people-hits';
 
 const hit = (url: string, title: string, snippet = '') => ({
@@ -130,5 +131,22 @@ describe('LinkedIn URL dedupe', () => {
     expect(selected.map((s) => s.url)).toEqual([
       'https://www.linkedin.com/in/daniella-magee',
     ]);
+  });
+});
+
+describe('textMentionsBrand word boundaries', () => {
+  it('does not match a brand inside another word', () => {
+    const keys = brandMatchKeys('Aktiv', 'aktivstyle.com');
+    expect(textMentionsBrand('pro[d]aktiv, Marketing & Communications', keys)).toBe(false);
+    expect(textMentionsBrand('Hyperaktive Labs', keys)).toBe(false);
+    expect(textMentionsBrand('Digital Marketing Manager at Aktiv', keys)).toBe(true);
+    expect(textMentionsBrand('Growth @ AktivStyle', keys)).toBe(true);
+  });
+
+  it('keeps multi-word brands matching joined or separated', () => {
+    const keys = brandMatchKeys('Jonathan Adler', 'jonathanadler.com');
+    expect(textMentionsBrand('PR - Jonathan Adler | LinkedIn', keys)).toBe(true);
+    expect(textMentionsBrand('Experience: JonathanAdler', keys)).toBe(true);
+    expect(textMentionsBrand('Jonathan Adlerstein Consulting', keys)).toBe(false);
   });
 });

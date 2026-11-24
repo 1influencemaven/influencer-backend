@@ -40,8 +40,31 @@ export function textMentionsBrand(
   keys: readonly string[],
 ): boolean {
   if (!text) return false;
-  const haystack = compact(text);
-  return keys.some((key) => haystack.includes(key));
+  // Brackets/apostrophes join a word ("pro[d]aktiv" is one word); every other
+  // separator splits. A key must start and end on word boundaries, so
+  // "Aktiv" no longer matches "pro[d]aktiv" while "Jonathan Adler" still
+  // matches "JonathanAdler" or "Jonathan-Adler".
+  const words = text
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\[\]'’`]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const starts = new Set<number>();
+  const ends = new Set<number>();
+  let joined = '';
+  for (const word of words) {
+    starts.add(joined.length);
+    joined += word;
+    ends.add(joined.length);
+  }
+  return keys.some((key) => {
+    for (let at = joined.indexOf(key); at >= 0; at = joined.indexOf(key, at + 1)) {
+      if (starts.has(at) && ends.has(at + key.length)) return true;
+    }
+    return false;
+  });
 }
 
 const ROLE_WORDS =
