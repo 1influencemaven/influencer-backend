@@ -6,7 +6,10 @@ WORKDIR /app
 
 RUN apk add --no-cache python3 make g++
 
+# Workspaces: package manifests must exist before `npm ci`.
 COPY package.json package-lock.json ./
+COPY packages/ai-contracts/package.json ./packages/ai-contracts/
+COPY packages/influencer-ai/package.json ./packages/influencer-ai/
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 
@@ -16,6 +19,10 @@ ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 RUN npm ci
 
 COPY . .
+
+# Workspace packages emit dist/ that Nest and the Mastra worker resolve at runtime.
+RUN npm run build -w @influence-maven/ai-contracts \
+  && npm run build -w @influence-maven/influencer-ai
 
 # Prisma v7 emits TypeScript sources; they must exist before `nest build`.
 RUN npx prisma generate
@@ -31,6 +38,8 @@ ENV NODE_ENV=production
 RUN apk add --no-cache python3 make g++
 
 COPY package.json package-lock.json ./
+COPY packages/ai-contracts/package.json ./packages/ai-contracts/
+COPY packages/influencer-ai/package.json ./packages/influencer-ai/
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 
@@ -38,6 +47,8 @@ COPY prisma.config.ts ./
 RUN npm ci --omit=dev --ignore-scripts && npm install prisma --no-save --ignore-scripts
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/packages/ai-contracts/dist ./packages/ai-contracts/dist
+COPY --from=builder /app/packages/influencer-ai/dist ./packages/influencer-ai/dist
 
 EXPOSE 3000
 
