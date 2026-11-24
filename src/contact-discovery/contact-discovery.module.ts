@@ -10,6 +10,8 @@ import { ContactChannelService } from '../lead-discovery/contact-channel.service
 import { ContactDiscoveryService } from './contact-discovery.service';
 import { ContactEmailMastraOrchestrator } from './orchestrator/contact-email-mastra.orchestrator';
 import { ContactDiscoveryProcessor } from './processors/contact-discovery.processor';
+import { SaleshandyClient } from '../integrations/saleshandy/saleshandy.client';
+import { SaleshandyEnrichmentService } from './saleshandy/saleshandy-enrichment.service';
 
 /**
  * Contact Discovery: Mastra 2A + conditional 2B + always-on Agency Discovery (2C).
@@ -33,6 +35,8 @@ import { ContactDiscoveryProcessor } from './processors/contact-discovery.proces
   providers: [
     BrandBusinessContactService,
     ContactChannelService,
+    SaleshandyClient,
+    SaleshandyEnrichmentService,
     ContactEmailMastraOrchestrator,
     ContactDiscoveryService,
     ContactDiscoveryProcessor,

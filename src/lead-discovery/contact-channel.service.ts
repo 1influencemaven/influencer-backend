@@ -50,6 +50,33 @@ export type CreateChannelInput = {
   status?: ContactChannelStatus;
 };
 
+type ChannelVerification = 'VALID' | 'CATCH_ALL' | 'INVALID' | 'UNVERIFIED';
+
+function verificationOf(metadata: unknown): ChannelVerification {
+  const value =
+    metadata && typeof metadata === 'object'
+      ? (metadata as { verificationStatus?: unknown }).verificationStatus
+      : undefined;
+  return value === 'VALID' || value === 'CATCH_ALL' || value === 'INVALID'
+    ? value
+    : 'UNVERIFIED';
+}
+
+const VERIFICATION_RANK: Record<ChannelVerification, number> = {
+  VALID: 0,
+  CATCH_ALL: 1,
+  UNVERIFIED: 2,
+  INVALID: 3,
+};
+
+/** Only a provider verification upgrades confidence; never inferred. */
+const CONFIDENCE_BY_VERIFICATION: Record<ChannelVerification, LeadEmailConfidence> = {
+  VALID: LeadEmailConfidence.VALID,
+  CATCH_ALL: LeadEmailConfidence.PROBABLE,
+  INVALID: LeadEmailConfidence.INVALID,
+  UNVERIFIED: LeadEmailConfidence.UNKNOWN,
+};
+
 @Injectable()
 export class ContactChannelService {
   constructor(private readonly prisma: PrismaService) {}
@@ -266,9 +293,15 @@ export class ContactChannelService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const emailChannel = channels.find(
-      (c) => c.type === ContactChannelType.EMAIL,
-    );
+    // Provider-verified email first (Saleshandy VALID > CATCH_ALL > unverified).
+    const emails = channels
+      .filter((c) => c.type === ContactChannelType.EMAIL)
+      .sort(
+        (a, b) =>
+          VERIFICATION_RANK[verificationOf(a.metadata)] -
+          VERIFICATION_RANK[verificationOf(b.metadata)],
+      );
+    const emailChannel = emails[0];
     const linkedInChannel = channels.find(
       (c) => c.type === ContactChannelType.LINKEDIN,
     );
@@ -279,7 +312,7 @@ export class ContactChannelService {
         email: emailChannel?.value ?? null,
         isGeneric: emailChannel?.isGeneric ?? false,
         emailConfidence: emailChannel
-          ? LeadEmailConfidence.UNKNOWN
+          ? CONFIDENCE_BY_VERIFICATION[verificationOf(emailChannel.metadata)]
           : LeadEmailConfidence.UNKNOWN,
         profileUrl: linkedInChannel?.value ?? null,
       },

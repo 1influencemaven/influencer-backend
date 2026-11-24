@@ -62,6 +62,15 @@ describe('ContactEmailMastraOrchestrator', () => {
     researchEligibleAgencies: researchEligiblePeople,
   };
 
+  /** RF-03 v2: a verified nominal email (Saleshandy Tier 1) is what skips 2B. */
+  let saleshandyTier1 = false;
+  const saleshandyTrace = { enabled: false, validEmails: 0, leadsCreated: 0, leadsUpdated: 0 };
+  const saleshandy = {
+    enrichByDomain: jest.fn(async () => ({ ...saleshandyTrace })),
+    enrichLinkedInLeads: jest.fn(async (_ctx: unknown, trace: unknown) => trace),
+    hasTier1: jest.fn(() => saleshandyTier1),
+  };
+
   let orchestrator: ContactEmailMastraOrchestrator;
   /** Controlled monotonic clock for RF-04.1 wait/total assertions. */
   let clockMs: number;
@@ -79,6 +88,7 @@ describe('ContactEmailMastraOrchestrator', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    saleshandyTier1 = false;
     clockMs = 1_000;
     orchestrator = new ContactEmailMastraOrchestrator(
       publisher as never,
@@ -90,6 +100,7 @@ describe('ContactEmailMastraOrchestrator', () => {
       agencyDiscovery as never,
       agencyContactEmails as never,
       agencyContactPeople as never,
+      saleshandy as never,
     );
     orchestrator.clock = clock;
     publishContactResearchFindBrandEmails.mockResolvedValue({
@@ -333,7 +344,8 @@ describe('ContactEmailMastraOrchestrator', () => {
   }
 
   describe('RF-03 conditional Track 2B', () => {
-    it('1: HIGH present → 2B omitted', async () => {
+    it('1: Tier 1 nominal + HIGH mailbox → 2B omitted', async () => {
+      saleshandyTier1 = true;
       waitForAiExecutionResult.mockResolvedValueOnce(
         mockEmailsResult([{ email: 'partnerships@brand.com' }]),
       );
@@ -342,20 +354,22 @@ describe('ContactEmailMastraOrchestrator', () => {
 
       expect(result.outcome).toBe('RESULTS_FOUND');
       expect(result.contactsCreated).toBe(1);
-      expectTrack2BSkipped('SUFFICIENT_COMMERCIAL_COVERAGE_HIGH');
+      expectTrack2BSkipped('TIER1_NOMINAL_FOUND');
     });
 
     it('2: MEDIUM present → 2B omitted', async () => {
+      saleshandyTier1 = true;
       waitForAiExecutionResult.mockResolvedValueOnce(
         mockEmailsResult([{ email: 'press@brand.com' }]),
       );
 
       await orchestrator.execute(baseInput);
 
-      expectTrack2BSkipped('SUFFICIENT_COMMERCIAL_COVERAGE_MEDIUM');
+      expectTrack2BSkipped('TIER1_NOMINAL_FOUND');
     });
 
     it('3: HIGH and MEDIUM present → 2B omitted', async () => {
+      saleshandyTier1 = true;
       waitForAiExecutionResult.mockResolvedValueOnce(
         mockEmailsResult([
           { email: 'partnerships@brand.com' },
@@ -365,7 +379,19 @@ describe('ContactEmailMastraOrchestrator', () => {
 
       await orchestrator.execute(baseInput);
 
-      expectTrack2BSkipped('SUFFICIENT_COMMERCIAL_COVERAGE_HIGH_AND_MEDIUM');
+      expectTrack2BSkipped('TIER1_NOMINAL_FOUND');
+    });
+
+    it('1b: HIGH mailbox without Tier 1 nominal → 2B still executed', async () => {
+      waitForAiExecutionResult
+        .mockResolvedValueOnce(
+          mockEmailsResult([{ email: 'partnerships@brand.com' }]),
+        )
+        .mockResolvedValueOnce(mockPeopleResult());
+
+      await orchestrator.execute(baseInput);
+
+      expectTrack2BExecuted('MAILBOX_ONLY_HIGH');
     });
 
     it('4: only GENERAL → 2B executed', async () => {
@@ -487,6 +513,7 @@ describe('ContactEmailMastraOrchestrator', () => {
     });
 
     it('10: mixed GENERAL+HIGH → 2B omitted (HIGH wins)', async () => {
+      saleshandyTier1 = true;
       waitForAiExecutionResult.mockResolvedValueOnce(
         mockEmailsResult([
           { email: 'info@brand.com' },
@@ -496,7 +523,7 @@ describe('ContactEmailMastraOrchestrator', () => {
 
       await orchestrator.execute(baseInput);
 
-      expectTrack2BSkipped('SUFFICIENT_COMMERCIAL_COVERAGE_HIGH');
+      expectTrack2BSkipped('TIER1_NOMINAL_FOUND');
       expect(upsertFromDiscovery).toHaveBeenCalledTimes(2);
     });
 
@@ -715,6 +742,7 @@ describe('ContactEmailMastraOrchestrator', () => {
     });
 
     it('omits 2B timing fields when RF-03 skips 2B (HIGH)', async () => {
+      saleshandyTier1 = true;
       installWaitSequence([
         mockEmailsResult([{ email: 'partnerships@brand.com' }], 'RESULTS_FOUND', 1_111),
       ], 100);
@@ -806,6 +834,7 @@ describe('ContactEmailMastraOrchestrator', () => {
     });
 
     it('historical-compatible: timings additive; RF-03 decision unchanged', async () => {
+      saleshandyTier1 = true;
       installWaitSequence([
         mockEmailsResult([{ email: 'press@brand.com' }], 'RESULTS_FOUND', 900),
       ]);
@@ -816,7 +845,7 @@ describe('ContactEmailMastraOrchestrator', () => {
       expect(meta.track2BDecision).toEqual(
         expect.objectContaining({
           executed: false,
-          reason: 'SUFFICIENT_COMMERCIAL_COVERAGE_MEDIUM',
+          reason: 'TIER1_NOMINAL_FOUND',
         }),
       );
       expect(meta.coverage2A).toEqual(
@@ -857,6 +886,7 @@ describe('ContactEmailMastraOrchestrator', () => {
   });
 
   it('RF-04.3: does not transfer snapshots when RF-03 omits 2B', async () => {
+      saleshandyTier1 = true;
     waitForAiExecutionResult.mockResolvedValueOnce(
       mockEmailsResult(
         [{ email: 'press@brand.com' }],
@@ -1111,6 +1141,7 @@ describe('ContactEmailMastraOrchestrator', () => {
 
   describe('2C.3 Agency Discovery always-on integration', () => {
     it('1: HIGH+MEDIUM → 2B skipped, 2C runs', async () => {
+      saleshandyTier1 = true;
       waitForAiExecutionResult.mockResolvedValueOnce(
         mockEmailsResult([
           { email: 'partnerships@brand.com' },
@@ -1121,7 +1152,7 @@ describe('ContactEmailMastraOrchestrator', () => {
       await orchestrator.execute(baseInput);
 
       expect(agencyDiscoveryExecute).toHaveBeenCalledTimes(1);
-      expectTrack2BSkipped('SUFFICIENT_COMMERCIAL_COVERAGE_HIGH_AND_MEDIUM');
+      expectTrack2BSkipped('TIER1_NOMINAL_FOUND');
     });
 
     it('2: GENERAL → 2B and 2C both run', async () => {
@@ -1147,6 +1178,7 @@ describe('ContactEmailMastraOrchestrator', () => {
     });
 
     it('4: HIGH only → 2C runs while 2B omitted', async () => {
+      saleshandyTier1 = true;
       waitForAiExecutionResult.mockResolvedValueOnce(
         mockEmailsResult([{ email: 'partnerships@brand.com' }]),
       );
@@ -1342,6 +1374,7 @@ describe('ContactEmailMastraOrchestrator', () => {
     });
 
     it('11: response keeps track2BDecision + timings (RF-03/RF-04)', async () => {
+      saleshandyTier1 = true;
       waitForAiExecutionResult.mockResolvedValueOnce(
         mockEmailsResult([{ email: 'partnerships@brand.com' }]),
       );
@@ -1352,7 +1385,7 @@ describe('ContactEmailMastraOrchestrator', () => {
       expect(meta.track2BDecision).toEqual(
         expect.objectContaining({
           executed: false,
-          reason: 'SUFFICIENT_COMMERCIAL_COVERAGE_HIGH',
+          reason: 'TIER1_NOMINAL_FOUND',
         }),
       );
       expect(meta.timings).toEqual(
@@ -1410,6 +1443,7 @@ describe('ContactEmailMastraOrchestrator', () => {
     });
 
     it('does not declare 2C executed when influencer context is missing', async () => {
+      saleshandyTier1 = true;
       influencerFindUnique.mockResolvedValueOnce(null);
       waitForAiExecutionResult.mockResolvedValueOnce(
         mockEmailsResult([{ email: 'partnerships@brand.com' }]),
@@ -1476,6 +1510,7 @@ describe('ContactEmailMastraOrchestrator', () => {
     });
 
     it('19: emailsPass PROVIDER_FAILURE does not fail 2A COMPLETED', async () => {
+      saleshandyTier1 = true;
       waitForAiExecutionResult.mockResolvedValueOnce(
         mockEmailsResult([{ email: 'partnerships@brand.com' }]),
       );

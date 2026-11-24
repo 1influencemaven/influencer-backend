@@ -96,6 +96,8 @@ enum ContactChannelSource {
   MANUAL
   LEGACY_MIGRATION
   BRAND_WEBSITE
+  /// Saleshandy Lead Finder / enrichment (provider-verified work email).
+  SALESHANDY
 }
 
 /// Commercial value for outreach prioritization (ADR-0016).

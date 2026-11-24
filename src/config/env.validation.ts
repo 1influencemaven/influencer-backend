@@ -182,6 +182,14 @@ export const envValidationSchema = Joi.object({
     .default(4),
   AI_PEOPLE_MAX_PROFILES: Joi.number().integer().min(1).max(15).default(3),
   AI_PEOPLE_MAX_BRAND_PAGES: Joi.number().integer().min(1).max(12).default(6),
+  /** Saleshandy enrichment (waterfall level 1/2). Search is free; reveal spends credits. */
+  SALESHANDY_API_KEY: Joi.string().allow('').optional(),
+  SALESHANDY_ENRICHMENT_ENABLED: Joi.boolean().default(false),
+  /** Max contacts revealed per brand per run (credits). Reused contacts count. */
+  SALESHANDY_MAX_ENRICH_PER_BRAND: Joi.number().integer().min(0).max(10).default(2),
+  /** Stop spending when the account balance drops below this. */
+  SALESHANDY_MIN_CREDITS: Joi.number().integer().min(0).default(20),
+  SALESHANDY_ENRICH_TIMEOUT_MS: Joi.number().integer().min(10000).max(600000).default(150000),
   /** When true, Nest asks worker to attempt OCR after LinkedIn+PEE (Phase 2). */
   CONTACT_OCR_ENABLED: Joi.boolean().default(false),
 

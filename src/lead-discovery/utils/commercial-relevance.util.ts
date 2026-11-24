@@ -35,6 +35,8 @@ const HIGH_LOCAL_PARTS = new Set([
 /** RF-02 MEDIUM — stored as NEUTRAL in Prisma. */
 const MEDIUM_LOCAL_PARTS = new Set([
   'marketing',
+  'pr',
+  'brand',
   'affiliate',
   'affiliates',
   'press',
@@ -47,6 +49,7 @@ const MEDIUM_LOCAL_PARTS = new Set([
 const GENERAL_LOCAL_PARTS = new Set([
   'info',
   'hello',
+  'hi',
   'hola',
   'contact',
   'contacto',
@@ -59,6 +62,17 @@ const LOW_LOCAL_PARTS = new Set([
   'help',
   'noreply',
   'no-reply',
+  'sales',
+  'orders',
+  'order',
+  'billing',
+  'careers',
+  'jobs',
+  'hr',
+  'legal',
+  'privacy',
+  'admin',
+  'webmaster',
   'donotreply',
   'do-not-reply',
 ]);

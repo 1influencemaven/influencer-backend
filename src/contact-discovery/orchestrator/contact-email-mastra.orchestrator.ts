@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type {
   AgencyDiscoveryOutput,
@@ -38,6 +38,11 @@ import { classifyPublicEmailGeneric } from '../../lead-discovery/utils/public-em
 import { buildCorroboratedBrandDomains } from '../../lead-discovery/utils/brand-business-contact-domain.util';
 import { canAttributeEmailToPerson } from '../../lead-discovery/utils/contact-email-attribution.util';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  emptySaleshandyTrace,
+  SaleshandyEnrichmentService,
+  type SaleshandyTrace,
+} from '../saleshandy/saleshandy-enrichment.service';
 import {
   MASTRA_CONTACT_EMAILS_PROVIDER_ID,
   MASTRA_FIND_BRAND_PEOPLE_PROVIDER_ID,
@@ -131,6 +136,8 @@ type MastraSearchMetadata = BbcSearchMetadataV2 & {
   coverage2A?: ContactResearchCoverage2A;
   /** RF-03: conditional 2B decision after this-run 2A coverage. */
   track2BDecision?: Track2BDecisionMetadata;
+  /** Enrichment waterfall level 1/2: Saleshandy Lead Finder + reveal (additive). */
+  saleshandy?: SaleshandyTrace;
   /** RF-04.1: Nest wait + Mastra durationMs (additive; omitted on historical runs). */
   timings?: ContactResearchTimings;
   /** RF-04.2: page origin counters from Mastra 2A trace (additive). */
@@ -183,6 +190,8 @@ export class ContactEmailMastraOrchestrator {
     private readonly agencyDiscovery: AgencyDiscoveryService,
     private readonly agencyContactEmails: AgencyContactEmailsResearchService,
     private readonly agencyContactPeople: AgencyContactPeopleResearchService,
+    @Optional()
+    private readonly saleshandy?: SaleshandyEnrichmentService,
   ) {}
 
   async execute(input: ContactEmailMastraInput): Promise<BbcDiscoveryResult> {
@@ -220,6 +229,18 @@ export class ContactEmailMastraOrchestrator {
       userId,
     });
 
+    // Enrichment level 1 (Saleshandy, verified nominal emails): independent of
+    // 2A, so it overlaps it. Soft-fail: the service never throws.
+    const saleshandyCtx = {
+      brandCandidateId: input.brandCandidateId,
+      influencerId: input.influencerId,
+      runId: input.runId,
+      domain,
+    };
+    const saleshandyPromise: Promise<SaleshandyTrace> = this.saleshandy
+      ? this.saleshandy.enrichByDomain(saleshandyCtx)
+      : Promise.resolve(emptySaleshandyTrace(false));
+
     // --- Track 2A ---
     const phase2A = await this.runTrack2A({
       input,
@@ -234,6 +255,7 @@ export class ContactEmailMastraOrchestrator {
     // Case F: hard 2A → skip RF-03 entirely (do not invent track2BDecision),
     // await 2C, then persist FAILED once with final metadata.
     if (phase2A.hardFailed) {
+      await saleshandyPromise;
       const phase2C = await phase2CPromise;
       const track2CMeta = this.toTrack2CMetadata(phase2C);
       const tracksOnFail: Array<'2A' | '2C'> = phase2C.executed
@@ -275,11 +297,13 @@ export class ContactEmailMastraOrchestrator {
       );
     }
 
-    // RF-03: 2B only when this-run 2A lacks HIGH/MEDIUM commercial coverage.
+    // RF-03 v2: 2B unless a verified nominal email (Tier 1) already exists.
+    let saleshandyTrace = await saleshandyPromise;
     const track2BDecision = decideTrack2BExecution({
       hasHigh: phase2A.tierFlags.hasHigh,
       hasMedium: phase2A.tierFlags.hasMedium,
       emailsPersistedThisRun: contactsPersisted,
+      hasTier1Nominal: this.saleshandy?.hasTier1(saleshandyTrace) === true,
     });
 
     let peopleCreated = 0;
@@ -346,6 +370,16 @@ export class ContactEmailMastraOrchestrator {
         }),
       );
     }
+
+    // Enrichment level 2: LinkedIn people from 2B without email → Saleshandy.
+    if (this.saleshandy && track2BDecision.shouldRun && peopleCreated + peopleUpdated > 0) {
+      saleshandyTrace = await this.saleshandy.enrichLinkedInLeads(
+        saleshandyCtx,
+        saleshandyTrace,
+      );
+    }
+    peopleCreated += saleshandyTrace.leadsCreated;
+    peopleUpdated += saleshandyTrace.leadsUpdated;
 
     const phase2C = await phase2CPromise;
 
@@ -462,6 +496,7 @@ export class ContactEmailMastraOrchestrator {
       personLeadsUpdated: peopleUpdated,
       ...(track2BError ? { track2BError } : {}),
       track2BDecision: track2BDecisionMeta,
+      ...(saleshandyTrace.enabled ? { saleshandy: saleshandyTrace } : {}),
       track2C: this.toTrack2CMetadata(phase2C),
       timings,
       ...(phase2A.pageOriginCounts
