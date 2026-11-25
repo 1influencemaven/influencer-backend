@@ -1,0 +1,214 @@
+# Influence Maven — production services (teliot.site VPS).
+#
+# Mirror of the Influencer part of /home/luis/srv/projects/teliot.site/docker-compose.yml
+# (that file also runs unrelated apps and is not versioned). Build contexts are
+# relative to that directory, where influencer-backend/ and influencer-frontend/
+# are checked out. Every secret comes from ${INFLUENCERS_*} variables in the
+# server's .env (never commit it). See deploy/README.md.
+
+networks:
+  proxy:
+    name: proxy
+    external: true
+  influencers-internal:
+    driver: bridge
+
+volumes:
+  influencers_postgres_data:
+    driver: local
+  influencers_redis_data:
+    driver: local
+
+services:
+  # ─────────────────────────────────────────────
+  # Ollama (Motor LLM)
+  # ─────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: always
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ./ollama:/root/.ollama
+    networks:
+      - proxy
+
+  # ─────────────────────────────────────────────
+  # App Influencers — PostgreSQL
+  # ─────────────────────────────────────────────
+  influencer-postgres:
+    image: postgres:16-alpine
+    container_name: influencer-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${INFLUENCERS_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${INFLUENCERS_DB_PASSWORD}
+      POSTGRES_DB: ${INFLUENCERS_DB_NAME:-app_db}
+    volumes:
+      - influencers_postgres_data:/var/lib/postgresql/data
+    networks:
+      - influencers-internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${INFLUENCERS_DB_USER:-postgres} -d ${INFLUENCERS_DB_NAME:-app_db}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
+
+  # ─────────────────────────────────────────────
+  # App Influencers — Redis (BullMQ)
+  # ─────────────────────────────────────────────
+  influencer-redis:
+    image: redis:7-alpine
+    container_name: influencer-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - influencers_redis_data:/data
+    networks:
+      - influencers-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+  # ─────────────────────────────────────────────
+  # App Influencers — Backend API (NestJS)
+  # ─────────────────────────────────────────────
+  influencer-backend:
+    build:
+      context: ./influencer-backend
+      dockerfile: Dockerfile
+    image: teliotsite-influencer-backend
+    container_name: influencer-backend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment: &influencer-ai-env
+      NODE_ENV: production
+      PORT: 3000
+      FRONTEND_URL: https://influencers.teliot.site
+      DATABASE_URL: postgresql://${INFLUENCERS_DB_USER:-postgres}:${INFLUENCERS_DB_PASSWORD}@influencer-postgres:5432/${INFLUENCERS_DB_NAME:-app_db}
+      REDIS_HOST: influencer-redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_PASSWORD: ""
+      SWAGGER_ENABLED: "false"
+      JWT_ACCESS_SECRET: ${INFLUENCERS_JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${INFLUENCERS_JWT_REFRESH_SECRET}
+      JWT_ACCESS_EXPIRES_IN: ${INFLUENCERS_JWT_ACCESS_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${INFLUENCERS_JWT_REFRESH_EXPIRES_IN:-7d}
+      THROTTLE_TTL: ${INFLUENCERS_THROTTLE_TTL:-60000}
+      THROTTLE_LIMIT: ${INFLUENCERS_THROTTLE_LIMIT:-100}
+      # Mastra worker only supports ollama|anthropic (not cursor).
+      AI_PROVIDER: ${INFLUENCERS_AI_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${INFLUENCERS_OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${INFLUENCERS_OLLAMA_MODEL:-deepseek-v4.1-flash:cloud}
+      CURSOR_API_KEY: ${INFLUENCERS_CURSOR_API_KEY:-}
+      CURSOR_MODEL: ${INFLUENCERS_CURSOR_MODEL:-composer-2.5}
+      ANTHROPIC_API_KEY: ${INFLUENCERS_ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${INFLUENCERS_ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
+      BRAND_DISCOVERY_ENGINE: ${INFLUENCERS_BRAND_DISCOVERY_ENGINE:-mastra}
+      BRAND_DISCOVERY_GEO_LENSES: ${INFLUENCERS_BRAND_DISCOVERY_GEO_LENSES:-v1}
+      BRAND_DISCOVERY_LIMIT: ${INFLUENCERS_BRAND_DISCOVERY_LIMIT:-20}
+      BRAND_DISCOVERY_PLAN_TIMEOUT_MS: ${INFLUENCERS_BRAND_DISCOVERY_PLAN_TIMEOUT_MS:-300000}
+      BRAND_DISCOVERY_RESEARCH_CONCURRENCY: ${INFLUENCERS_BRAND_DISCOVERY_RESEARCH_CONCURRENCY:-5}
+      LEAD_DISCOVERY_LIMIT: ${INFLUENCERS_LEAD_DISCOVERY_LIMIT:-10}
+      BRIGHTDATA_API_KEY: ${INFLUENCERS_BRIGHTDATA_API_KEY:-}
+      BRIGHTDATA_DATASET_ID: ${INFLUENCERS_BRIGHTDATA_DATASET_ID:-}
+      BRIGHTDATA_SERP_ZONE: ${INFLUENCERS_BRIGHTDATA_SERP_ZONE:-}
+      BRIGHTDATA_UNLOCKER_ZONE: ${INFLUENCERS_BRIGHTDATA_UNLOCKER_ZONE:-mcp_unlocker}
+      BRIGHTDATA_INSTAGRAM_PROFILE_DATASET_ID: ${INFLUENCERS_BRIGHTDATA_INSTAGRAM_PROFILE_DATASET_ID:-gd_l1vikfch901nx3by4}
+      BRIGHTDATA_LINKEDIN_PEOPLE_DATASET_ID: ${INFLUENCERS_BRIGHTDATA_LINKEDIN_PEOPLE_DATASET_ID:-gd_l1viktl72bvl7bjuj0}
+      # Saleshandy enrichment (Brand Knowledge Base / contact waterfall)
+      SALESHANDY_API_KEY: ${INFLUENCERS_SALESHANDY_API_KEY:-}
+      SALESHANDY_ENRICHMENT_ENABLED: ${INFLUENCERS_SALESHANDY_ENRICHMENT_ENABLED:-false}
+      SALESHANDY_MAX_ENRICH_PER_BRAND: ${INFLUENCERS_SALESHANDY_MAX_ENRICH_PER_BRAND:-2}
+      SALESHANDY_MIN_CREDITS: ${INFLUENCERS_SALESHANDY_MIN_CREDITS:-20}
+      SALESHANDY_ENRICH_TIMEOUT_MS: ${INFLUENCERS_SALESHANDY_ENRICH_TIMEOUT_MS:-150000}
+    depends_on:
+      influencer-postgres:
+        condition: service_healthy
+      influencer-redis:
+        condition: service_healthy
+    networks:
+      - proxy
+      - influencers-internal
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.00"
+
+  # ─────────────────────────────────────────────
+  # App Influencers — Mastra AI worker (BullMQ)
+  # ─────────────────────────────────────────────
+  influencer-ai:
+    image: teliotsite-influencer-backend
+    container_name: influencer-ai
+    restart: unless-stopped
+    command: ["npm", "run", "start:influencer-ai"]
+    environment:
+      <<: *influencer-ai-env
+    depends_on:
+      influencer-postgres:
+        condition: service_healthy
+      influencer-redis:
+        condition: service_healthy
+      influencer-backend:
+        condition: service_started
+      ollama:
+        condition: service_started
+    networks:
+      - proxy
+      - influencers-internal
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.00"
+
+  # ─────────────────────────────────────────────
+  # App Influencers — Frontend (Next.js)
+  # ─────────────────────────────────────────────
+  influencer-frontend:
+    build:
+      context: ./influencer-frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/v1
+        NEXT_PUBLIC_APP_URL: https://influencers.teliot.site
+        API_ORIGIN: http://influencer-backend:3000
+    container_name: influencer-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      API_ORIGIN: http://influencer-backend:3000
+    depends_on:
+      - influencer-backend
+    networks:
+      - proxy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
+
