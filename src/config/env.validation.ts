@@ -107,7 +107,7 @@ export const envValidationSchema = Joi.object({
     .integer()
     .min(1)
     .max(5)
-    .default(2),
+    .default(4),
 
   /** Concurrent Bright Data SERP calls per Brand Discovery run (1 = sequential). */
   BRAND_DISCOVERY_SERP_CONCURRENCY: Joi.number().integer().min(1).max(8).default(4),

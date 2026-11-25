@@ -1,3 +1,7 @@
+jest.mock('../integrations/brightdata/direct-html-fetch.util', () => ({
+  directFetchHtml: jest.fn().mockResolvedValue(null),
+}));
+
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 
