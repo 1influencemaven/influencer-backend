@@ -194,6 +194,10 @@ export const envValidationSchema = Joi.object({
   AI_PEOPLE_MAX_BRAND_PAGES: Joi.number().integer().min(1).max(12).default(6),
   /** Saleshandy enrichment (waterfall level 1/2). Search is free; reveal spends credits. */
   SALESHANDY_API_KEY: Joi.string().allow('').optional(),
+  /** Saleshandy Open API base URL (override only for tests/mocks). */
+  SALESHANDY_BASE_URL: Joi.string().uri().optional(),
+  /** Default timeout for Saleshandy calls; SMTP/IMAP verification can be slow. */
+  SALESHANDY_TIMEOUT_MS: Joi.number().integer().min(5000).max(300000).default(60000),
   SALESHANDY_ENRICHMENT_ENABLED: Joi.boolean().default(false),
   /** Max contacts revealed per brand per run (credits). Reused contacts count. */
   SALESHANDY_MAX_ENRICH_PER_BRAND: Joi.number().integer().min(0).max(10).default(2),

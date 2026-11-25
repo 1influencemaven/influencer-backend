@@ -10,7 +10,7 @@ import { ContactChannelService } from '../lead-discovery/contact-channel.service
 import { ContactDiscoveryService } from './contact-discovery.service';
 import { ContactEmailMastraOrchestrator } from './orchestrator/contact-email-mastra.orchestrator';
 import { ContactDiscoveryProcessor } from './processors/contact-discovery.processor';
-import { SaleshandyClient } from '../integrations/saleshandy/saleshandy.client';
+import { SaleshandyModule } from '../integrations/saleshandy/saleshandy.module';
 import { SaleshandyEnrichmentService } from './saleshandy/saleshandy-enrichment.service';
 
 /**
@@ -22,6 +22,7 @@ import { SaleshandyEnrichmentService } from './saleshandy/saleshandy-enrichment.
     ConfigModule,
     AiExecutionModule,
     AgencyDiscoveryModule,
+    SaleshandyModule,
     BullModule.registerQueue({
       name: QUEUES.CONTACT_DISCOVERY,
       defaultJobOptions: {
@@ -35,7 +36,6 @@ import { SaleshandyEnrichmentService } from './saleshandy/saleshandy-enrichment.
   providers: [
     BrandBusinessContactService,
     ContactChannelService,
-    SaleshandyClient,
     SaleshandyEnrichmentService,
     ContactEmailMastraOrchestrator,
     ContactDiscoveryService,

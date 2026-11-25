@@ -162,6 +162,7 @@ model User {
   leadDiscoveryPromptTemplates  LeadDiscoveryPromptTemplate[]
   /// Talents where this user is the assigned manager (Talent Manager).
   managedInfluencers            Influencer[]                   @relation("InfluencerManager")
+  emailAccountJobs              EmailAccountJob[]              @relation("EmailAccountJobInitiator")
 }
 
 model RefreshToken {
@@ -628,4 +629,42 @@ model BrandNicheAffinity {
   @@index([nicheKey, approvedCount])
   @@index([nicheKey, lastSurfacedAt])
   @@index([brandId])
+}
+
+/// Saleshandy async email-account process (HU-EA-002/003/004).
+enum EmailAccountJobType {
+  CONNECT
+  RECONNECT
+}
+
+enum EmailAccountJobStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+/// Durable tracking of a Saleshandy connect/reconnect request (requestId).
+/// Never stores SMTP/IMAP passwords: only sender emails or account ids.
+model EmailAccountJob {
+  id            String                @id @default(uuid())
+  /// Saleshandy requestId for /v1/email-accounts/connect/status/{requestId}.
+  requestId     String                @unique
+  type          EmailAccountJobType
+  status        EmailAccountJobStatus @default(PROCESSING)
+  /// Number of accounts submitted.
+  accountCount  Int
+  /// Sender emails (CONNECT) or Saleshandy account ids (RECONNECT). No secrets.
+  targets       String[]              @default([])
+  /// CSV report with per-account import details (set when completed).
+  reportUrl     String?
+  errorMessage  String?
+  initiatedById String?
+  initiatedBy   User?                 @relation("EmailAccountJobInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+  lastCheckedAt DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
 }
