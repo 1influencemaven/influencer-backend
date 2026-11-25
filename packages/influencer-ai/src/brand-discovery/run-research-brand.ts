@@ -186,7 +186,9 @@ export async function runBrandDiscoveryResearchBrand(
         structuredOutput: {
           // Lenient capture — strict Zod after normalizeResearchLlmObject.
           schema: researchLlmCaptureSchema as z.ZodType,
-          jsonPromptInjection: 'auto',
+          // Untyped capture fields become `{}` in JSON Schema, which Anthropic
+          // rejects in native structured output: keep the schema in the prompt.
+          jsonPromptInjection: true,
         },
       });
 

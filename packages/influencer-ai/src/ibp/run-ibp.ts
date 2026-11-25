@@ -59,7 +59,11 @@ export async function runIbpGeneration(
       structuredOutput: {
         // Lenient capture — disclaimer/superRefine applied after normalize.
         schema: ibpGenerationOutputLlmCaptureSchema,
-        jsonPromptInjection: 'auto',
+        // The capture schema has untyped (`z.unknown()`) fields, which become
+        // `{}` in JSON Schema. Anthropic rejects that in native structured
+        // output, so the schema always goes in the prompt (what Ollama already
+        // did under 'auto'); the result is still validated with Zod.
+        jsonPromptInjection: true,
       },
     });
   };
