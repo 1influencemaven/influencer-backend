@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { directFetchHtml } from '../integrations/brightdata/direct-html-fetch.util';
 import { ConfigService } from '@nestjs/config';
 import type {
   AiExecutionResult,
@@ -38,7 +39,7 @@ import {
 import { mapPool } from './utils/map-pool.util';
 import { filterBrandDiscoverySearchHits } from './utils/brand-serp-hit-filter.util';
 
-export const BRAND_DISCOVERY_RESEARCH_DEFAULT_CONCURRENCY = 2;
+export const BRAND_DISCOVERY_RESEARCH_DEFAULT_CONCURRENCY = 4;
 export const BRAND_DISCOVERY_RESEARCH_DEFAULT_TIMEOUT_MS = 300_000;
 
 export type BrandDiscoveryResearchContext = {
@@ -166,12 +167,13 @@ export class BrandDiscoveryResearchService {
     const pages: PageFetchRecord[] = [];
     const snapshots: BrandPageSnapshot[] = [];
 
-    for (const page of planned) {
-      const fetched = await this.fetchAuthorizedPage(
-        page.url,
-        page.role,
-        candidate.domain,
-      );
+    // Pages of one brand are independent: fetch them in parallel (order kept).
+    const fetchedPages = await Promise.all(
+      planned.map((page) =>
+        this.fetchAuthorizedPage(page.url, page.role, candidate.domain),
+      ),
+    );
+    for (const fetched of fetchedPages) {
       pages.push(fetched.record);
       if (fetched.snapshot) {
         snapshots.push(fetched.snapshot);
@@ -290,7 +292,10 @@ export class BrandDiscoveryResearchService {
       };
     }
 
-    const fetched = await this.unlocker.fetchRawHtml(guarded.url);
+    // Direct fetch first (free, ~1 s); Unlocker only when the site blocks bots.
+    const fetched =
+      (await directFetchHtml(guarded.url)) ??
+      (await this.unlocker.fetchRawHtml(guarded.url));
     if (fetched.outcome !== 'ok' || fetched.emptyBody) {
       return {
         record: {
