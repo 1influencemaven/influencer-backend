@@ -66,7 +66,8 @@ export class QueryInfluencersDto {
   search?: string;
 
   @ApiPropertyOptional({
-    description: 'Filtro por país (ISO 3166-1 alpha-2)',
+    description:
+      'Filtro por país (ISO 3166-1 alpha-2). Coincide si el talento incluye ese código en `countries`.',
     example: 'ES',
   })
   @IsOptional()

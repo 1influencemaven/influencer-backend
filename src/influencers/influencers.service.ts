@@ -47,7 +47,7 @@ export const influencerSelect = {
   instagramNormalized: true,
   tiktok: true,
   youtube: true,
-  country: true,
+  countries: true,
   language: true,
   niche: true,
   subNiche: true,
@@ -169,6 +169,7 @@ export class InfluencersService {
     );
 
     const niches = this.normalizeNiches(createInfluencerDto.niches);
+    const countries = this.normalizeCountries(createInfluencerDto.countries);
     const quarters = createInfluencerDto.quarters ?? [];
     const researchEvidence = sanitizeInstagramResearchEvidence(
       createInfluencerDto.instagramResearch,
@@ -212,9 +213,7 @@ export class InfluencersService {
           instagramNormalized: resolved.instagramNormalized,
           tiktok: createInfluencerDto.tiktok,
           youtube: createInfluencerDto.youtube,
-          country: createInfluencerDto.country
-            ? createInfluencerDto.country.trim().toUpperCase()
-            : createInfluencerDto.country,
+          countries,
           language: createInfluencerDto.language,
           niche: createInfluencerDto.niche,
           subNiche: createInfluencerDto.subNiche,
@@ -242,6 +241,7 @@ export class InfluencersService {
       const manualKeys = this.collectProvidedFieldKeys(createInfluencerDto, {
         instagramProvided: true,
         nichesProvided: createInfluencerDto.niches !== undefined,
+        countriesProvided: true,
       }).filter((key) => !externalFromResearch.includes(key));
 
       if (manualKeys.length > 0) {
@@ -348,17 +348,13 @@ export class InfluencersService {
       },
     );
 
-    trackScalar(
-      INFLUENCER_FIELD_KEYS.COUNTRY,
-      updateInfluencerDto.country,
-      current.country,
-      () => {
-        data.country =
-          typeof updateInfluencerDto.country === 'string'
-            ? updateInfluencerDto.country.trim().toUpperCase()
-            : updateInfluencerDto.country;
-      },
-    );
+    if (updateInfluencerDto.countries !== undefined) {
+      const countries = this.normalizeCountries(updateInfluencerDto.countries);
+      data.countries = countries;
+      if (!this.nichesEqual(countries, current.countries)) {
+        changedKeys.push(INFLUENCER_FIELD_KEYS.COUNTRIES);
+      }
+    }
 
     trackScalar(
       INFLUENCER_FIELD_KEYS.LANGUAGE,
@@ -596,7 +592,7 @@ export class InfluencersService {
     const where: Prisma.InfluencerWhereInput = {};
 
     if (query.country) {
-      where.country = query.country;
+      where.countries = { has: query.country.trim().toUpperCase() };
     }
 
     if (query.language) {
@@ -764,6 +760,29 @@ export class InfluencersService {
     return result;
   }
 
+  private normalizeCountries(countries: string[] | undefined): string[] {
+    if (!countries) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    for (const raw of countries) {
+      const value = raw.trim().toUpperCase();
+      if (!value) {
+        continue;
+      }
+      if (seen.has(value)) {
+        continue;
+      }
+      seen.add(value);
+      result.push(value);
+    }
+
+    return result;
+  }
+
   private nichesEqual(a: string[], b: string[]): boolean {
     if (a.length !== b.length) {
       return false;
@@ -785,7 +804,11 @@ export class InfluencersService {
 
   private collectProvidedFieldKeys(
     dto: CreateInfluencerDto,
-    flags: { instagramProvided: boolean; nichesProvided: boolean },
+    flags: {
+      instagramProvided: boolean;
+      nichesProvided: boolean;
+      countriesProvided: boolean;
+    },
   ): InfluencerFieldKey[] {
     const keys: InfluencerFieldKey[] = [INFLUENCER_FIELD_KEYS.NAME];
 
@@ -798,8 +821,8 @@ export class InfluencersService {
     if (dto.youtube !== undefined) {
       keys.push(INFLUENCER_FIELD_KEYS.YOUTUBE);
     }
-    if (dto.country !== undefined) {
-      keys.push(INFLUENCER_FIELD_KEYS.COUNTRY);
+    if (flags.countriesProvided) {
+      keys.push(INFLUENCER_FIELD_KEYS.COUNTRIES);
     }
     if (dto.language !== undefined) {
       keys.push(INFLUENCER_FIELD_KEYS.LANGUAGE);

@@ -106,7 +106,8 @@ describe('InfluencersController', () => {
     const dto = {
       name: 'Laura Martínez',
       instagram: '@laurafit_es',
-      country: 'ES',
+      countries: ['ES'],
+      managerId: '550e8400-e29b-41d4-a716-446655440000',
     };
     influencersService.create.mockResolvedValue({
       id: 'influencer-id',

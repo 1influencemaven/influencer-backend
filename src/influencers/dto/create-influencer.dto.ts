@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   ArrayUnique,
   IsArray,
   IsEmail,
@@ -66,17 +67,26 @@ export class CreateInfluencerDto {
 
   @ApiProperty({
     description:
-      'País donde se encuentra actualmente el talento (residencia / ubicación habitual declarada). ISO 3166-1 alpha-2. Obligatorio en alta; no es nacionalidad ni país de audiencia. Alimenta la lente SERP local_home en Brand Discovery.',
-    example: 'CO',
-    maxLength: 2,
+      'Países donde se encuentra actualmente el talento (residencia / ubicación habitual declarada). ISO 3166-1 alpha-2. Al menos uno obligatorio en alta; no es nacionalidad ni país de audiencia. Alimenta las lentes SERP local_home en Brand Discovery.',
+    example: ['CO', 'US'],
+    type: [String],
+    minItems: 1,
   })
-  @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.trim().toUpperCase() : value,
-  )
-  @IsString()
-  @IsNotEmpty()
-  @IsISO31661Alpha2()
-  country!: string;
+  @Transform(({ value }: { value: unknown }) => {
+    if (!Array.isArray(value)) {
+      return value;
+    }
+    return value.map((item) =>
+      typeof item === 'string' ? item.trim().toUpperCase() : item,
+    );
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(30)
+  @ArrayUnique()
+  @IsString({ each: true })
+  @IsISO31661Alpha2({ each: true })
+  countries!: string[];
 
   @ApiPropertyOptional({
     description: 'Código de idioma ISO 639-1',

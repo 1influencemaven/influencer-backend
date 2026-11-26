@@ -99,7 +99,11 @@ const influencerResponseSchema = {
     },
     tiktok: { type: 'string', example: '@laurafit', nullable: true },
     youtube: { type: 'string', example: '@LauraFitChannel', nullable: true },
-    country: { type: 'string', example: 'ES', nullable: true },
+    countries: {
+      type: 'array',
+      items: { type: 'string' },
+      example: ['ES', 'CO'],
+    },
     language: { type: 'string', example: 'es', nullable: true },
     niche: { type: 'string', example: 'Fitness', nullable: true },
     subNiche: {
