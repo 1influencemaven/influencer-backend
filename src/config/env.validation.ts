@@ -223,7 +223,7 @@ export const envValidationSchema = Joi.object({
   BRIGHTDATA_SCRAPER_POLL_TIMEOUT_MS: Joi.number()
     .integer()
     .min(5000)
-    .default(120000),
+    .default(300000),
 
   BRIGHTDATA_SCRAPER_POLL_INTERVAL_MS: Joi.number()
     .integer()

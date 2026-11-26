@@ -52,7 +52,8 @@ export class BrightDataDatasetClient {
       this.configService.get<number>('BRIGHTDATA_SEARCH_TIMEOUT_MS') ?? 60_000;
     const pollTimeoutMs =
       this.configService.get<number>('BRIGHTDATA_SCRAPER_POLL_TIMEOUT_MS') ??
-      120_000;
+      // Instagram snapshots usually take ~70 s but sometimes exceed 2 min.
+      300_000;
     const pollIntervalMs =
       this.configService.get<number>('BRIGHTDATA_SCRAPER_POLL_INTERVAL_MS') ??
       3_000;
