@@ -1,9 +1,23 @@
 # Pending items — Email Accounts module and production
 
-- **Last updated:** 2026-11-25
+- **Last updated:** 2026-11-26
 - **Current state:**
   - The Saleshandy (Email Accounts) module is deployed in production under **Campaigns**: backend PR #9 and frontend PR #5.
   - Review against the user stories: [revision-hu-ea.md](./revision-hu-ea.md). 36 of 42 criteria are met; the rest are listed below.
+
+## 0. Next production deploy (tested locally on 2026-11-26, not pushed yet)
+
+| # | Change | Branch | Production notes |
+|---|---|---|---|
+| 0.1 | **Fields module** (HU-FLD-001..005): **Fields** tab in Campaigns, sync with Saleshandy, create/edit/disable. | backend `module-fields`, frontend `module-fields` | Run the migration `20261125120000_add_custom_fields` (`prisma migrate deploy` runs on startup). The first visit to the tab imports the Saleshandy fields. |
+| 0.2 | **Lead Discovery prompt** wired to the email agents (brands and agencies). | backend `feat/lead-discovery-prompt` | Rebuild `ai-contracts` and `influencer-ai` (the Dockerfile already does it). Settings → Lead Discovery prompt now takes effect. |
+| 0.3 | Placeholder emails are no longer saved (`abc@domain.com`, `you@yourcompany.com`…). | backend `feat/lead-discovery-prompt` | — |
+| 0.4 | The API shows "is required" before length errors. This also resolves item 1.5. | backend `module-fields` | — |
+| 0.5 | **Instagram research:** the wait for the Bright Data snapshot goes up from 2 to 5 minutes. Snapshots sometimes take more than 2 min, and the run failed with `PROVIDER_TIMEOUT` even though the (already billed) result finished moments later. | backend `fix/instagram-poll-timeout` | Comes with the code. If you need it before the PR, add `BRIGHTDATA_SCRAPER_POLL_TIMEOUT_MS=300000` to the server `.env` (backend service) and recreate the container. |
+| 0.6 | *(Pending decision)* Field write permissions: today only ADMIN can create or edit fields. | — | To be confirmed with the client. |
+| 0.7 | *(Idea)* When a brand only has a partnerships **form**, save the form URL as a contact channel. | — | Seen in Guitar Center and Mountain Valley Spring during the prompt tests. |
+
+Local verification: Fields against the real Saleshandy (read and sync only; creating and editing fields is pending because the API cannot delete them). Lead Discovery A/B on 5 brands with Ollama and with Claude Haiku: same results with both prompts, so the current prompt stays.
 
 ## 1. Saleshandy module (HU-EA)
 
@@ -13,7 +27,7 @@
 | 1.2 | **Live test of the write operations:** bulk connect, reconnect, a real bulk update, and job tracking until `isCompleted` with the CSV report. Only validations and calls with nonexistent ids have been tested. | HU-EA-002, 003, 004, 005 | High | Approval to touch real mailboxes, or test mailboxes. |
 | 1.3 | **Show the job error** when the status call to Saleshandy fails. Today the job stays "processing" until it is marked `FAILED` after 6 h, and the UI shows no error in the meantime. | HU-EA-004 CA-05 | Medium | Code change: `getJob` (backend) and `useEmailAccountJobs` / `EmailAccountJobs` (frontend). |
 | 1.4 | *(Optional)* Parse the CSV report to show in the app which accounts failed and why. | HU-EA-004 CA-05 | Low | Backend proxy with a Saleshandy domain allowlist, plus a results table. |
-| 1.5 | *(Minor)* When a field is missing, the API returns the first class-validator message ("must be shorter than…") instead of "is required". | HU-EA-002 / 006 | Low | Order or customize the DTO validation messages. |
+| 1.5 | ~~*(Minor)*~~ **Resolved in 0.4.** When a field is missing, the API returns the first class-validator message ("must be shorter than…") instead of "is required". | HU-EA-002 / 006 | Low | Order or customize the DTO validation messages. |
 | 1.6 | *(Optional)* Expose the "added by" filter, which Saleshandy supports, and a page-size selector. | HU-EA-001 CA-03 / CA-04 | Low | Frontend only. |
 | 1.7 | The **Sequences** and **Prospects** tabs in Campaigns are marked "soon". | Outside HU-EA | — | Future user stories (outreach). |
 
