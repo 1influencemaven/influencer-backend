@@ -30,6 +30,7 @@ import { LeadDiscoveryModule } from './lead-discovery/lead-discovery.module';
 import { EmailAccountsModule } from './email-accounts/email-accounts.module';
 import { FieldsModule } from './fields/fields.module';
 import { ProspectsModule } from './prospects/prospects.module';
+import { TemplatesModule } from './templates/templates.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { ProspectsModule } from './prospects/prospects.module';
     EmailAccountsModule,
     FieldsModule,
     ProspectsModule,
+    TemplatesModule,
     LeadDiscoveryModule,
     LoggerModule,
     HealthModule,
