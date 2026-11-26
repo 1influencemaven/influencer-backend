@@ -163,6 +163,7 @@ model User {
   /// Talents where this user is the assigned manager (Talent Manager).
   managedInfluencers            Influencer[]                   @relation("InfluencerManager")
   emailAccountJobs              EmailAccountJob[]              @relation("EmailAccountJobInitiator")
+  customFieldSyncRuns           CustomFieldSyncRun[]           @relation("CustomFieldSyncInitiator")
 }
 
 model RefreshToken {
@@ -667,4 +668,87 @@ model EmailAccountJob {
 
   @@index([status])
   @@index([createdAt])
+}
+
+/// Saleshandy prospect field data types (HU-FLD-001 CA-02).
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  LONG_TEXT
+  DROPDOWN
+  CURRENCY
+}
+
+/// Saleshandy built-in field vs user-created field (HU-FLD-001 CA-03).
+enum CustomFieldOrigin {
+  SYSTEM
+  CUSTOM
+}
+
+/// Why a field is inactive: disabled by an admin, or gone from Saleshandy.
+enum CustomFieldDisabledReason {
+  MANUAL
+  REMOVED_IN_SALESHANDY
+}
+
+enum CustomFieldSyncStatus {
+  COMPLETED
+  FAILED
+}
+
+enum CustomFieldSyncTrigger {
+  MANUAL
+  BOOTSTRAP
+  AFTER_WRITE
+}
+
+/// Local catalog of Saleshandy prospect fields / template variables
+/// (HU-FLD-001..005). Influencer profile data never lives here (FLD-005 CA-05).
+/// Saleshandy's GET /fields does not return `fallbackText` nor `metadata`, so
+/// this table is the only source of truth for them.
+model CustomField {
+  id                String                     @id @default(uuid())
+  /// Stable identifier for mappings / template variables. Immutable.
+  key               String                     @unique
+  label             String
+  fieldType         CustomFieldType
+  origin            CustomFieldOrigin          @default(CUSTOM)
+  fallbackText      String?
+  /// Saleshandy public field id (unique when present).
+  saleshandyFieldId String?                    @unique
+  /// Saleshandy `mappingDefaultField` for system fields (e.g. `firstName`).
+  systemMapping     String?
+  /// `{ options: string[] }` (DROPDOWN) or `{ currencyCode: string }` (CURRENCY).
+  metadata          Json?
+  /// Field tags (own namespace, not Prospect Tags).
+  tags              String[]                   @default([])
+  isActive          Boolean                    @default(true)
+  disabledReason    CustomFieldDisabledReason?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  @@index([origin, isActive])
+  @@index([fieldType])
+}
+
+/// Audit of Saleshandy field synchronizations (HU-FLD-005 CA-04).
+model CustomFieldSyncRun {
+  id               String                 @id @default(uuid())
+  status           CustomFieldSyncStatus
+  trigger          CustomFieldSyncTrigger
+  remoteCount      Int                    @default(0)
+  createdCount     Int                    @default(0)
+  updatedCount     Int                    @default(0)
+  unchangedCount   Int                    @default(0)
+  deactivatedCount Int                    @default(0)
+  errorCode        String?
+  errorMessage     String?
+  initiatedById    String?
+  initiatedBy      User?                  @relation("CustomFieldSyncInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+  startedAt        DateTime               @default(now())
+  completedAt      DateTime?
+
+  @@index([startedAt])
 }
