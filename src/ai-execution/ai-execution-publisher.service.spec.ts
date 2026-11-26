@@ -502,6 +502,32 @@ describe('AiExecutionPublisherService', () => {
       expect(add.mock.calls[0][1].context.resourceType).toBe(
         'CONTACT_RESEARCH_RUN',
       );
+      expect(parsed.instructions.business).toBe('');
+    });
+
+    it('includes promptInstructions and hash in request.instructions when provided', async () => {
+      const add = jest.fn().mockResolvedValue({ id: 'job' });
+      const service = buildService(add);
+      const promptInstructions = 'Prioritize partnerships@ on official domain';
+
+      await service.publishContactResearchFindBrandEmails({
+        runId: 'run-contact-2',
+        userId: 'user-1',
+        influencerId: influencer.id,
+        brandName: 'Demo Co',
+        website: 'https://demo.co',
+        domain: 'demo.co',
+        promptInstructions,
+      });
+
+      const parsed = parseAiExecutionRequest(add.mock.calls[0][1]);
+      expect(parsed.instructions.business).toBe(promptInstructions);
+      expect(parsed.instructions.businessHash).toBe(
+        createHash('sha256')
+          .update(promptInstructions)
+          .digest('hex')
+          .slice(0, 16),
+      );
     });
   });
 
@@ -574,6 +600,32 @@ describe('AiExecutionPublisherService', () => {
       expect(add.mock.calls[0][1].idempotencyKey).toMatch(/^agency-emails:/);
       expect(add.mock.calls[0][1].context.resourceType).toBe(
         'CONTACT_RESEARCH_RUN',
+      );
+    });
+
+    it('includes promptInstructions and hash on FIND_AGENCY_EMAILS when provided', async () => {
+      const add = jest.fn().mockResolvedValue({ id: 'job' });
+      const service = buildService(add);
+      const promptInstructions = 'Agency commercial contacts only';
+
+      await service.publishContactResearchFindAgencyEmails({
+        runId: 'run-agency-2',
+        userId: 'user-1',
+        influencerId: influencer.id,
+        agencyId: 'agency-1',
+        agencyName: 'Creator Partners',
+        website: 'https://creatorpartners.example',
+        domain: 'creatorpartners.example',
+        promptInstructions,
+      });
+
+      const parsed = parseAiExecutionRequest(add.mock.calls[0][1]);
+      expect(parsed.instructions.business).toBe(promptInstructions);
+      expect(parsed.instructions.businessHash).toBe(
+        createHash('sha256')
+          .update(promptInstructions)
+          .digest('hex')
+          .slice(0, 16),
       );
     });
   });

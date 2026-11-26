@@ -13,6 +13,7 @@ import {
   BrandCandidateStatus,
   LeadDiscoveryStatus,
 } from '../generated/prisma/enums';
+import { DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS } from '../ai/prompts/generate-lead-discovery.prompt';
 import { CONTACT_DISCOVERY_JOBS } from '../bullmq/job-types';
 import { QUEUES } from '../bullmq/queue.constants';
 import { MASTRA_CONTACT_EMAILS_PROVIDER_ID } from './constants';
@@ -30,6 +31,8 @@ describe('ContactDiscoveryService', () => {
   };
 
   const queue = { add: jest.fn() };
+  const getLeadDiscoveryInstructions = jest.fn();
+  const aiPromptsService = { getLeadDiscoveryInstructions };
   const configService = {
     get: jest.fn((key: string) => {
       if (key === 'MAX_BRAND_BUSINESS_CONTACT_PAGES') return 12;
@@ -82,10 +85,14 @@ describe('ContactDiscoveryService', () => {
     prisma.leadDiscoveryRun.findFirst.mockResolvedValue(null);
     prisma.leadDiscoveryRun.create.mockResolvedValue(runRow);
     queue.add.mockResolvedValue({ id: contactDiscoveryJobId(runRow.id) });
+    getLeadDiscoveryInstructions.mockResolvedValue(
+      'Custom Lead Discovery prompt snapshot',
+    );
     service = new ContactDiscoveryService(
       prisma as never,
       configService,
       queue as never,
+      aiPromptsService as never,
     );
   });
 
@@ -118,6 +125,7 @@ describe('ContactDiscoveryService', () => {
         website: 'https://acme.com',
         domain: 'acme.com',
         maxPages: 12,
+        promptInstructions: 'Custom Lead Discovery prompt snapshot',
       }),
       expect.objectContaining({
         jobId: contactDiscoveryJobId('run-bbc-1'),
@@ -125,7 +133,26 @@ describe('ContactDiscoveryService', () => {
         backoff: { type: 'exponential', delay: 2000 },
       }),
     );
+    expect(getLeadDiscoveryInstructions).toHaveBeenCalledTimes(1);
     expect(queue.add.mock.calls[0][0]).not.toBe('find-leads');
+  });
+
+  it('falls back to DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS when AiPromptsService is omitted', async () => {
+    const fallbackService = new ContactDiscoveryService(
+      prisma as never,
+      configService,
+      queue as never,
+    );
+
+    await fallbackService.startBbcDiscovery({ brandCandidateIds: ['b1'] });
+
+    expect(queue.add).toHaveBeenCalledWith(
+      CONTACT_DISCOVERY_JOBS.DISCOVER_BUSINESS_CONTACTS,
+      expect.objectContaining({
+        promptInstructions: DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
+      }),
+      expect.any(Object),
+    );
   });
 
   it('rejects non-APPROVED brands', async () => {

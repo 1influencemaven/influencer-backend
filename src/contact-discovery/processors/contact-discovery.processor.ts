@@ -55,8 +55,15 @@ export class ContactDiscoveryProcessor extends WorkerHost {
       return { skipped: true };
     }
 
-    const { runId, brandCandidateId, influencerId, website, domain, maxPages } =
-      job.data;
+    const {
+      runId,
+      brandCandidateId,
+      influencerId,
+      website,
+      domain,
+      maxPages,
+      promptInstructions,
+    } = job.data;
 
     if (!runId || !brandCandidateId || !website) {
       throw new UnrecoverableError(
@@ -124,6 +131,7 @@ export class ContactDiscoveryProcessor extends WorkerHost {
       niche,
       seedUrls,
       ...(maxPages != null ? { maxPages } : {}),
+      ...(promptInstructions !== undefined ? { promptInstructions } : {}),
     });
 
     const interpreted = interpretBbcDiscoveryResult(result);

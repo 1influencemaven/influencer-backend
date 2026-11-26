@@ -9,6 +9,10 @@ jest.mock('../agents/contact-research.agent', () => ({
   })),
 }));
 
+import {
+  DEFAULT_LEAD_DISCOVERY_BUSINESS_INSTRUCTIONS,
+  LEAD_DISCOVERY_INSTRUCTIONS_MAX_CHARS,
+} from '../prompts/lead-discovery-business-instructions';
 import { runContactResearchFindBrandEmails } from './run-find-brand-emails';
 
 const baseEnv: InfluencerAiEnv = {
@@ -181,5 +185,109 @@ describe('runContactResearchFindBrandEmails seed path', () => {
     expect(openPage.mock.calls.every(([url]) => String(url).includes('acme.test'))).toBe(
       true,
     );
+  });
+
+  it('passes request.instructions.business into LLM prompt with hard rules and ignores invented emails', async () => {
+    const generate = jest.fn().mockResolvedValue({
+      object: {
+        outcome: 'RESULTS_FOUND',
+        summary: 'Checked site',
+        // Model tries to invent an email not present in session
+        emails: [{ email: 'invented@acme.test', sourceUrl: 'https://acme.test' }],
+      },
+    });
+    const client = {
+      isConfigured: () => true,
+      openPage: jest.fn(async () => ({
+        ok: true,
+        httpStatus: 200,
+        bodyLength: 40,
+        elapsedMs: 1,
+        html: '<a href="mailto:partnerships@acme.test">p</a>',
+        emptyBody: false,
+      })),
+      searchWeb: jest.fn().mockResolvedValue({
+        ok: true,
+        organics: [],
+        httpStatus: 200,
+        bodyLength: 2,
+        elapsedMs: 1,
+        emptyBody: false,
+      }),
+    } as unknown as BrightDataToolsClient;
+
+    const req = request();
+    req.instructions = {
+      business: 'Focus on Spanish-speaking creator partnerships teams.',
+      businessHash: '1'.repeat(16),
+    };
+
+    const result = await runContactResearchFindBrandEmails(baseEnv, req, {
+      client,
+      createAgent: () => ({ generate }) as never,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(generate).toHaveBeenCalledTimes(1);
+    const [promptArg, optsArg] = generate.mock.calls[0];
+    expect(String(promptArg)).toContain(
+      'Focus on Spanish-speaking creator partnerships teams.',
+    );
+    expect(String(promptArg)).toContain(
+      'RF-01: Never invent emails or people',
+    );
+    expect(optsArg.structuredOutput).toBeDefined();
+    // RF-01 runtime guard: invented email is dropped; only literal session email returned
+    expect(result.output.emails.map((e) => e.email)).toEqual([
+      'partnerships@acme.test',
+    ]);
+  });
+
+  it('uses default Lead Discovery instructions when request.instructions.business is empty and truncates oversized ones', async () => {
+    const generate = jest.fn().mockResolvedValue({
+      object: { outcome: 'NO_MATCHES', summary: 'none', emails: [] },
+    });
+    const client = {
+      isConfigured: () => true,
+      openPage: jest.fn(async () => ({
+        ok: true,
+        httpStatus: 200,
+        bodyLength: 20,
+        elapsedMs: 1,
+        html: '<html><body>no mail</body></html>',
+        emptyBody: false,
+      })),
+      searchWeb: jest.fn().mockResolvedValue({
+        ok: true,
+        organics: [],
+        httpStatus: 200,
+        bodyLength: 2,
+        elapsedMs: 1,
+        emptyBody: false,
+      }),
+    } as unknown as BrightDataToolsClient;
+
+    await runContactResearchFindBrandEmails(baseEnv, request(), {
+      client,
+      createAgent: () => ({ generate }) as never,
+    });
+    expect(String(generate.mock.calls[0][0])).toContain(
+      DEFAULT_LEAD_DISCOVERY_BUSINESS_INSTRUCTIONS,
+    );
+
+    const longReq = request();
+    longReq.instructions = {
+      business: `LONG_START_${'Z'.repeat(LEAD_DISCOVERY_INSTRUCTIONS_MAX_CHARS + 1000)}_LONG_END`,
+      businessHash: '2'.repeat(16),
+    };
+    await runContactResearchFindBrandEmails(baseEnv, longReq, {
+      client,
+      createAgent: () => ({ generate }) as never,
+    });
+    const longPrompt = String(generate.mock.calls[1][0]);
+    expect(longPrompt).toContain('LONG_START_');
+    expect(longPrompt).not.toContain('LONG_END');
+    expect(longPrompt).toContain('[...truncated]');
   });
 });

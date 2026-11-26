@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -15,6 +16,8 @@ import {
   LeadDiscoveryStatus,
 } from '../generated/prisma/enums';
 
+import { DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS } from '../ai/prompts/generate-lead-discovery.prompt';
+import { AiPromptsService } from '../ai-prompts/ai-prompts.service';
 import { CONTACT_DISCOVERY_JOBS } from '../bullmq/job-types';
 import { QUEUES } from '../bullmq/queue.constants';
 import { PrismaService } from '../prisma/prisma.service';
@@ -73,6 +76,8 @@ export class ContactDiscoveryService {
     private readonly configService: ConfigService,
     @InjectQueue(QUEUES.CONTACT_DISCOVERY)
     private readonly contactDiscoveryQueue: Queue,
+    @Optional()
+    private readonly aiPromptsService?: AiPromptsService,
   ) {}
 
   /**
@@ -116,6 +121,8 @@ export class ContactDiscoveryService {
       influencer: { id: string; name: string };
     }> = [];
 
+    let promptInstructionsSnapshot: string | undefined;
+
     for (const brandCandidateId of dto.brandCandidateIds) {
       const candidate = await this.prisma.brandCandidate.findUnique({
         where: { id: brandCandidateId },
@@ -155,6 +162,12 @@ export class ContactDiscoveryService {
         );
       }
 
+      if (promptInstructionsSnapshot === undefined) {
+        promptInstructionsSnapshot = this.aiPromptsService
+          ? await this.aiPromptsService.getLeadDiscoveryInstructions()
+          : DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS;
+      }
+
       const run = await this.prisma.leadDiscoveryRun.create({
         data: {
           brandCandidateId,
@@ -174,6 +187,7 @@ export class ContactDiscoveryService {
         website: candidate.website,
         domain: candidate.domain,
         maxPages,
+        promptInstructions: promptInstructionsSnapshot,
       };
 
       try {

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   AGENCY_CONTACT_DEFAULT_PRIORITY_ROLES,
@@ -7,6 +7,7 @@ import {
   type ContactResearchPageSnapshot,
 } from '@influence-maven/ai-contracts';
 
+import { AiPromptsService } from '../ai-prompts/ai-prompts.service';
 import { AiExecutionPublisherService } from '../ai-execution/ai-execution-publisher.service';
 import { AiExecutionWaitError } from '../ai-execution/ai-execution-result-wait.errors';
 import { AiExecutionResultWaitService } from '../ai-execution/ai-execution-result-wait.service';
@@ -85,6 +86,8 @@ export type AgencyContactPeopleResearchInput = {
   markets?: string[];
   /** Same-run emails-pass metadata (snapshots bridge); never gates execution. */
   emailsPass?: Track2CEmailsPassMetadata;
+  /** Optional snapshot of Settings Lead Discovery instructions. */
+  promptInstructions?: string;
 };
 
 /**
@@ -125,6 +128,8 @@ export class AgencyContactPeopleResearchService {
     private readonly resultWait: AiExecutionResultWaitService,
     private readonly agencyContacts: AgencyContactPersistenceService,
     private readonly configService: ConfigService,
+    @Optional()
+    private readonly aiPromptsService?: AiPromptsService,
   ) {}
 
   async researchEligibleAgencies(
@@ -192,6 +197,12 @@ export class AgencyContactPeopleResearchService {
       };
     }
 
+    const promptInstructions =
+      input.promptInstructions?.trim() ||
+      (this.aiPromptsService
+        ? await this.aiPromptsService.getLeadDiscoveryInstructions()
+        : undefined);
+
     // Agencies are independent: research up to AGENCY_RESEARCH_CONCURRENCY at once
     // (order of results is preserved for metadata).
     const agencyResults = await mapPool(
@@ -254,6 +265,7 @@ export class AgencyContactPeopleResearchService {
           maxAgencyPages,
           ocrEnabled,
           pageSnapshots: snapshotByAgency.get(agency.id),
+          promptInstructions,
         });
       },
     );
@@ -279,6 +291,7 @@ export class AgencyContactPeopleResearchService {
     maxAgencyPages: number;
     ocrEnabled: boolean;
     pageSnapshots?: ContactResearchPageSnapshot[];
+    promptInstructions?: string;
   }): Promise<Track2CPeoplePassAgencyResult> {
     const base: Track2CPeoplePassAgencyResult = {
       agencyId: params.agencyId,
@@ -314,6 +327,9 @@ export class AgencyContactPeopleResearchService {
           maxProfilesToScrape: params.maxProfiles,
           maxAgencyPages: params.maxAgencyPages,
           ocrEnabled: params.ocrEnabled,
+          ...(params.promptInstructions
+            ? { promptInstructions: params.promptInstructions }
+            : {}),
           ...(params.pageSnapshots?.length
             ? { pageSnapshots: params.pageSnapshots }
             : {}),

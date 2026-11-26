@@ -10,6 +10,10 @@ jest.mock('../agents/contact-research-agency-emails.agent', () => ({
 }));
 
 import {
+  DEFAULT_LEAD_DISCOVERY_BUSINESS_INSTRUCTIONS,
+  LEAD_DISCOVERY_INSTRUCTIONS_MAX_CHARS,
+} from '../prompts/lead-discovery-business-instructions';
+import {
   filterOnAgencyDomainSeedUrls,
   runContactResearchFindAgencyEmails,
 } from './run-find-agency-emails';
@@ -481,6 +485,70 @@ describe('runContactResearchFindAgencyEmails (2C.4.4)', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.message).toMatch(/FIND_BRAND_PEOPLE/);
+  });
+
+  it('passes request.instructions.business into agency LLM prompt, defaults when empty, and truncates oversized text', async () => {
+    const generate = jest.fn().mockResolvedValue({
+      object: { outcome: 'NO_MATCHES', summary: 'none', emails: [] },
+    });
+    const client = {
+      isConfigured: () => true,
+      openPage: jest.fn(async () => ({
+        ok: true,
+        httpStatus: 200,
+        bodyLength: 20,
+        elapsedMs: 1,
+        html: '<html><body>no mail</body></html>',
+        emptyBody: false,
+      })),
+      searchWeb: jest.fn().mockResolvedValue({
+        ok: true,
+        organics: [],
+        httpStatus: 200,
+        bodyLength: 2,
+        elapsedMs: 1,
+        emptyBody: false,
+      }),
+    } as unknown as BrightDataToolsClient;
+
+    const customReq = request();
+    customReq.instructions = {
+      business: 'Prioritize LATAM influencer agency campaign desks.',
+      businessHash: 'a'.repeat(16),
+    };
+    const r1 = await runContactResearchFindAgencyEmails(baseEnv, customReq, {
+      client,
+      createAgent: () => ({ generate }) as never,
+    });
+    expect(r1.ok).toBe(true);
+    expect(String(generate.mock.calls[0][0])).toContain(
+      'Prioritize LATAM influencer agency campaign desks.',
+    );
+    expect(String(generate.mock.calls[0][0])).toContain(
+      'RF-01: Never invent emails or people',
+    );
+
+    await runContactResearchFindAgencyEmails(baseEnv, request(), {
+      client,
+      createAgent: () => ({ generate }) as never,
+    });
+    expect(String(generate.mock.calls[1][0])).toContain(
+      DEFAULT_LEAD_DISCOVERY_BUSINESS_INSTRUCTIONS,
+    );
+
+    const longReq = request();
+    longReq.instructions = {
+      business: `AGENCY_START_${'Y'.repeat(LEAD_DISCOVERY_INSTRUCTIONS_MAX_CHARS + 500)}_AGENCY_END`,
+      businessHash: 'b'.repeat(16),
+    };
+    await runContactResearchFindAgencyEmails(baseEnv, longReq, {
+      client,
+      createAgent: () => ({ generate }) as never,
+    });
+    const longPrompt = String(generate.mock.calls[2][0]);
+    expect(longPrompt).toContain('AGENCY_START_');
+    expect(longPrompt).not.toContain('AGENCY_END');
+    expect(longPrompt).toContain('[...truncated]');
   });
 });
 

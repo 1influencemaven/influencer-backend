@@ -4,6 +4,7 @@ import { BullModule } from '@nestjs/bullmq';
 
 import { AgencyDiscoveryModule } from '../agency-discovery/agency-discovery.module';
 import { AiExecutionModule } from '../ai-execution/ai-execution.module';
+import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { QUEUES } from '../bullmq/queue.constants';
 import { BrandBusinessContactService } from '../lead-discovery/brand-business-contact.service';
 import { ContactChannelService } from '../lead-discovery/contact-channel.service';
@@ -20,6 +21,7 @@ import { SaleshandyEnrichmentService } from './saleshandy/saleshandy-enrichment.
 @Module({
   imports: [
     ConfigModule,
+    AiPromptsModule,
     AiExecutionModule,
     AgencyDiscoveryModule,
     SaleshandyModule,

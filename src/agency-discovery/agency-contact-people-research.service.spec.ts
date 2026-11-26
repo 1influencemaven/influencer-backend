@@ -377,4 +377,21 @@ describe('AgencyContactPeopleResearchService (2C.4.6)', () => {
     expect(result.contactsPersistFailed).toBe(1);
     expect(result.outcome).toBe('PARTIAL');
   });
+
+  it('forwards promptInstructions to publishContactResearchFindAgencyPeople', async () => {
+    influencerAgencyFindMany.mockResolvedValue([eligibleRow()]);
+    waitForAiExecutionResult.mockResolvedValue(mastraPeopleResult([]));
+
+    await service.researchEligibleAgencies({
+      runId: 'run-1',
+      influencerId: 'inf-1',
+      promptInstructions: 'Agency people prompt snapshot',
+    });
+
+    expect(publishContactResearchFindAgencyPeople).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptInstructions: 'Agency people prompt snapshot',
+      }),
+    );
+  });
 });

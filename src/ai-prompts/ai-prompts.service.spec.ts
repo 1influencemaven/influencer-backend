@@ -6,6 +6,7 @@ jest.mock('../prisma/prisma.service', () => ({
 
 import { DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS } from '../ai/prompts/generate-brand-discovery.prompt';
 import { DEFAULT_IBP_INSTRUCTIONS } from '../ai/prompts/generate-ibp.prompt';
+import { DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS } from '../ai/prompts/generate-lead-discovery.prompt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiPromptsService } from './ai-prompts.service';
 
@@ -18,6 +19,10 @@ describe('AiPromptsService', () => {
       upsert: jest.fn(),
     },
     brandDiscoveryPromptTemplate: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+    },
+    leadDiscoveryPromptTemplate: {
       findUnique: jest.fn(),
       upsert: jest.fn(),
     },
@@ -186,6 +191,78 @@ describe('AiPromptsService', () => {
 
       expect(result.isDefault).toBe(true);
       expect(result.instructions).toBe(DEFAULT_BRAND_DISCOVERY_INSTRUCTIONS);
+    });
+  });
+
+  describe('leadDiscoveryPromptTemplate', () => {
+    it('returns default instructions when no template exists', async () => {
+      prismaService.leadDiscoveryPromptTemplate.findUnique.mockResolvedValue(
+        null,
+      );
+
+      const template = await service.getLeadDiscoveryTemplate();
+      const instructions = await service.getLeadDiscoveryInstructions();
+
+      expect(template.instructions).toBe(DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS);
+      expect(template.isDefault).toBe(true);
+      expect(instructions).toBe(DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS);
+    });
+
+    it('returns stored template instructions and falls back to default if whitespace', async () => {
+      prismaService.leadDiscoveryPromptTemplate.findUnique.mockResolvedValueOnce(
+        {
+          id: 'default',
+          instructions: '  Custom Lead Discovery instructions  ',
+          updatedById: 'admin-1',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      );
+      expect(await service.getLeadDiscoveryInstructions()).toBe(
+        'Custom Lead Discovery instructions',
+      );
+
+      prismaService.leadDiscoveryPromptTemplate.findUnique.mockResolvedValueOnce(
+        {
+          id: 'default',
+          instructions: '   ',
+          updatedById: 'admin-1',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      );
+      expect(await service.getLeadDiscoveryInstructions()).toBe(
+        DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
+      );
+    });
+
+    it('updates and resets Lead Discovery template', async () => {
+      prismaService.leadDiscoveryPromptTemplate.upsert.mockResolvedValueOnce({
+        id: 'default',
+        instructions: 'Updated Lead Discovery',
+        updatedById: 'admin-1',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const updated = await service.updateLeadDiscoveryTemplate(
+        { instructions: '  Updated Lead Discovery  ' },
+        'admin-1',
+      );
+      expect(updated.instructions).toBe('Updated Lead Discovery');
+      expect(updated.isDefault).toBe(false);
+
+      prismaService.leadDiscoveryPromptTemplate.upsert.mockResolvedValueOnce({
+        id: 'default',
+        instructions: DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
+        updatedById: 'admin-1',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const reset = await service.resetLeadDiscoveryTemplate('admin-1');
+      expect(reset.isDefault).toBe(true);
+      expect(reset.instructions).toBe(DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS);
     });
   });
 });

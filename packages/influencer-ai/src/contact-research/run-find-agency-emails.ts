@@ -352,6 +352,7 @@ export async function runContactResearchFindAgencyEmails(
       preferredSeedUrls: seedUrls,
       remainingSearches: Math.max(0, maxSerpQueries - session.serpCalls),
       remainingPages: Math.max(0, maxPages - session.pageCalls),
+      businessInstructions: request.instructions?.business,
     });
 
     const maxSteps = Math.min(20, 2 + maxSerpQueries * 2 + maxPages * 2);

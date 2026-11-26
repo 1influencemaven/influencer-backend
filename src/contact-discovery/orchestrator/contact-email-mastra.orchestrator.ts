@@ -22,6 +22,8 @@ import {
   type Track2CPeoplePassMetadata,
 } from '../../agency-discovery/agency-contact-people-research.service';
 import { AgencyDiscoveryService } from '../../agency-discovery/agency-discovery.service';
+import { DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS } from '../../ai/prompts/generate-lead-discovery.prompt';
+import { AiPromptsService } from '../../ai-prompts/ai-prompts.service';
 import { AiExecutionPublisherService } from '../../ai-execution/ai-execution-publisher.service';
 import { AiExecutionWaitError } from '../../ai-execution/ai-execution-result-wait.errors';
 import { AiExecutionResultWaitService } from '../../ai-execution/ai-execution-result-wait.service';
@@ -78,6 +80,8 @@ export type ContactEmailMastraInput = {
   userId?: string;
   /** RF-02: Brand Discovery evidenceUrls for preferred seed. */
   seedUrls?: string[];
+  /** Snapshot of Settings Lead Discovery instructions; loaded via AiPromptsService if omitted. */
+  promptInstructions?: string;
 };
 
 /** RF-02 / RF-02.1 coverage metrics (additive on searchMetadata). */
@@ -192,6 +196,8 @@ export class ContactEmailMastraOrchestrator {
     private readonly agencyContactPeople: AgencyContactPeopleResearchService,
     @Optional()
     private readonly saleshandy?: SaleshandyEnrichmentService,
+    @Optional()
+    private readonly aiPromptsService?: AiPromptsService,
   ) {}
 
   async execute(input: ContactEmailMastraInput): Promise<BbcDiscoveryResult> {
@@ -218,6 +224,11 @@ export class ContactEmailMastraOrchestrator {
         .replace(/^www\./, '') || this.domainFromWebsite(input.website);
     const brandName = input.brandName?.trim() || domain;
     const userId = input.userId ?? 'system:contact-email-mastra';
+    const promptInstructions =
+      input.promptInstructions?.trim() ||
+      (this.aiPromptsService
+        ? await this.aiPromptsService.getLeadDiscoveryInstructions()
+        : DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS);
 
     // 2C.3: always attempt Agency Discovery once (soft-isolated). It does not
     // depend on 2A, so it starts first and overlaps 2A + 2B instead of waiting
@@ -227,6 +238,7 @@ export class ContactEmailMastraOrchestrator {
       nicheFallback: input.niche,
       runId: input.runId,
       userId,
+      promptInstructions,
     });
 
     // Enrichment level 1 (Saleshandy, verified nominal emails): independent of
@@ -249,6 +261,7 @@ export class ContactEmailMastraOrchestrator {
       userId,
       maxSerpQueries,
       maxPages,
+      promptInstructions,
     });
     const contactsPersisted = phase2A.contactsCreated + phase2A.contactsUpdated;
 
@@ -330,6 +343,7 @@ export class ContactEmailMastraOrchestrator {
           maxProfiles,
           maxBrandPages,
           ocrEnabled,
+          promptInstructions,
           ...(pageSnapshotsFrom2A?.length
             ? { pageSnapshots: pageSnapshotsFrom2A }
             : {}),
@@ -570,6 +584,7 @@ export class ContactEmailMastraOrchestrator {
     userId: string;
     maxSerpQueries: number;
     maxPages: number;
+    promptInstructions: string;
   }): Promise<{
     hardFailed: boolean;
     /**
@@ -612,8 +627,15 @@ export class ContactEmailMastraOrchestrator {
       hasMedium: false,
       hasGeneral: false,
     };
-    const { input, brandName, domain, userId, maxSerpQueries, maxPages } =
-      params;
+    const {
+      input,
+      brandName,
+      domain,
+      userId,
+      maxSerpQueries,
+      maxPages,
+      promptInstructions,
+    } = params;
 
     let executionId: string;
     try {
@@ -628,6 +650,7 @@ export class ContactEmailMastraOrchestrator {
           niche: input.niche,
           maxSerpQueries,
           maxPages,
+          promptInstructions,
           ...(input.seedUrls?.length ? { seedUrls: input.seedUrls } : {}),
         });
       executionId = published.executionId;
@@ -815,6 +838,7 @@ export class ContactEmailMastraOrchestrator {
     maxProfiles: number;
     maxBrandPages: number;
     ocrEnabled: boolean;
+    promptInstructions: string;
     /** RF-04.3: optional same-run 2A snapshots (only when RF-03 runs 2B). */
     pageSnapshots?: ContactResearchPageSnapshot[];
   }): Promise<{
@@ -841,6 +865,7 @@ export class ContactEmailMastraOrchestrator {
       maxProfiles,
       maxBrandPages,
       ocrEnabled,
+      promptInstructions,
       pageSnapshots,
     } = params;
 
@@ -859,6 +884,7 @@ export class ContactEmailMastraOrchestrator {
           maxProfilesToScrape: maxProfiles,
           maxBrandPages,
           ocrEnabled,
+          promptInstructions,
           ...(pageSnapshots?.length ? { pageSnapshots } : {}),
         });
       executionId = published.executionId;
@@ -1145,6 +1171,7 @@ export class ContactEmailMastraOrchestrator {
     nicheFallback?: string | null;
     runId: string;
     userId?: string;
+    promptInstructions: string;
   }): Promise<Track2CPhaseResult> {
     const empty: Track2CPhaseResult = {
       executed: false,
@@ -1256,6 +1283,7 @@ export class ContactEmailMastraOrchestrator {
           niches,
           country: influencer.country ?? null,
           markets,
+          promptInstructions: params.promptInstructions,
         });
       } catch (error) {
         const message =
@@ -1296,6 +1324,7 @@ export class ContactEmailMastraOrchestrator {
           country: influencer.country ?? null,
           markets,
           emailsPass,
+          promptInstructions: params.promptInstructions,
         });
       } catch (error) {
         const message =
