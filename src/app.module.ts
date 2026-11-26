@@ -29,6 +29,7 @@ import { ContactDiscoveryModule } from './contact-discovery/contact-discovery.mo
 import { LeadDiscoveryModule } from './lead-discovery/lead-discovery.module';
 import { EmailAccountsModule } from './email-accounts/email-accounts.module';
 import { FieldsModule } from './fields/fields.module';
+import { ProspectsModule } from './prospects/prospects.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { FieldsModule } from './fields/fields.module';
     ContactDiscoveryModule,
     EmailAccountsModule,
     FieldsModule,
+    ProspectsModule,
     LeadDiscoveryModule,
     LoggerModule,
     HealthModule,

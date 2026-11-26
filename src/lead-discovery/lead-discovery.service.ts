@@ -2,11 +2,9 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
-import {
-  CONTACT_TIER_ORDER,
-  leadContactTier,
-} from './utils/contact-tier.util';
+import { CONTACT_TIER_ORDER, leadContactTier } from './utils/contact-tier.util';
 import type { Prisma } from '../generated/prisma/client';
 import { LeadStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,6 +17,7 @@ import {
 } from './contact-channel.service';
 import type { OutreachReadiness } from './utils/outreach-readiness.util';
 import { ContactDiscoveryService } from '../contact-discovery/contact-discovery.service';
+import { ProspectsIngestionService } from '../prospects/prospects-ingestion.service';
 import {
   BBC_BRIGHTDATA_PROVIDER_ID,
   MASTRA_CONTACT_EMAILS_PROVIDER_ID,
@@ -94,6 +93,8 @@ export class LeadDiscoveryService {
     private readonly prisma: PrismaService,
     private readonly contactChannelService: ContactChannelService,
     private readonly contactDiscoveryService: ContactDiscoveryService,
+    @Optional()
+    private readonly prospectsIngestion?: ProspectsIngestionService,
   ) {}
 
   listProviders() {
@@ -269,6 +270,9 @@ export class LeadDiscoveryService {
       return lead;
     });
 
+    // Approving a lead creates its prospect; discarding archives it (2026-11-26).
+    await this.prospectsIngestion?.onLeadStatusChanged(id, dto.status);
+
     const [withFlag] = await this.withSelectedForOutreach([updated]);
     return withFlag;
   }
@@ -358,5 +362,4 @@ export class LeadDiscoveryService {
         selectedByBrand.get(lead.brandCandidateId) === lead.id,
     }));
   }
-
 }

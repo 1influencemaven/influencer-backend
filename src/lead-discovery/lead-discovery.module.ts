@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { BrightDataModule } from '../integrations/brightdata';
 import { AgencyDiscoveryModule } from '../agency-discovery/agency-discovery.module';
 import { ContactDiscoveryModule } from '../contact-discovery/contact-discovery.module';
+import { ProspectsModule } from '../prospects/prospects.module';
 import { LeadDiscoveryController } from './lead-discovery.controller';
 import { LeadDiscoveryService } from './lead-discovery.service';
 import { ContactChannelService } from './contact-channel.service';
@@ -23,6 +24,7 @@ import { UnlockerDiagnosticsService } from './unlocker-diagnostics.service';
     BrightDataModule,
     ContactDiscoveryModule,
     AgencyDiscoveryModule,
+    ProspectsModule,
   ],
   controllers: [LeadDiscoveryController],
   providers: [
