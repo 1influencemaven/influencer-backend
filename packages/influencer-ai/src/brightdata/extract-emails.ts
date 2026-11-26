@@ -23,6 +23,13 @@ const BLOCKED_LOCAL_PARTS = new Set([
   'postmaster',
 ]);
 
+/**
+ * Template / form-placeholder domains (e.g. `abc@domain.com`, `you@yourcompany.com`).
+ * They appear literally on pages but are never real contacts.
+ */
+const PLACEHOLDER_DOMAIN_RE =
+  /^(?:[a-z0-9-]+\.)*(?:example\.(?:com|org|net)|sentry\.io|wixpress\.com)$|^(?:domain\.(?:com|net|org)|your[a-z-]*\.[a-z]{2,}|my(?:domain|company|website|site|email)\.com|email\.com|emailaddress\.com|test\.(?:com|net|org)|sample\.com|website\.com|company\.com)$/;
+
 function decodeJsUnicodeEscapes(html: string): string {
   return html.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) =>
     String.fromCharCode(parseInt(hex, 16)),
@@ -36,8 +43,8 @@ function stripTags(html: string): string {
 function isPlausibleEmail(email: string): boolean {
   const lower = email.toLowerCase();
   if (BLOCKED_SUFFIXES.some((s) => lower.endsWith(s))) return false;
-  if (lower.includes('example.com') || lower.includes('sentry.io')) return false;
-  const local = lower.split('@')[0] ?? '';
+  const [local = '', domain = ''] = lower.split('@');
+  if (PLACEHOLDER_DOMAIN_RE.test(domain)) return false;
   if (BLOCKED_LOCAL_PARTS.has(local)) return false;
   // Reject version-like locals from asset filenames (ecom-swiper@11.css already blocked)
   if (/^\d/.test(local)) return false;
