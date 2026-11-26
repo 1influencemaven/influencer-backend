@@ -261,6 +261,7 @@ describe('Brand Discovery Mastra integration (Nest pipeline)', () => {
       id: 'inf-1',
       name: 'Ada',
       niche: 'tech',
+      countries: ['ES'],
     });
     prisma.brandCandidate.findMany.mockResolvedValue([]);
     prisma.brandCandidate.createMany.mockResolvedValue({ count: 0 });
