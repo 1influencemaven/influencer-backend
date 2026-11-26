@@ -39,7 +39,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       const responseObject = exceptionResponse as Record<string, unknown>;
 
       message = Array.isArray(responseObject.message)
-        ? String(responseObject.message[0])
+        ? pickValidationMessage(responseObject.message)
         : String(responseObject.message);
       if (typeof responseObject.code === 'string') {
         code = responseObject.code;
@@ -55,4 +55,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       path: request.url,
     });
   }
+}
+
+/** "Required" errors explain a missing field better than length/format ones. */
+const REQUIRED_MESSAGE = /required|should not be empty|must be defined/i;
+
+export function pickValidationMessage(messages: unknown[]): string {
+  const list = messages.map(String);
+  return list.find((m) => REQUIRED_MESSAGE.test(m)) ?? list[0] ?? 'Bad Request';
 }
