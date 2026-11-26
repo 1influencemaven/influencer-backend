@@ -160,7 +160,7 @@ describe('ContactEmailMastraOrchestrator', () => {
     influencerFindUnique.mockResolvedValue({
       id: 'i1',
       name: 'Creator One',
-      country: 'ES',
+      countries: ['ES'],
       niche: 'home',
       subNiche: null,
       niches: ['home'],

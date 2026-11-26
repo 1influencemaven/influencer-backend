@@ -11,7 +11,7 @@ describe('CreateInfluencerDto', () => {
       name: 'Laura Martínez',
       instagram: '@laurafit_es',
       managerId: VALID_MANAGER_ID,
-      country: 'ES',
+      countries: ['ES'],
       language: 'es',
       niches: ['Fitness', 'Lifestyle'],
       followers: 180000,
@@ -35,7 +35,7 @@ describe('CreateInfluencerDto', () => {
       name: 'PIXEL SPARTAN',
       instagram: '@pixel.vnzla',
       managerId: VALID_MANAGER_ID,
-      country: 'VE',
+      countries: ['VE'],
       instagramResearch: {
         source: 'brightdata:instagram:gd_x',
         fetchedAt: '2026-11-13T20:00:00.000Z',
@@ -67,7 +67,7 @@ describe('CreateInfluencerDto', () => {
       name: 'Laura Martínez',
       instagram: '@laurafit_es',
       managerId: VALID_MANAGER_ID,
-      country: 'ES',
+      countries: ['ES'],
     });
 
     const errors = await validate(dto);
@@ -138,7 +138,7 @@ describe('CreateInfluencerDto', () => {
     const dto = plainToInstance(CreateInfluencerDto, {
       instagram: '@laurafit_es',
       managerId: VALID_MANAGER_ID,
-      country: 'ES',
+      countries: ['ES'],
     });
 
     const errors = await validate(dto);
@@ -150,7 +150,7 @@ describe('CreateInfluencerDto', () => {
     const dto = plainToInstance(CreateInfluencerDto, {
       name: 'Laura Martínez',
       managerId: VALID_MANAGER_ID,
-      country: 'ES',
+      countries: ['ES'],
     });
 
     const errors = await validate(dto);
@@ -163,12 +163,12 @@ describe('CreateInfluencerDto', () => {
       name: 'Laura Martínez',
       instagram: '@laurafit_es',
       managerId: VALID_MANAGER_ID,
-      country: 'ESP',
+      countries: ['ESP'],
     });
 
     const errors = await validate(dto);
 
-    expect(errors.some((error) => error.property === 'country')).toBe(true);
+    expect(errors.some((error) => error.property === 'countries')).toBe(true);
   });
 
   it('should fail when country is missing (P1c)', async () => {
@@ -180,7 +180,7 @@ describe('CreateInfluencerDto', () => {
 
     const errors = await validate(dto);
 
-    expect(errors.some((error) => error.property === 'country')).toBe(true);
+    expect(errors.some((error) => error.property === 'countries')).toBe(true);
   });
 
   it('should fail when country is not ISO alpha-2 (P1c)', async () => {
@@ -188,12 +188,12 @@ describe('CreateInfluencerDto', () => {
       name: 'Laura Martínez',
       instagram: '@laurafit_es',
       managerId: VALID_MANAGER_ID,
-      country: 'ZZ',
+      countries: ['ZZ'],
     });
 
     const errors = await validate(dto);
 
-    expect(errors.some((error) => error.property === 'country')).toBe(true);
+    expect(errors.some((error) => error.property === 'countries')).toBe(true);
   });
 
   it('should fail when engagement is out of range', async () => {
@@ -201,7 +201,7 @@ describe('CreateInfluencerDto', () => {
       name: 'Laura Martínez',
       instagram: '@laurafit_es',
       managerId: VALID_MANAGER_ID,
-      country: 'ES',
+      countries: ['ES'],
       engagement: 150,
     });
 
@@ -215,7 +215,7 @@ describe('CreateInfluencerDto', () => {
       name: 'Laura Martínez',
       instagram: '@laurafit_es',
       managerId: VALID_MANAGER_ID,
-      country: 'ES',
+      countries: ['ES'],
       followers: -1,
     });
 
@@ -229,7 +229,7 @@ describe('CreateInfluencerDto', () => {
       name: 'Laura Martínez',
       instagram: '@laurafit_es',
       managerId: VALID_MANAGER_ID,
-      country: 'ES',
+      countries: ['ES'],
       quarters: [
         { year: 2026, quarter: 'Q1' },
         { year: 2026, quarter: 'Q1' },

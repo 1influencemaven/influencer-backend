@@ -1158,7 +1158,7 @@ export class ContactEmailMastraOrchestrator {
         select: {
           id: true,
           name: true,
-          country: true,
+          countries: true,
           niche: true,
           subNiche: true,
           niches: true,
@@ -1196,7 +1196,7 @@ export class ContactEmailMastraOrchestrator {
           niche,
           subNiche: influencer.subNiche ?? null,
           niches,
-          country: influencer.country ?? null,
+          country: influencer.countries[0] ?? null,
           markets,
           ibpTargetSectors: influencer.idealBrandProfile?.targetSectors,
           ibpMarkets: markets,
@@ -1254,7 +1254,7 @@ export class ContactEmailMastraOrchestrator {
           userId: params.userId,
           niche,
           niches,
-          country: influencer.country ?? null,
+          country: influencer.countries[0] ?? null,
           markets,
         });
       } catch (error) {
@@ -1293,7 +1293,7 @@ export class ContactEmailMastraOrchestrator {
           userId: params.userId,
           niche,
           niches,
-          country: influencer.country ?? null,
+          country: influencer.countries[0] ?? null,
           markets,
           emailsPass,
         });

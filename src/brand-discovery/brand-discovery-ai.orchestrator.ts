@@ -94,7 +94,10 @@ export type BrandDiscoveryAiOrchestrateParams = {
   subNiche?: string | null;
   /** Multi-value niches (Talent Manager) — preferred over legacy niche alone. */
   niches?: string[] | null;
+  /** Primary / first residence country (prompts + query expansion). */
   country?: string | null;
+  /** All residence countries — each becomes a SERP local_home lens. */
+  countries?: string[] | null;
   language?: string | null;
   followers?: number | null;
   engagement?: number | null;
@@ -377,6 +380,7 @@ export class BrandDiscoveryAiOrchestrator {
     hitGeoAttribution: HitGeoAttribution[];
   }> {
     const { lenses, unresolvedRegions } = buildSerpLenses({
+      countries: params.countries,
       country: params.country,
       language: params.language,
       markets: params.ibp.markets,

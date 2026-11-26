@@ -65,7 +65,7 @@ describe('InfluencersService', () => {
     instagramNormalized: 'laurafit_es',
     tiktok: null,
     youtube: null,
-    country: 'ES',
+    countries: ['ES'],
     language: 'es',
     niche: 'Fitness',
     subNiche: 'Nutrición deportiva',
@@ -122,7 +122,7 @@ describe('InfluencersService', () => {
 
       expect(prismaService.influencer.findMany).toHaveBeenCalledWith({
         where: {
-          country: 'ES',
+          countries: { has: 'ES' },
           idealBrandProfile: { status: IbpStatus.ACTIVE },
           OR: [
             { name: { contains: 'laura', mode: 'insensitive' } },
@@ -190,7 +190,7 @@ describe('InfluencersService', () => {
       const dto = {
         name: 'Laura Martínez',
         instagram: 'https://www.instagram.com/LauraFit_ES/',
-        country: 'ES',
+        countries: ['ES'],
         niches: ['Fitness', 'Lifestyle', 'fitness'],
         managerId: 'manager-1',
         email: 'laura@example.com',
@@ -242,7 +242,7 @@ describe('InfluencersService', () => {
       await influencersService.create({
         name: 'Laura Martínez',
         instagram: '@laurafit_es',
-        country: 'ES',
+        countries: ['ES'],
         managerId: '  manager-1  ',
       });
 
@@ -276,7 +276,7 @@ describe('InfluencersService', () => {
       await influencersService.create({
         name: 'PIXEL SPARTAN',
         instagram: '@pixel.vnzla',
-        country: 'ES',
+        countries: ['ES'],
         managerId: 'manager-1',
         niches: [],
         instagramResearch: {
@@ -352,7 +352,7 @@ describe('InfluencersService', () => {
       await influencersService.create({
         name: 'Laura Martínez',
         instagram: '@laurafit_es',
-        country: 'ES',
+        countries: ['ES'],
         managerId: 'manager-1',
         followers: 1,
         instagramResearch: {
@@ -403,7 +403,7 @@ describe('InfluencersService', () => {
         influencersService.create({
           name: 'Laura Martínez',
           instagram: '@laurafit_es',
-        country: 'ES',
+        countries: ['ES'],
         } as Parameters<InfluencersService['create']>[0]),
       ).rejects.toBeInstanceOf(BadRequestException);
 
@@ -418,7 +418,7 @@ describe('InfluencersService', () => {
         influencersService.create({
           name: 'Laura Martínez',
           instagram: '@laurafit_es',
-        country: 'ES',
+        countries: ['ES'],
           managerId: null,
         } as unknown as Parameters<InfluencersService['create']>[0]),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -434,7 +434,7 @@ describe('InfluencersService', () => {
         influencersService.create({
           name: 'Laura Martínez',
           instagram: '@laurafit_es',
-        country: 'ES',
+        countries: ['ES'],
           managerId: '',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -451,7 +451,7 @@ describe('InfluencersService', () => {
         influencersService.create({
           name: 'Laura Martínez',
           instagram: '@laurafit_es',
-        country: 'ES',
+        countries: ['ES'],
           managerId: '550e8400-e29b-41d4-a716-446655440000',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -473,7 +473,7 @@ describe('InfluencersService', () => {
         influencersService.create({
           name: 'Other',
           instagram: '@laurafit_es',
-        country: 'ES',
+        countries: ['ES'],
           managerId: 'manager-1',
         }),
       ).rejects.toBeInstanceOf(ConflictException);
@@ -486,7 +486,7 @@ describe('InfluencersService', () => {
         influencersService.create({
           name: 'Bad',
           instagram: 'not a handle!!!',
-        country: 'ES',
+        countries: ['ES'],
           managerId: 'manager-1',
         }),
       ).rejects.toBeInstanceOf(BadRequestException);

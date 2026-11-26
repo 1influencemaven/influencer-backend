@@ -9,5 +9,6 @@ import { EmailAccountsService } from './email-accounts.service';
   imports: [SaleshandyModule],
   controllers: [EmailAccountsController],
   providers: [EmailAccountsService],
+  exports: [EmailAccountsService],
 })
 export class EmailAccountsModule {}

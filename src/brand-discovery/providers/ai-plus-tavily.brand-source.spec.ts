@@ -92,7 +92,8 @@ describe('AiPlusTavilyBrandSource', () => {
     const result = await source.discover(context);
 
     expect(planBrandSearch).toHaveBeenCalled();
-    expect(search).toHaveBeenCalledTimes(2);
+    // Second planned query shares category signature → mode_quota keeps 1
+    expect(search).toHaveBeenCalledTimes(1);
     expect(scoreBrandCandidates).toHaveBeenCalledWith(
       expect.objectContaining({ searchHits: [hit] }),
     );
@@ -101,11 +102,10 @@ describe('AiPlusTavilyBrandSource', () => {
     );
     expect(result.searchMetadata).toEqual({
       strategy: 'llm',
-      queries: planned,
+      queries: [planned[0]],
       plannedQueriesCount: 2,
-      validatedQueriesCount: 2,
+      validatedQueriesCount: 1,
       fallbackUsed: false,
-      // Same mock hit per query → domain dedupe keeps 1
       searchHitsCount: 1,
     });
   });
@@ -125,13 +125,13 @@ describe('AiPlusTavilyBrandSource', () => {
     const result = await source.discover(context);
 
     expect(result.searchMetadata?.plannedQueriesCount).toBe(4);
-    expect(result.searchMetadata?.validatedQueriesCount).toBe(2);
+    // listicle + mode_quota (same category as first) → 1 kept
+    expect(result.searchMetadata?.validatedQueriesCount).toBe(1);
     expect(result.searchMetadata?.queries).toEqual([
       'software brands Global creator partnerships',
-      'software companies Global affiliate program xx',
     ]);
     expect(result.searchMetadata?.fallbackUsed).toBe(false);
-    expect(search).toHaveBeenCalledTimes(2);
+    expect(search).toHaveBeenCalledTimes(1);
     expect(result.searchMetadata?.searchHitsCount).toBe(1);
   });
 

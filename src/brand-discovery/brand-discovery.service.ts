@@ -423,7 +423,8 @@ export class BrandDiscoveryService {
             niche: influencer.niche,
             subNiche: influencer.subNiche,
             niches: influencer.niches,
-            country: influencer.country,
+            country: influencer.countries?.[0] ?? null,
+            countries: influencer.countries ?? [],
             language: influencer.language,
             followers: influencer.followers,
             engagement:
@@ -557,7 +558,7 @@ export class BrandDiscoveryService {
                 influencerName: influencer.name,
                 niche: influencer.niche,
                 subNiche: influencer.subNiche,
-                country: influencer.country,
+                country: influencer.countries?.[0] ?? null,
                 language: influencer.language,
                 followers: influencer.followers,
                 engagement:

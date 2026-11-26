@@ -181,6 +181,7 @@ describe('BrandDiscoveryService.executeDiscovery', () => {
       id: 'inf-1',
       name: 'Ada',
       niche: 'tech',
+      countries: ['ES'],
     });
 
     prismaService.$transaction.mockImplementation(

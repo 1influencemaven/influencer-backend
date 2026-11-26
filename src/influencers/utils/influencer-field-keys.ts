@@ -4,7 +4,7 @@ export const INFLUENCER_FIELD_KEYS = {
   INSTAGRAM: 'instagram',
   TIKTOK: 'tiktok',
   YOUTUBE: 'youtube',
-  COUNTRY: 'country',
+  COUNTRIES: 'countries',
   LANGUAGE: 'language',
   NICHE: 'niche',
   SUB_NICHE: 'subNiche',
