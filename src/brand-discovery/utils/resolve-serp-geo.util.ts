@@ -302,6 +302,9 @@ export function parseRegionCountryConfig(
 }
 
 export type BuildSerpLensesParams = {
+  /** Preferred: all talent residence countries (ISO or legacy labels). */
+  countries?: string[] | null;
+  /** Legacy single country; used when `countries` is empty/omitted. */
   country?: string | null;
   language?: string | null;
   markets?: string[] | null;
@@ -345,12 +348,23 @@ export function buildSerpLenses(
     }
   };
 
-  const homeGl = resolveCountryGl(params.country);
-  if (homeGl && params.country?.trim()) {
+  const homeCountries = (
+    params.countries?.length
+      ? params.countries
+      : params.country
+        ? [params.country]
+        : []
+  )
+    .map((c) => c.trim())
+    .filter(Boolean);
+
+  for (const homeCountry of homeCountries) {
+    const homeGl = resolveCountryGl(homeCountry);
+    if (!homeGl) continue;
     const { hl } = hlForGl(homeGl, params.language);
     upsert({
       role: 'local_home',
-      marketLabel: params.country.trim(),
+      marketLabel: homeCountry,
       gl: homeGl,
       hl,
     });

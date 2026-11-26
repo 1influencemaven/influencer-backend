@@ -31,7 +31,7 @@ describe('mapInfluencerToIbpInput', () => {
       name: 'Ada',
       niche: 'fitness',
       subNiche: 'HIIT',
-      country: 'Spain',
+      countries: ['ES'],
       language: 'es',
       followers: 10000,
       instagram: '@ada',
@@ -42,7 +42,7 @@ describe('mapInfluencerToIbpInput', () => {
 
     expect(input.influencer.platforms).toEqual(['instagram', 'tiktok']);
     expect(input.influencer.audienceSize).toBe(10000);
-    expect(input.influencer.audienceLocation).toBe('Spain');
+    expect(input.influencer.audienceLocation).toBe('ES');
     expect(input.influencer.notes).toContain('language=es');
     expect(input.influencer.notes).toContain('instagramResearch=unavailable');
     expect(input.instagramResearchEvidence).toBeNull();

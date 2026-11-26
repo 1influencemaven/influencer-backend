@@ -10,7 +10,7 @@ type InfluencerLike = {
   niche?: string | null;
   subNiche?: string | null;
   niches?: string[] | null;
-  country?: string | null;
+  countries?: string[] | null;
   language?: string | null;
   followers?: number | null;
   /** Prisma Decimal / number / numeric string. */
@@ -57,7 +57,9 @@ export function mapInfluencerToIbpInput(
       niche: influencer.niche ?? undefined,
       platforms: platforms.length ? platforms : undefined,
       audienceSize: influencer.followers ?? undefined,
-      audienceLocation: influencer.country ?? undefined,
+      audienceLocation: influencer.countries?.length
+        ? influencer.countries.join(', ')
+        : undefined,
       audienceLanguage: influencer.language ?? undefined,
       engagementRate: toEngagementRate(influencer.engagement),
       contentStyle: influencer.subNiche ?? influencer.niche ?? undefined,
