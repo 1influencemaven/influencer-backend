@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
 import { ConfigService } from '@nestjs/config';
@@ -9,7 +10,12 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { configureSwagger } from './config/swagger.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Body parsers are registered manually so only the CSV import accepts large
+  // payloads (up to 5,000 mapped rows); every other route keeps a small limit.
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app.use('/api/v1/prospects/import-csv', json({ limit: '10mb' }));
+  app.use(json({ limit: '1mb' }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
   const configService = app.get(ConfigService);
   app.enableShutdownHooks();
 

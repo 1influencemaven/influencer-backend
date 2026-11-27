@@ -79,7 +79,8 @@ export function toSaleshandyException(
       upstreamCode,
     );
   }
-  if (status === 404) {
+  // Saleshandy answers 400 "1001: Field not found" for missing resources.
+  if (status === 404 || (status === 400 && /\bnot found\b/i.test(message))) {
     return new SaleshandyApiException(
       SALESHANDY_ERROR_CODES.NOT_FOUND,
       fallback,

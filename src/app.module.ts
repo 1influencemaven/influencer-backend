@@ -29,6 +29,9 @@ import { ContactDiscoveryModule } from './contact-discovery/contact-discovery.mo
 import { LeadDiscoveryModule } from './lead-discovery/lead-discovery.module';
 import { EmailAccountsModule } from './email-accounts/email-accounts.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { FieldsModule } from './fields/fields.module';
+import { ProspectsModule } from './prospects/prospects.module';
+import { TemplatesModule } from './templates/templates.module';
 
 @Module({
   imports: [
@@ -56,6 +59,9 @@ import { DashboardModule } from './dashboard/dashboard.module';
     BrandDiscoveryModule,
     ContactDiscoveryModule,
     EmailAccountsModule,
+    FieldsModule,
+    ProspectsModule,
+    TemplatesModule,
     LeadDiscoveryModule,
     DashboardModule,
     LoggerModule,

@@ -163,6 +163,11 @@ model User {
   /// Talents where this user is the assigned manager (Talent Manager).
   managedInfluencers            Influencer[]                   @relation("InfluencerManager")
   emailAccountJobs              EmailAccountJob[]              @relation("EmailAccountJobInitiator")
+  customFieldSyncRuns           CustomFieldSyncRun[]           @relation("CustomFieldSyncInitiator")
+  emailTemplatesCreated         EmailTemplate[]                @relation("EmailTemplateCreator")
+  emailTemplatesUpdated         EmailTemplate[]                @relation("EmailTemplateUpdater")
+  prospectsCreated              Prospect[]                     @relation("ProspectCreator")
+  prospectSyncJobs              ProspectSyncJob[]              @relation("ProspectSyncJobInitiator")
 }
 
 model RefreshToken {
@@ -213,6 +218,9 @@ model Influencer {
   quarterAssignments        InfluencerQuarterAssignment[]
   fieldProvenances          InfluencerFieldProvenance[]
   instagramResearchRuns     InstagramResearchRun[]
+  emailTemplates            EmailTemplate[]
+  prospects                 Prospect[]
+  prospectSyncJobs          ProspectSyncJob[]
 
   @@index([countries], type: Gin)
   @@index([niche])
@@ -374,6 +382,7 @@ model BrandCandidate {
   leadDiscoveryRuns     LeadDiscoveryRun[]
   leads                 Lead[]                 @relation("BrandCandidateLeads")
   brandBusinessContacts BrandBusinessContact[]
+  prospects             Prospect[]
 
   @@index([influencerId])
   @@index([discoveryRunId])
@@ -433,6 +442,7 @@ model Lead {
   contactChannels          ContactChannel[]
   createdAt                DateTime            @default(now())
   updatedAt                DateTime            @updatedAt
+  prospects                Prospect[]
 
   @@index([brandCandidateId])
   @@index([influencerId])
@@ -481,6 +491,7 @@ model BrandBusinessContact {
   metadata            Json?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+  prospects           Prospect[]
 
   @@unique([brandCandidateId, emailNormalized])
   @@index([brandCandidateId])
@@ -506,6 +517,7 @@ model Agency {
   updatedAt          DateTime           @updatedAt
   influencerAgencies InfluencerAgency[]
   contacts           AgencyContact[]
+  prospects          Prospect[]
 
   @@index([normalizedName])
   @@index([agencyType])
@@ -560,6 +572,7 @@ model AgencyContact {
   discoveredAt        DateTime            @default(now())
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
+  prospects           Prospect[]
 
   @@unique([agencyId, emailNormalized])
   @@index([agencyId])
@@ -668,4 +681,290 @@ model EmailAccountJob {
 
   @@index([status])
   @@index([createdAt])
+}
+
+/// Saleshandy prospect field data types (HU-FLD-001 CA-02).
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  LONG_TEXT
+  DROPDOWN
+  CURRENCY
+}
+
+/// Saleshandy built-in field vs user-created field (HU-FLD-001 CA-03).
+enum CustomFieldOrigin {
+  SYSTEM
+  CUSTOM
+}
+
+/// Why a field is inactive: disabled by an admin, or gone from Saleshandy.
+enum CustomFieldDisabledReason {
+  MANUAL
+  REMOVED_IN_SALESHANDY
+}
+
+enum CustomFieldSyncStatus {
+  COMPLETED
+  FAILED
+}
+
+enum CustomFieldSyncTrigger {
+  MANUAL
+  BOOTSTRAP
+  AFTER_WRITE
+}
+
+/// Local catalog of Saleshandy prospect fields / template variables
+/// (HU-FLD-001..005). Influencer profile data never lives here (FLD-005 CA-05).
+/// Saleshandy's GET /fields does not return `fallbackText` nor `metadata`, so
+/// this table is the only source of truth for them.
+model CustomField {
+  id                 String                     @id @default(uuid())
+  /// Stable identifier for mappings / template variables. Immutable.
+  key                String                     @unique
+  label              String
+  fieldType          CustomFieldType
+  origin             CustomFieldOrigin          @default(CUSTOM)
+  fallbackText       String?
+  /// Saleshandy public field id (unique when present).
+  saleshandyFieldId  String?                    @unique
+  /// Saleshandy `mappingDefaultField` for system fields (e.g. `firstName`).
+  systemMapping      String?
+  /// `{ options: string[] }` (DROPDOWN) or `{ currencyCode: string }` (CURRENCY).
+  metadata           Json?
+  /// Field tags (own namespace, not Prospect Tags).
+  tags               String[]                   @default([])
+  isActive           Boolean                    @default(true)
+  disabledReason     CustomFieldDisabledReason?
+  lastSyncedAt       DateTime?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  templateReferences EmailTemplateField[]
+  prospectValues     ProspectFieldValue[]
+
+  @@index([origin, isActive])
+  @@index([fieldType])
+}
+
+/// Audit of Saleshandy field synchronizations (HU-FLD-005 CA-04).
+model CustomFieldSyncRun {
+  id               String                 @id @default(uuid())
+  status           CustomFieldSyncStatus
+  trigger          CustomFieldSyncTrigger
+  remoteCount      Int                    @default(0)
+  createdCount     Int                    @default(0)
+  updatedCount     Int                    @default(0)
+  unchangedCount   Int                    @default(0)
+  deactivatedCount Int                    @default(0)
+  errorCode        String?
+  errorMessage     String?
+  initiatedById    String?
+  initiatedBy      User?                  @relation("CustomFieldSyncInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+  startedAt        DateTime               @default(now())
+  completedAt      DateTime?
+
+  @@index([startedAt])
+}
+
+// ============================================================
+// SALESHANDY - TEMPLATES (HU-TPL-001, HU-TPL-002)
+// ============================================================
+
+enum EmailTemplateStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+/// Reusable email template owned by a talent (HU-TPL-001). Deleted with the
+/// talent (product decision 2026-11-26). Variables are stored as stable keys
+/// (`{{firstName}}`, `{{influencer.name}}`) and exported to Saleshandy labels.
+model EmailTemplate {
+  id                  String               @id @default(uuid())
+  influencerId        String
+  influencer          Influencer           @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  name                String
+  subject             String
+  preHeader           String?
+  /// Sanitized HTML; variables as `<span data-variable-key="...">{{key}}</span>`.
+  bodyHtml            String
+  /// Plain-text version generated on save.
+  bodyText            String
+  /// `influencer.*` variables used (CustomField ones live in EmailTemplateField).
+  influencerVariables String[]             @default([])
+  /// Number of variable issues found on the last save (0 = clean).
+  validationIssues    Int                  @default(0)
+  status              EmailTemplateStatus  @default(ACTIVE)
+  createdById         String?
+  createdBy           User?                @relation("EmailTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById         String?
+  updatedBy           User?                @relation("EmailTemplateUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  fieldReferences     EmailTemplateField[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([influencerId, status])
+  @@index([updatedAt])
+}
+
+/// EmailTemplate ↔ CustomField dependency (HU-TPL-002). CustomField is never
+/// hard-deleted, so references survive when a field is disabled (CA-04).
+model EmailTemplateField {
+  id            String        @id @default(uuid())
+  templateId    String
+  template      EmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  customFieldId String
+  customField   CustomField   @relation(fields: [customFieldId], references: [id], onDelete: Restrict)
+  /// CustomField.key at save time.
+  variableKey   String
+  /// Where it appears: subject | preHeader | body.
+  locations     String[]      @default([])
+  createdAt     DateTime      @default(now())
+
+  @@unique([templateId, customFieldId])
+  @@index([customFieldId])
+}
+
+// ============================================================
+// PROSPECTS (prerequisite of HU-TPL-010/011)
+// ============================================================
+
+enum ProspectSource {
+  LEAD
+  BRAND_CONTACT
+  AGENCY_CONTACT
+  CSV
+  MANUAL
+  SALESHANDY
+}
+
+enum ProspectContactKind {
+  PERSON
+  MAILBOX
+}
+
+enum ProspectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ProspectSyncStatus {
+  LOCAL_ONLY
+  SYNCING
+  SYNCED
+  SYNC_FAILED
+}
+
+enum ProspectSyncJobType {
+  CSV_IMPORT
+  SALESHANDY_PUSH
+}
+
+enum ProspectSyncJobStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+/// Contact approved for outreach for one talent: created when a user approves
+/// a discovered contact (lead, brand email, agency contact) or imports a CSV.
+/// System fields live in columns; ProspectFieldValue holds custom fields only.
+/// Never invent names (RF-01): mailboxes keep firstName null.
+model Prospect {
+  id                     String                @id @default(uuid())
+  influencerId           String
+  influencer             Influencer            @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  email                  String
+  /// trim + lowercase; unique per talent.
+  emailNormalized        String
+  firstName              String?
+  lastName               String?
+  jobTitle               String?
+  company                String?
+  companyDomain          String?
+  website                String?
+  linkedInUrl            String?
+  country                String?
+  phoneNumber            String?
+  contactKind            ProspectContactKind   @default(PERSON)
+  isGeneric              Boolean               @default(false)
+  /// Mailbox label (e.g. "Partnerships"); never used as firstName.
+  mailboxLabel           String?
+  commercialRelevance    CommercialRelevance   @default(UNKNOWN)
+  source                 ProspectSource
+  brandCandidateId       String?
+  brandCandidate         BrandCandidate?       @relation(fields: [brandCandidateId], references: [id], onDelete: SetNull)
+  brandBusinessContactId String?
+  brandBusinessContact   BrandBusinessContact? @relation(fields: [brandBusinessContactId], references: [id], onDelete: SetNull)
+  leadId                 String?
+  lead                   Lead?                 @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  agencyId               String?
+  agency                 Agency?               @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  agencyContactId        String?
+  agencyContact          AgencyContact?        @relation(fields: [agencyContactId], references: [id], onDelete: SetNull)
+  /// Prospect tags (own namespace).
+  tags                   String[]              @default([])
+  status                 ProspectStatus        @default(ACTIVE)
+  saleshandyProspectId   String?
+  syncStatus             ProspectSyncStatus    @default(LOCAL_ONLY)
+  lastSyncedAt           DateTime?
+  lastSyncError          String?
+  createdById            String?
+  createdBy              User?                 @relation("ProspectCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  fieldValues            ProspectFieldValue[]
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  @@unique([influencerId, emailNormalized])
+  @@index([influencerId, status])
+  @@index([source])
+  @@index([brandCandidateId])
+  @@index([leadId])
+  @@index([brandBusinessContactId])
+  @@index([agencyContactId])
+}
+
+/// Value of a custom field (or a system field without a column) for a prospect.
+model ProspectFieldValue {
+  id            String      @id @default(uuid())
+  prospectId    String
+  prospect      Prospect    @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  customFieldId String
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onDelete: Restrict)
+  value         String
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([prospectId, customFieldId])
+  @@index([customFieldId])
+}
+
+/// Durable tracking of CSV imports and pushes to Saleshandy.
+model ProspectSyncJob {
+  id             String                @id @default(uuid())
+  influencerId   String?
+  influencer     Influencer?           @relation(fields: [influencerId], references: [id], onDelete: Cascade)
+  type           ProspectSyncJobType
+  status         ProspectSyncJobStatus @default(PROCESSING)
+  /// Saleshandy requestId (pushes only).
+  requestId      String?               @unique
+  conflictAction String?
+  totalCount     Int                   @default(0)
+  createdCount   Int                   @default(0)
+  updatedCount   Int                   @default(0)
+  skippedCount   Int                   @default(0)
+  failedCount    Int                   @default(0)
+  /// First failing rows: [{ row, email, reason }] (bounded).
+  errorSummary   Json?
+  reportUrl      String?
+  errorMessage   String?
+  initiatedById  String?
+  initiatedBy    User?                 @relation("ProspectSyncJobInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+  lastCheckedAt  DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@index([influencerId, createdAt])
+  @@index([status])
 }
