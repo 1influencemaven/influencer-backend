@@ -2,13 +2,13 @@
  * BullMQ worker options for INSTAGRAM_RESEARCH.
  *
  * Budget mirrors Bright Data dataset scrape poll window + headroom:
- * - BRIGHTDATA_SCRAPER_POLL_TIMEOUT_MS default = 120_000
+ * - BRIGHTDATA_SCRAPER_POLL_TIMEOUT_MS default = 300_000
  * - trigger / progress HTTP ceilings use BRIGHTDATA_SEARCH_TIMEOUT_MS (60_000)
  * - persist / logging headroom
  */
 
 /** Default Bright Data snapshot poll wall (env BRIGHTDATA_SCRAPER_POLL_TIMEOUT_MS). */
-export const INSTAGRAM_RESEARCH_BUDGET_POLL_MS = 120_000;
+export const INSTAGRAM_RESEARCH_BUDGET_POLL_MS = 300_000;
 
 /** Nest persist / logging headroom (not a product operation timeout). */
 export const INSTAGRAM_RESEARCH_LOCK_HEADROOM_MS = 60_000;
