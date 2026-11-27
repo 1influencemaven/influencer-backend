@@ -20,7 +20,8 @@ export const aiLlmConfigurationSchema = z.object({
 export type AiLlmConfiguration = z.infer<typeof aiLlmConfigurationSchema>;
 
 export const aiInstructionsSchema = z.object({
-  business: z.string(),
+  /** Editable business instructions snapshot (empty/omitted → worker default). */
+  business: z.string().default(''),
   businessHash: z.string().optional(),
 });
 

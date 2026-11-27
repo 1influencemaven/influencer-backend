@@ -21,3 +21,14 @@ export {
   CONTACT_RESEARCH_FIND_EMAILS_INSTRUCTIONS,
   buildContactResearchFindEmailsUserPrompt,
 } from './prompts/contact-research-find-emails.prompt';
+export {
+  CONTACT_RESEARCH_FIND_AGENCY_EMAILS_INSTRUCTIONS,
+  buildContactResearchFindAgencyEmailsUserPrompt,
+} from './prompts/contact-research-find-agency-emails.prompt';
+export {
+  DEFAULT_LEAD_DISCOVERY_BUSINESS_INSTRUCTIONS,
+  LEAD_DISCOVERY_BUSINESS_SECTION_HEADER,
+  LEAD_DISCOVERY_INSTRUCTIONS_MAX_CHARS,
+  buildLeadDiscoveryBusinessSection,
+  resolveLeadDiscoveryBusinessInstructions,
+} from './prompts/lead-discovery-business-instructions';

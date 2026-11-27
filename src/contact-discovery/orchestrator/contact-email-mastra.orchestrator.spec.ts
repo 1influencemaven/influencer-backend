@@ -10,6 +10,7 @@ import {
 } from '../../generated/prisma/enums';
 import { commercialCoverageTier } from '../../lead-discovery/utils/commercial-relevance.util';
 import { CONTACT_EMAIL_VERIFICATION_STATUS } from '../../lead-discovery/utils/contact-email-attribution.util';
+import { DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS } from '../../ai/prompts/generate-lead-discovery.prompt';
 import { ContactEmailMastraOrchestrator } from './contact-email-mastra.orchestrator';
 
 describe('ContactEmailMastraOrchestrator', () => {
@@ -1623,6 +1624,197 @@ describe('ContactEmailMastraOrchestrator', () => {
         'PROVIDER_FAILURE',
       );
       expect(completedMetadata().track2C.peoplePass.error).toMatch(/people boom/);
+    });
+  });
+
+  describe('Lead Discovery Settings prompt propagation', () => {
+    it('forwards job promptInstructions snapshot to 2A, 2B, and 2C without querying AiPromptsService', async () => {
+      const getLeadDiscoveryInstructions = jest.fn();
+      const orchWithPrompts = new ContactEmailMastraOrchestrator(
+        publisher as never,
+        resultWait as never,
+        brandBusinessContacts as never,
+        contactChannels as never,
+        prisma as never,
+        configService as never,
+        agencyDiscovery as never,
+        agencyContactEmails as never,
+        agencyContactPeople as never,
+        saleshandy as never,
+        { getLeadDiscoveryInstructions } as never,
+      );
+      orchWithPrompts.clock = clock;
+
+      waitForAiExecutionResult
+        .mockResolvedValueOnce({
+          type: 'CONTACT_RESEARCH',
+          status: 'COMPLETED',
+          durationMs: 10,
+          output: {
+            operation: 'FIND_BRAND_EMAILS',
+            outcome: 'NO_MATCHES',
+            emails: [],
+            trace: { queries: [], pages: [], serpCalls: 0, pageCalls: 0 },
+          },
+        })
+        .mockResolvedValueOnce({
+          type: 'CONTACT_RESEARCH',
+          status: 'COMPLETED',
+          durationMs: 10,
+          output: {
+            operation: 'FIND_BRAND_PEOPLE',
+            outcome: 'NO_MATCHES',
+            people: [],
+            trace: {
+              queries: [],
+              linkedinUrlsConsidered: [],
+              profilesScraped: 0,
+              serpCalls: 0,
+              brandPagesFetched: 0,
+            },
+          },
+        });
+      agencyDiscoveryExecute.mockResolvedValueOnce({
+        output: { outcome: 'NO_MATCHES', candidates: [] },
+        persistedCount: 0,
+        queries: [],
+      });
+
+      await orchWithPrompts.execute({
+        ...baseInput,
+        promptInstructions: 'Admin snapshot instructions for LATAM',
+      });
+
+      expect(getLeadDiscoveryInstructions).not.toHaveBeenCalled();
+      expect(publishContactResearchFindBrandEmails).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptInstructions: 'Admin snapshot instructions for LATAM',
+        }),
+      );
+      expect(publishContactResearchFindBrandPeople).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptInstructions: 'Admin snapshot instructions for LATAM',
+        }),
+      );
+      expect(researchEligibleAgencies).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptInstructions: 'Admin snapshot instructions for LATAM',
+        }),
+      );
+      expect(researchEligiblePeople).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptInstructions: 'Admin snapshot instructions for LATAM',
+        }),
+      );
+    });
+
+    it('loads Lead Discovery instructions from AiPromptsService when omitted from input', async () => {
+      const getLeadDiscoveryInstructions = jest
+        .fn()
+        .mockResolvedValue('Loaded from Settings template');
+      const orchWithPrompts = new ContactEmailMastraOrchestrator(
+        publisher as never,
+        resultWait as never,
+        brandBusinessContacts as never,
+        contactChannels as never,
+        prisma as never,
+        configService as never,
+        agencyDiscovery as never,
+        agencyContactEmails as never,
+        agencyContactPeople as never,
+        saleshandy as never,
+        { getLeadDiscoveryInstructions } as never,
+      );
+      orchWithPrompts.clock = clock;
+
+      waitForAiExecutionResult
+        .mockResolvedValueOnce({
+          type: 'CONTACT_RESEARCH',
+          status: 'COMPLETED',
+          durationMs: 10,
+          output: {
+            operation: 'FIND_BRAND_EMAILS',
+            outcome: 'NO_MATCHES',
+            emails: [],
+            trace: { queries: [], pages: [], serpCalls: 0, pageCalls: 0 },
+          },
+        })
+        .mockResolvedValueOnce({
+          type: 'CONTACT_RESEARCH',
+          status: 'COMPLETED',
+          durationMs: 10,
+          output: {
+            operation: 'FIND_BRAND_PEOPLE',
+            outcome: 'NO_MATCHES',
+            people: [],
+            trace: {
+              queries: [],
+              linkedinUrlsConsidered: [],
+              profilesScraped: 0,
+              serpCalls: 0,
+              brandPagesFetched: 0,
+            },
+          },
+        });
+      agencyDiscoveryExecute.mockResolvedValueOnce({
+        output: { outcome: 'NO_MATCHES', candidates: [] },
+        persistedCount: 0,
+        queries: [],
+      });
+
+      await orchWithPrompts.execute(baseInput);
+
+      expect(getLeadDiscoveryInstructions).toHaveBeenCalledTimes(1);
+      expect(publishContactResearchFindBrandEmails).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptInstructions: 'Loaded from Settings template',
+        }),
+      );
+    });
+
+    it('falls back to DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS when neither input nor AiPromptsService provides instructions', async () => {
+      waitForAiExecutionResult
+        .mockResolvedValueOnce({
+          type: 'CONTACT_RESEARCH',
+          status: 'COMPLETED',
+          durationMs: 10,
+          output: {
+            operation: 'FIND_BRAND_EMAILS',
+            outcome: 'NO_MATCHES',
+            emails: [],
+            trace: { queries: [], pages: [], serpCalls: 0, pageCalls: 0 },
+          },
+        })
+        .mockResolvedValueOnce({
+          type: 'CONTACT_RESEARCH',
+          status: 'COMPLETED',
+          durationMs: 10,
+          output: {
+            operation: 'FIND_BRAND_PEOPLE',
+            outcome: 'NO_MATCHES',
+            people: [],
+            trace: {
+              queries: [],
+              linkedinUrlsConsidered: [],
+              profilesScraped: 0,
+              serpCalls: 0,
+              brandPagesFetched: 0,
+            },
+          },
+        });
+      agencyDiscoveryExecute.mockResolvedValueOnce({
+        output: { outcome: 'NO_MATCHES', candidates: [] },
+        persistedCount: 0,
+        queries: [],
+      });
+
+      await orchestrator.execute(baseInput);
+
+      expect(publishContactResearchFindBrandEmails).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptInstructions: DEFAULT_LEAD_DISCOVERY_INSTRUCTIONS,
+        }),
+      );
     });
   });
 });

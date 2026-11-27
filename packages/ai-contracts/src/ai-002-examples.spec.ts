@@ -525,6 +525,30 @@ describe('AI-002 contract examples', () => {
       },
     });
     expect(legacy.type).toBe('CONTACT_RESEARCH');
+
+    // Backward compat: omitted instructions.business defaults to empty string
+    const withoutBusiness = parseAiExecutionRequest({
+      contractVersion: '1.0',
+      executionId: '44444444-4444-4444-8444-444444444444',
+      correlationId: '22222222-2222-4222-8222-222222222222',
+      idempotencyKey: 'contact-find:legacy-no-business',
+      requestedAt: '2026-11-08T12:00:00.000Z',
+      type: 'CONTACT_RESEARCH',
+      context: {
+        userId: 'u1',
+        influencerId: '33333333-3333-4333-8333-333333333333',
+        resourceId: '55555555-5555-4555-8555-555555555555',
+        resourceType: 'CONTACT_RESEARCH_RUN',
+      },
+      instructions: {},
+      input: {
+        operation: 'FIND_BRAND_EMAILS',
+        brandName: 'Demo Co',
+        website: 'https://demo.co',
+        domain: 'demo.co',
+      },
+    });
+    expect(withoutBusiness.instructions.business).toBe('');
   });
 
   it('parses Contact Research FIND_BRAND_PEOPLE request/result', () => {

@@ -98,7 +98,7 @@ export type PublishContactResearchFindEmailsParams = {
   maxPages?: number;
   /** RF-02: Brand Discovery evidenceUrls (on-domain preferred seed). */
   seedUrls?: string[];
-  /** Optional business instructions; FIND_BRAND_EMAILS uses fixed 2A prompt in worker. */
+  /** Optional Settings Lead Discovery business instructions; worker defaults when empty and keeps hard rules immutable. */
   promptInstructions?: string;
   actorRole?: 'USER' | 'ADMIN';
   locale?: 'es' | 'en';

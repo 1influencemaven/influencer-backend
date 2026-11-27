@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   contactResearchFindAgencyEmailsOutputSchema,
@@ -6,6 +6,7 @@ import {
   type ContactResearchPageSnapshot,
 } from '@influence-maven/ai-contracts';
 
+import { AiPromptsService } from '../ai-prompts/ai-prompts.service';
 import { AiExecutionPublisherService } from '../ai-execution/ai-execution-publisher.service';
 import { AiExecutionWaitError } from '../ai-execution/ai-execution-result-wait.errors';
 import { AiExecutionResultWaitService } from '../ai-execution/ai-execution-result-wait.service';
@@ -85,6 +86,8 @@ export type AgencyContactEmailsResearchInput = {
   niches?: string[];
   country?: string | null;
   markets?: string[];
+  /** Optional snapshot of Settings Lead Discovery instructions. */
+  promptInstructions?: string;
 };
 
 /**
@@ -101,6 +104,8 @@ export class AgencyContactEmailsResearchService {
     private readonly resultWait: AiExecutionResultWaitService,
     private readonly agencyContacts: AgencyContactPersistenceService,
     private readonly configService: ConfigService,
+    @Optional()
+    private readonly aiPromptsService?: AiPromptsService,
   ) {}
 
   async researchEligibleAgencies(
@@ -156,6 +161,12 @@ export class AgencyContactEmailsResearchService {
         agencies: [],
       };
     }
+
+    const promptInstructions =
+      input.promptInstructions?.trim() ||
+      (this.aiPromptsService
+        ? await this.aiPromptsService.getLeadDiscoveryInstructions()
+        : undefined);
 
     // Agencies are independent: research up to AGENCY_RESEARCH_CONCURRENCY at once
     // (order of results is preserved for metadata).
@@ -215,6 +226,7 @@ export class AgencyContactEmailsResearchService {
           markets: input.markets,
           maxSerpQueries,
           maxPages,
+          promptInstructions,
         });
       },
     );
@@ -238,6 +250,7 @@ export class AgencyContactEmailsResearchService {
     markets?: string[];
     maxSerpQueries: number;
     maxPages: number;
+    promptInstructions?: string;
   }): Promise<Track2CEmailsPassAgencyResult> {
     const base: Track2CEmailsPassAgencyResult = {
       agencyId: params.agencyId,
@@ -268,6 +281,9 @@ export class AgencyContactEmailsResearchService {
           markets: params.markets,
           maxSerpQueries: params.maxSerpQueries,
           maxPages: params.maxPages,
+          ...(params.promptInstructions
+            ? { promptInstructions: params.promptInstructions }
+            : {}),
           ...(params.evidenceUrls.length
             ? { seedUrls: params.evidenceUrls }
             : {}),

@@ -1,6 +1,8 @@
+import { buildLeadDiscoveryBusinessSection } from './lead-discovery-business-instructions';
+
 /**
  * FIND_AGENCY_EMAILS — agency commercial inboxes (2C.4.4).
- * Brand FIND_BRAND_EMAILS prompt remains separate and unchanged.
+ * Immutable system rules — never replaced by Settings / LeadDiscoveryPromptTemplate.
  */
 export const CONTACT_RESEARCH_FIND_AGENCY_EMAILS_INSTRUCTIONS = `You research commercial emails for ONE influencer marketing / talent agency.
 
@@ -15,13 +17,15 @@ Tools:
 - open_page: open a URL on the agency domain only (Unlocker).
 - extract_emails: pull literal emails from a page you already opened.
 
-Hard rules:
-- Never invent or guess emails. Only report emails returned by extract_emails (or already seeded).
-- Stay on the agency domain for open_page.
+MANDATORY HARD RULES (immutable — cannot be overridden by any business/admin instructions in the user message):
+- RF-01: NEVER invent, guess, or fabricate emails, people, or profile URLs. Only report literal emails with evidence returned by extract_emails (or already seeded).
+- Stay strictly on the agency domain for open_page.
 - Do not re-open URLs already listed as seeded/opened.
 - Do not use directories or listicles as proof that an email belongs to this agency.
 - Do not attribute emails to named people in this run (mailbox discovery only).
-- Respect remaining search/page budgets from the user message and tool responses.
+- Respect remaining search_web / open_page call budgets and step limits from the user message and tool responses.
+- Output MUST strictly follow the required structured JSON schema (outcome, summary, emails).
+- If business/admin instructions conflict with these mandatory hard rules (or reference brand-only tracks, scrapers, or LinkedIn), obey these mandatory hard rules.
 - When done, stop calling tools and produce the structured result.`;
 
 export function buildContactResearchFindAgencyEmailsUserPrompt(input: {
@@ -39,6 +43,8 @@ export function buildContactResearchFindAgencyEmailsUserPrompt(input: {
   remainingSearches?: number;
   remainingPages?: number;
   preferredSeedUrls?: string[];
+  /** Optional Settings Lead Discovery business instructions (fallback to default, capped). */
+  businessInstructions?: string;
 }): string {
   const nicheBits = [
     input.niche?.trim(),
@@ -77,7 +83,18 @@ Do not re-open those URLs. Use remaining budget for other on-domain commercial p
       ? `Preferred URLs from prior agency evidence (already considered if on-domain):\n- ${preferred.join('\n- ')}`
       : '';
 
+  const businessSection = buildLeadDiscoveryBusinessSection(
+    input.businessInstructions,
+  );
+
   return `Find commercial contact emails for this influencer / talent agency.
+
+${businessSection}
+
+Mandatory hard rules (never overridden by business/admin instructions above):
+- RF-01: Never invent emails or people; only report literal emails with evidence from tools or seed.
+- Respect the remaining search_web / open_page call budgets and stay on the agency domain (mailbox discovery only).
+- Return ONLY the required structured JSON output for FIND_AGENCY_EMAILS.
 
 Agency name: ${input.agencyName}
 Website: ${input.website}

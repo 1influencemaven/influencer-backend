@@ -33,3 +33,29 @@ describe('extractEmailsFromHtml JS escapes', () => {
     expect(extractEmailsFromHtml(html)).toEqual(['customercare@gorjana.com']);
   });
 });
+
+describe('extractEmailsFromHtml placeholder domains', () => {
+  it('drops template/placeholder emails but keeps real brand domains', () => {
+    const html = `
+      <input placeholder="abc@domain.com"> <p>you@yourcompany.com</p>
+      <span>name@email.com</span> <span>john@mydomain.com</span>
+      <a href="mailto:hi@mail.example.com">x</a> <i>x@o123.ingest.sentry.io</i>
+      <a href="mailto:partnerships@myprotein.com">p</a>
+      <a href="mailto:press@yourbrand-real.co">?</a>
+      <a href="mailto:pr@mountainvalleyspring.com">pr</a>`;
+    const found = extractEmailsFromHtml(html);
+    expect(found).toEqual(
+      expect.arrayContaining(['partnerships@myprotein.com', 'pr@mountainvalleyspring.com']),
+    );
+    for (const junk of [
+      'abc@domain.com',
+      'you@yourcompany.com',
+      'name@email.com',
+      'john@mydomain.com',
+      'hi@mail.example.com',
+      'x@o123.ingest.sentry.io',
+    ]) {
+      expect(found).not.toContain(junk);
+    }
+  });
+});

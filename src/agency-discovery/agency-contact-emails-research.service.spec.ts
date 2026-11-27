@@ -670,5 +670,46 @@ describe('AgencyContactEmailsResearchService (2C.4.5)', () => {
         ]),
       );
     });
+
+    it('forwards promptInstructions to publishContactResearchFindAgencyEmails and falls back to AiPromptsService', async () => {
+      influencerAgencyFindMany.mockResolvedValue([eligibleRow()]);
+      waitForAiExecutionResult.mockResolvedValue(mastraEmailsResult([]));
+
+      await service.researchEligibleAgencies({
+        runId: 'run-1',
+        influencerId: 'inf-1',
+        promptInstructions: 'Agency email custom guidance',
+      });
+
+      expect(publishContactResearchFindAgencyEmails).toHaveBeenCalledWith(
+        expect.objectContaining({
+          promptInstructions: 'Agency email custom guidance',
+        }),
+      );
+
+      const getLeadDiscoveryInstructions = jest
+        .fn()
+        .mockResolvedValue('Fallback agency prompt from settings');
+      const svcWithPrompts = new AgencyContactEmailsResearchService(
+        prisma as never,
+        publisher as never,
+        resultWait as never,
+        agencyContacts as never,
+        configService as never,
+        { getLeadDiscoveryInstructions } as never,
+      );
+
+      await svcWithPrompts.researchEligibleAgencies({
+        runId: 'run-2',
+        influencerId: 'inf-1',
+      });
+
+      expect(getLeadDiscoveryInstructions).toHaveBeenCalledTimes(1);
+      expect(publishContactResearchFindAgencyEmails).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          promptInstructions: 'Fallback agency prompt from settings',
+        }),
+      );
+    });
   });
 });

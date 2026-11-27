@@ -208,4 +208,32 @@ describe('ContactDiscoveryProcessor', () => {
     expect(result).toEqual({ skipped: true });
     expect(mastraExecute).not.toHaveBeenCalled();
   });
+
+  it('forwards promptInstructions snapshot from job data to orchestrator', async () => {
+    mastraExecute.mockResolvedValue({
+      outcome: 'RESULTS_FOUND',
+      runStatus: 'COMPLETED',
+      errorMessage: null,
+      searchMetadata: null,
+      contactsCreated: 1,
+      contactsUpdated: 0,
+      terminalStatusPersisted: true,
+      partialContactsMayExist: false,
+    } satisfies BbcDiscoveryResult);
+
+    await processor.process(
+      makeJob({
+        data: {
+          ...jobData,
+          promptInstructions: 'Custom Settings Lead Discovery prompt',
+        },
+      }),
+    );
+
+    expect(mastraExecute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptInstructions: 'Custom Settings Lead Discovery prompt',
+      }),
+    );
+  });
 });

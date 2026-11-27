@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 
 import { BrightDataWebSearchProvider } from '../brand-discovery/providers/brightdata-web-search.provider';
 import { AiExecutionModule } from '../ai-execution/ai-execution.module';
+import { AiPromptsModule } from '../ai-prompts/ai-prompts.module';
 import { BrightDataModule } from '../integrations/brightdata';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AgencyContactCommercialReaderService } from './agency-contact-commercial-reader.service';
@@ -18,7 +19,13 @@ import { AgencyPersistenceService } from './agency-persistence.service';
  * Reuses BrightDataWebSearchProvider + CONTACT_RESEARCH publish/wait (no new queues).
  */
 @Module({
-  imports: [PrismaModule, BrightDataModule, AiExecutionModule, ConfigModule],
+  imports: [
+    PrismaModule,
+    BrightDataModule,
+    AiPromptsModule,
+    AiExecutionModule,
+    ConfigModule,
+  ],
   providers: [
     BrightDataWebSearchProvider,
     AgencyDiscoveryService,

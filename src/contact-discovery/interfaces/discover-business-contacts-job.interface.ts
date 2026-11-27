@@ -9,6 +9,8 @@ export type DiscoverBusinessContactsJobData = {
   website: string;
   domain: string;
   maxPages?: number;
+  /** Snapshot of Settings Lead Discovery instructions taken at enqueue time (optional for backward compat). */
+  promptInstructions?: string;
 };
 
 /** Stable jobId so duplicate enqueue of the same run is rejected by BullMQ. */
