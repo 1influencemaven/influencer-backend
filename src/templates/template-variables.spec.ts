@@ -76,7 +76,7 @@ const influencer: InfluencerData = {
   instagram: 'sofiarios',
   tiktok: null,
   youtube: null,
-  country: 'MX',
+  countries: ['MX'],
   language: 'es',
   niche: 'beauty',
   subNiche: null,

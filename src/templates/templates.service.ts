@@ -46,7 +46,7 @@ const influencerSelect = {
   instagram: true,
   tiktok: true,
   youtube: true,
-  country: true,
+  countries: true,
   language: true,
   niche: true,
   subNiche: true,

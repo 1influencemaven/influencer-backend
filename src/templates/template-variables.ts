@@ -40,7 +40,7 @@ export type InfluencerData = Pick<
   | 'instagram'
   | 'tiktok'
   | 'youtube'
-  | 'country'
+  | 'countries'
   | 'language'
   | 'niche'
   | 'subNiche'
@@ -111,7 +111,8 @@ export const INFLUENCER_VARIABLES: InfluencerVar[] = [
   {
     key: 'influencer.country',
     label: { es: 'País', en: 'Country' },
-    read: (i) => i.country,
+    // Talent countries are an ISO array since 2026-11-26 (key kept stable).
+    read: (i) => (i.countries.length ? i.countries.join(', ') : null),
   },
   {
     key: 'influencer.language',
